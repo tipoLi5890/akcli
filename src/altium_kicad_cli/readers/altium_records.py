@@ -87,17 +87,15 @@ def fields(r: str) -> dict[str, str]:
         k, v = tok.split("=", 1)
         if k.startswith(_UTF8_PREFIX):
             base = k[len(_UTF8_PREFIX):]
-            raw = v.encode("latin-1", "replace")
+            # NOTE: this only re-decodes latin1 framing bytes as UTF-8. If an upstream
+            # tool already wrote a value's Ω/µ/± as the U+FFFD replacement bytes
+            # (``EF BF BD``) on a non-UTF-8 locale, the loss happened at *export* time
+            # and cannot be recovered here by any codec — re-export from a tool that
+            # preserves it instead.
             try:
-                v = raw.decode("utf-8")
+                v = v.encode("latin-1", "replace").decode("utf-8")
             except UnicodeDecodeError:
-                # Not valid UTF-8: tools on a Chinese-locale Windows (e.g. npnp) may
-                # have written the system codepage (GBK/cp936) instead — try that
-                # before giving up to U+FFFD, so Ω/µ/± survive instead of mojibake.
-                try:
-                    v = raw.decode("cp936")
-                except UnicodeDecodeError:
-                    v = raw.decode("utf-8", "replace")
+                v = v.encode("latin-1", "replace").decode("utf-8", "replace")
             utf8[base] = v
         else:
             d[k] = v

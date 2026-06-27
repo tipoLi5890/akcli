@@ -8,8 +8,8 @@ named storages -- some **ASCII** (``|KEY=VALUE|`` records: ``Nets6``,
 v1 scope (LOCKED): parse **only** the four ASCII sections needed for net / part /
 class / rule analysis. The binary sections require per-section struct decoders and
 are **explicitly deferred** -- :func:`parse_ascii_section` *refuses loudly*
-(``ALTIUM_MALFORMED``) if asked to ASCII-parse one, rather than feeding binary
-bytes through the text tokenizer and emitting garbage.
+(``ALTIUM_UNSUPPORTED`` -> exit 5, unsupported) if asked to ASCII-parse one, rather
+than feeding binary bytes through the text tokenizer and emitting garbage.
 """
 
 from __future__ import annotations

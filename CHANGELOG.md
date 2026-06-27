@@ -53,8 +53,10 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
   `docs/cli-reference.md`), reference config, and CI matrix.
 
 ### Fixed
-- **Footprints** now fall back to the RECORD-41 `Footprint` / `Supplier Footprint` parameter when the
-  RECORD-45/46 model link is empty (npnp-generated parts), removing false `BOM_MISSING_FOOTPRINT`.
+- **Footprints** now resolve via the model-link chain (RECORD-45 model → RECORD-44 implementation →
+  RECORD-1 component): the owner keying was wrong, so the model-link footprint was never found; the
+  RECORD-41 `Footprint` / `Supplier Footprint` parameter is the fallback. Removes false
+  `BOM_MISSING_FOOTPRINT` (80/80 components resolved on the reference board).
 - **Rail voltage inference** no longer mis-fires on underscore-suffixed rails (`V3V3_BNO`, `V3V3_FSR`):
   the trailing word-boundary that `_` defeated is replaced; logic is now shared in `checks/_rails.py`,
   and configured `[[rail]]` names match `<rail>_suffix` too. Fixes false `ERC_NO_POWER`.
@@ -63,9 +65,16 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
   instead of `ALTIUM_MALFORMED` (exit 3, *parse error*).
 - **`pinmap --expected`** unmatched pins are now `WARNING` (non-zero exit) instead of a silent NOTE.
 - **`-C/--config`** (and other global flags) are accepted before *or* after the subcommand.
-- Report JSON (`check`/`diff`/`pinmap`) now carries `schema_version`.
-- GBK/cp936 fallback for `%UTF8%` values that aren't valid UTF-8 (Ω/µ/± from Chinese-locale tools).
+- `schema_version` now stamped on every machine-readable command: `check` / `diff` / `pinmap` reports,
+  plus `read` and `component --json` (`net` stays a bare array, as documented).
+- **`draw --apply`** writes a `<target>.bak` next to the file (the doc'd backup was never wired up).
 - `tarfile` extraction uses `filter="data"` (Python 3.14-ready, hardened).
+
+### Known limitations
+- A value whose Ω/µ/± was already written as the U+FFFD replacement bytes (`EF BF BD`) by an upstream
+  tool on a non-UTF-8 locale is corrupted **at export** and cannot be recovered on read by any codec.
+- `draw` snaps off-grid / non-orthogonal geometry rather than rejecting it.
+- The Windows Altium *live driver* (DelphiScript half) needs a Windows + Altium 22+ box to validate.
 
 ### Notes
 - Baselines at the first tagged release: package `0.1.0`, `schema_version = "1.0"`,

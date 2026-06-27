@@ -109,14 +109,42 @@ def _designators(recs: list[dict]) -> dict[int, str]:
 
 
 def _footprints(recs: list[dict]) -> dict[int, str]:
-    """Map a component's record index -> its first model/footprint name."""
+    """Map a component's record index -> its first model/footprint name.
+
+    The model link is a chain, not a direct child of the component: the model record
+    (RECORD-45/46, carrying ``ModelName``) is owned by a RECORD-44 *Implementation*,
+    which in turn is owned by the RECORD-1 *Component*. So the footprint name must be
+    resolved back to the **component** index by walking the ``OwnerIndex`` chain up to
+    the first component — keying directly on the model's owner would land on the
+    RECORD-44 and never match a component (the bug that hid every model-link footprint).
+    """
+    components = {i for i, r in enumerate(recs) if _rid(r) == RECORD_COMPONENT}
+    n = len(recs)
+
+    def owning_component(start: int) -> int | None:
+        seen: set[int] = set()
+        cur = start
+        for _ in range(8):  # depth cap; real chains are model -> impl -> component
+            if cur is None or cur in seen or not (0 <= cur < n):
+                return None
+            seen.add(cur)
+            oi = gi(recs[cur], "OwnerIndex")
+            if oi is None:
+                return None
+            if oi in components:
+                return oi
+            cur = oi
+        return None
+
     out: dict[int, str] = {}
-    for r in recs:
+    for i, r in enumerate(recs):
         if _rid(r) in (RECORD_IMPL_MODEL, RECORD_IMPL_FOOTPRINT):
-            oi = gi(r, "OwnerIndex")
             name = r.get("ModelName") or r.get("Name")
-            if oi is not None and name and oi not in out:
-                out[oi] = name
+            if not name:
+                continue
+            comp_idx = owning_component(i)
+            if comp_idx is not None and comp_idx not in out:
+                out[comp_idx] = name
     return out
 
 

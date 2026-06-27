@@ -56,17 +56,38 @@ def test_footprint_falls_back_to_parameter():
 
 
 def test_footprint_model_link_wins_over_parameter():
-    from altium_kicad_cli.readers import altium_sch as A
+    # Real model-link chain: component <- RECORD-44 (impl) <- RECORD-45 (model, ModelName).
+    # The footprint must resolve back to the component index across BOTH hops.
+    from altium_kicad_cli.readers import altium_records as AR, altium_sch as A
 
     recs = [
-        {"RECORD": str(A.RECORD_COMPONENT)},
-        {"RECORD": str(A.RECORD_DESIGNATOR), "OwnerIndex": "0", "Text": "U1"},
-        {"RECORD": str(A.RECORD_IMPL_FOOTPRINT), "OwnerIndex": "0", "ModelName": "LGA-28"},
-        {"RECORD": str(A.RECORD_PARAMETER), "OwnerIndex": "0",
-         "Name": "Footprint", "Text": "WRONG"},
+        {"RECORD": str(AR.RECORD_COMPONENT)},                                      # idx0
+        {"RECORD": str(AR.RECORD_DESIGNATOR), "OwnerIndex": "0", "Text": "U1"},    # idx1
+        {"RECORD": str(AR.RECORD_IMPL_44), "OwnerIndex": "0"},                     # idx2 impl
+        {"RECORD": str(AR.RECORD_IMPL_MODEL), "OwnerIndex": "2", "ModelName": "LGA-28"},  # idx3
+        {"RECORD": str(AR.RECORD_PARAMETER), "OwnerIndex": "0",
+         "Name": "Footprint", "Text": "WRONG"},                                    # idx4
     ]
     comps, _ = A._build_components(recs)
     assert comps[0].footprint == "LGA-28"
+
+
+# --- #(report) diff --json and component --json carry schema_version ---------
+def test_diff_and_component_json_have_schema_version(capsys):
+    from pathlib import Path
+
+    from altium_kicad_cli.readers import kicad as kr
+
+    v8 = str(Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch")
+
+    cli.main(["diff", v8, v8, "--json"])
+    diff_out = json.loads(capsys.readouterr().out)
+    assert diff_out["schema_version"]
+
+    ref = kr.read_sch(v8).components[0].designator
+    cli.main(["component", v8, ref, "--json"])
+    comp_out = json.loads(capsys.readouterr().out)
+    assert comp_out["schema_version"]
 
 
 # --- #3 export rejects --json (no silent non-JSON + exit 0) ------------------

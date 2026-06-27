@@ -370,8 +370,9 @@ def _cmd_component(args: argparse.Namespace) -> int:
 
     index = _pin_net_index(sch)
     if args.json:
-        from .model import to_json
+        from .model import SCHEMA_VERSION, to_json
         payload = to_json(comp)
+        payload["schema_version"] = SCHEMA_VERSION
         payload["pin_nets"] = {
             p.number: (index.get((comp.designator, p.number)).name
                        if index.get((comp.designator, p.number)) else None)
@@ -901,7 +902,10 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
 
     findings: list = []
     results = kwriter.apply(
-        oplist, str(target), apply=do_apply, sources=sources, verify_out=findings
+        oplist, str(target), apply=do_apply, sources=sources, verify_out=findings,
+        # write a <name>.bak next to the target on apply (the atomic write already
+        # guarantees the original is never corrupted; this is an extra safety copy).
+        backup_dir=(target.parent if do_apply else None),
     )
 
     if do_apply and _draw_exit(results, findings) == EXIT["OK"]:

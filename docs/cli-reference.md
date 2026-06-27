@@ -70,7 +70,7 @@ target `.kicad_sch`, and print what *would* change. Never writes. `--target` ove
 Execute an op-list against a KiCad `.kicad_sch`.
 - **Default is a dry run** (no file written): prints per-op results and the connectivity verification.
 - `--apply` performs the write via the atomic snapshot → temp → verify-on-temp → `os.replace` pipeline,
-  with a timestamped backup. The write is rejected if the connectivity verifier fails.
+  writing a `<target>.bak` copy alongside the file. The write is rejected if the connectivity verifier fails.
 - `--target` overrides the op-list's `target_file`.
 
 ## Exit codes

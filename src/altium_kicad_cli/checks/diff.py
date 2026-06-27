@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..model import Component, Net, PinRef, Schematic
+from ..model import SCHEMA_VERSION, Component, Net, PinRef, Schematic
 from ..report import Finding, Severity
 
 # A matched net pair below this Jaccard overlap is treated as "no match" (the two
@@ -177,6 +177,7 @@ class DiffReport:
 
     def export(self) -> dict:
         return {
+            "schema_version": SCHEMA_VERSION,
             "summary": self.summary(),
             "low_confidence": self.low_confidence,
             "notes": list(self.notes),
