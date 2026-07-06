@@ -254,10 +254,12 @@ def test_input_on_power_rail_is_not_floating():
 # ---------------------------------------------------------------------------
 def _powered_board() -> Schematic:
     # GND {U1.1, R1.1}; V3V3 {U1.2, U2.1}. U1 has both rails; U2 only power.
+    # ICs carry >= 3 pins: parts below that are treated as header/jumper stubs
+    # and skipped by the per-IC power/ground check.
     return _sch(
         [
-            _comp("U1", [_pin("1"), _pin("2")]),
-            _comp("U2", [_pin("1")]),
+            _comp("U1", [_pin("1"), _pin("2"), _pin("3")]),
+            _comp("U2", [_pin("1"), _pin("2"), _pin("3")]),
             _comp("R1", [_pin("1")]),
         ],
         [
@@ -278,6 +280,27 @@ def test_ic_missing_ground_flagged_by_identity():
     ng = _by_code(out, erc.ERC_NO_GROUND)
     assert any(f.refs == ["U2"] for f in ng)          # U2 touches no ground net
     assert _by_code(out, erc.ERC_NO_POWER) == []       # U2 touches power -> ok
+
+
+def test_two_pin_u_part_is_not_an_ic():
+    # A "U"-designated 2-pin part (e.g. a piezo header U9) must not be flagged
+    # for missing power/ground -- it is a header/jumper stub, not an IC.
+    sch = _sch(
+        [
+            _comp("U1", [_pin("1"), _pin("2"), _pin("3")]),
+            _comp("U9", [_pin("1"), _pin("2")]),
+        ],
+        [
+            _net("GND", [("U1", "1")], source_names=["GND"]),
+            _net("V3V3", [("U1", "2")], source_names=["V3V3"]),
+            _net("OSC_OUT", [("U9", "1")]),
+        ],
+    )
+    out = erc.run(sch, _cfg())
+    assert not any(
+        f.refs == ["U9"] for f in out
+        if f.code in (erc.ERC_NO_POWER, erc.ERC_NO_GROUND)
+    )
 
 
 def test_no_power_or_ground_infra_skips_per_ic_checks():

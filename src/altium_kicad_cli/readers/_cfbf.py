@@ -13,7 +13,10 @@ logic, with every loop/allocation bounded against hostile input:
 * every FAT / miniFAT chain walk is cycle-detected (seen-set) and capped at
   :data:`safety.MAX_SECTORS` -> ``ALTIUM_FAT_CYCLE`` / ``ALTIUM_ALLOC_GUARD``;
 * every sector byte-offset is range-checked -> ``ALTIUM_OOB_SECTOR``;
-* DIFAT spillover (> 109 FAT sectors) is refused -> ``ALTIUM_ALLOC_GUARD``;
+* DIFAT spillover (> 109 FAT sectors) is walked with the same cycle/length
+  guards as every other chain (declared ``n_difat`` is the hard bound, itself
+  capped by :data:`safety.MAX_SECTORS`) -> ``ALTIUM_FAT_CYCLE`` /
+  ``ALTIUM_ALLOC_GUARD`` on hostile input;
 * the red-black directory tree (Child/Left/Right) is walked so storage names are
   **path-qualified** (``"Components6/Data"``) and multi-storage containers do not
   collapse to a single bare-name survivor.
@@ -104,14 +107,20 @@ class _Container:
             fail("ALTIUM_MALFORMED", f"mini_cutoff {self.mini_cutoff} != 4096")
         self.first_minifat = _u32(data, 60)
         self.n_minifat = _u32(data, 64)
-        first_difat = _u32(data, 68)
-        n_difat = _u32(data, 72)
+        self.first_difat = _u32(data, 68)
+        self.n_difat = _u32(data, 72)
 
-        # DIFAT spillover is explicitly unsupported (and a classic allocation
-        # bomb): a valid container we emit keeps all FAT pointers in the 109
-        # header slots with first_difat == ENDOFCHAIN and n_difat == 0.
-        if first_difat < ENDOFCHAIN or n_difat != 0:
-            fail("ALTIUM_ALLOC_GUARD", "DIFAT spillover (>109 FAT sectors) unsupported")
+        # DIFAT spillover (> 109 FAT sectors; large PcbDocs routinely need it)
+        # is walked in _build_fat() under the declared-count + cycle guards.
+        # Reject only an inconsistent header: a chain start with a zero count
+        # (or vice versa) is malformed, and a count that cannot fit in the file
+        # is an allocation bomb.
+        if (self.first_difat < ENDOFCHAIN) != (self.n_difat != 0):
+            fail("ALTIUM_MALFORMED",
+                 f"inconsistent DIFAT header (first={self.first_difat:#x}, "
+                 f"count={self.n_difat})")
+        if self.n_difat > safety.MAX_SECTORS:
+            fail("ALTIUM_ALLOC_GUARD", f"DIFAT count {self.n_difat} exceeds sector cap")
 
         self._build_fat()
         self._build_minifat()
@@ -151,8 +160,30 @@ class _Container:
     # -- FAT / miniFAT --------------------------------------------------------
     def _build_fat(self) -> None:
         difat = list(struct.unpack_from("<109I", self.data, 76))
+
+        # DIFAT spillover chain: each DIFAT sector holds (per - 1) FAT sector
+        # pointers, and its last u32 is the next DIFAT sector. Bounded by the
+        # header-declared count, a cycle set, and the global sector cap.
+        s = self.first_difat
+        seen: set[int] = set()
+        walked = 0
+        while s < ENDOFCHAIN:
+            if s in seen:
+                fail("ALTIUM_FAT_CYCLE", f"DIFAT chain cycle at sector {s}")
+            if walked >= self.n_difat:
+                fail("ALTIUM_MALFORMED",
+                     f"DIFAT chain longer than declared count {self.n_difat}")
+            seen.add(s)
+            walked += 1
+            entries = struct.unpack_from(f"<{self.per}I", self.data, self._off(s))
+            difat += entries[:-1]
+            s = entries[-1]
+        if walked < self.n_difat:
+            fail("ALTIUM_MALFORMED",
+                 f"DIFAT chain ended after {walked} sectors (declared {self.n_difat})")
+
         fat: list[int] = []
-        for fs in difat[:DIFAT_HEADER_SLOTS]:
+        for fs in difat:
             if fs >= ENDOFCHAIN:
                 continue
             if len(fat) > safety.MAX_SECTORS:

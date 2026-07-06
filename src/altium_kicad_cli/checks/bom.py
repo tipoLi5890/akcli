@@ -1,7 +1,7 @@
 """BOM hygiene checks (SPEC §3.6).
 
 ``run(sch)`` inspects only the *component* layer of a :class:`model.Schematic`
-(no net inference needed) and reports four classes of issue:
+(no net inference needed) and reports five classes of issue:
 
 * **duplicate designator** -- two or more genuinely distinct components share a
   refdes. Multi-unit parts (several placements of one physical component sharing
@@ -11,8 +11,19 @@
   numeric-suffixed prefix**: compound / manually-named refs such as ``J_USB_C``
   do not parse to ``(prefix, int)`` and are skipped, and a lone member (``X3``
   with no ``X1``/``X2``) has an empty min..max range so it never reports a gap.
+* **corrupt text** -- a component whose value or parameters contain the U+FFFD
+  replacement character. The corruption is baked into the ``.SchDoc`` at export
+  time (typically a GBK/CP125x-locale value pushed through a lossy UTF-8 decode
+  by the authoring/import tool -- both the ANSI field and its ``%UTF8%`` twin
+  carry the damage), so **no decoder can recover it**; the fix is to re-export
+  from a tool that preserves the text. One aggregated NOTE per schematic.
 * **missing value** / **missing footprint** -- a component with no value or no
-  footprint string.
+  footprint string. A component whose ``value`` is empty but that carries a
+  concrete *part identity* -- a part-number parameter (``Manufacturer Part``,
+  ``LCSC Part Name``, ...) or a digit-bearing ``library_ref`` (``AO2301``,
+  ``MCP73831T-2ACI/OT``) -- is **not** flagged: Altium designs sourced from
+  vendor libraries routinely leave Comment/Value blank and identify the part
+  by its library reference, and flagging those drowned real findings in noise.
 
 Synthesized (undesignated, ``$U<idx>``) components carry no real refdes and are
 excluded from every BOM check; their count is already surfaced in the schematic
@@ -48,6 +59,35 @@ def _clean(s: str | None) -> str | None:
         return None
     s = s.strip()
     return s or None
+
+
+# Parameter names that carry a concrete part number (vendor-library exports).
+_PART_ID_PARAMS: tuple[str, ...] = (
+    "Manufacturer Part",
+    "MPN",
+    "LCSC Part Name",
+    "LCSC Part",
+    "Supplier Part",
+    "Part Number",
+)
+
+
+def _part_identity(comp: Component) -> str | None:
+    """A concrete part identity that substitutes for a blank value, or ``None``.
+
+    A part-number parameter wins; else a ``library_ref`` that contains a digit
+    (real part numbers do -- ``AO2301``; generic symbols -- ``R``, ``LED`` --
+    do not, so those still report a missing value).
+    """
+    params = comp.parameters or {}
+    for key in _PART_ID_PARAMS:
+        v = _clean(params.get(key))
+        if v:
+            return v
+    lib = _clean(comp.library_ref)
+    if lib and any(ch.isdigit() for ch in lib):
+        return lib
+    return None
 
 
 def _identity(comp: Component) -> object:
@@ -121,9 +161,34 @@ def run(sch: Schematic) -> list[Finding]:
                 )
             )
 
+    # --- corrupt (U+FFFD-bearing) text, aggregated per schematic ----------------
+    corrupt: list[str] = []
+    for desig, members in groups.items():
+        for c in members:
+            texts = [c.value, *(c.parameters or {}).values()]
+            if any(t and "�" in t for t in texts):
+                corrupt.append(desig)
+                break
+    if corrupt:
+        findings.append(
+            Finding(
+                code="BOM_CORRUPT_TEXT",
+                severity=Severity.NOTE,
+                message=(
+                    f"{len(corrupt)} component(s) carry U+FFFD-corrupted text in "
+                    f"value/parameters ({', '.join(corrupt[:8])}"
+                    f"{', ...' if len(corrupt) > 8 else ''}) -- the replacement "
+                    "characters are baked into the file at export time and no "
+                    "decoder can recover them; re-export from a tool that "
+                    "preserves the original text"
+                ),
+                refs=corrupt,
+            )
+        )
+
     # --- missing value / footprint (per logical component) ----------------------
     for desig, members in groups.items():
-        has_value = any(_clean(c.value) for c in members)
+        has_value = any(_clean(c.value) or _part_identity(c) for c in members)
         has_footprint = any(_clean(c.footprint) for c in members)
         if not has_value:
             findings.append(

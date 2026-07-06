@@ -112,9 +112,15 @@ idempotent. Note: when piping (`akcli … | head`) the shell reports the *pipe's
 use `set -o pipefail` if you branch on it.
 
 - **Claude Code** — install the bundled plugin (below) for the `/altium-kicad:circuit-review`,
-  `circuit-pinmap`, `circuit-draw`, and `circuit-diff` commands plus a circuit-design skill.
-- **Codex / OpenCode** — both auto-discover the bundled `circuit-design` skill; drop it into their
-  skills dir and let the agent shell out to `akcli`. See
+  `circuit-pinmap`, `circuit-draw`, and `circuit-diff` commands plus six skills: `circuit-design`
+  (read/analyze/draw basics), `circuit-debug` (connectivity & tool triage), `schematic-review`
+  (severity-ranked design review), `schematic-authoring` (new circuits from an op-list),
+  `altium-interop` (working with Altium Designer), and `parts-sourcing` (JLC/LCSC parts).
+- **Codex** — install the bundled plugin (below): it packages all six skills plus the session hook.
+  Or drop the loose skill folders into `.agents/skills/` for auto-discovery. See
+  [docs/codex-plugin.md](docs/codex-plugin.md).
+- **OpenCode** — auto-discovers the bundled skills; drop them into its skills dir and let the agent
+  shell out to `akcli`. See
   [INSTALL.md](INSTALL.md#use-with-ai-coding-agents) for the exact commands (and a copy-paste setup prompt).
 
 A native MCP server is on the [roadmap](#roadmap).
@@ -141,12 +147,21 @@ Claude Code plugin (marketplace name `altium-kicad`):
 /plugin install altium-kicad@altium-kicad
 ```
 
+Codex plugin (same name `altium-kicad`):
+
+```bash
+codex plugin marketplace add tipoLi5890/altium-kicad-cli   # or `add ./` from a clone
+codex plugin install altium-kicad@altium-kicad
+```
+
 Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Roadmap
 
 Shipped today: Altium `.SchDoc`/`.SchLib` and KiCad `.kicad_sch` read (version-tolerant), net inference,
-ERC/power/BOM/diff/pinmap checks, KiCad write/draw, and JLCPCB/LCSC part search. Still ahead:
+ERC/power/BOM/diff/pinmap checks, KiCad write/draw, and JLCPCB/LCSC part search. The full milestone
+plan (v0.2 → v1.0, with exit criteria per milestone) lives in **[ROADMAP.md](ROADMAP.md)**. Headline
+items still ahead:
 
 - Altium `.PcbDoc` **binary** sections (pads/tracks/vias/arcs/fills/regions) — ASCII sections read today.
 - **Offline Altium writing** and Altium-authoritative ERC/netlist (today these need the live driver).
