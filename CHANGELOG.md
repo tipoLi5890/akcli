@@ -60,6 +60,20 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
   finding says so and points at re-export.
 
 ### Fixed
+- **Pin taps now follow eeschema connectivity:** a pin tip touching a wire's **mid-span**
+  connects only when a junction marks that point (or at a segment endpoint) — both in net
+  inference (`netbuild`) and, constructively, in the writer: `auto_junctions` now also
+  considers pins lying on a segment interior, so a placed part tapping a rail gets its
+  junction automatically (previously the mid-span-pin rule never fired because candidates
+  were wire endpoints only, and `akcli net` claimed connectivity KiCad rejected).
+- **Replaying an op-list is byte-identical after ONE apply:** idempotent replay now replaces
+  same-uuid nodes **in place** instead of remove-then-append, which migrated every op node to
+  the end of the file while auto-junctions stayed put — the first re-apply reordered the
+  document and byte-idempotency only converged on the second apply.
+- **Large op-lists are no longer quadratic:** each placement re-parsed the whole (growing)
+  inline `lib_symbols` cache to resolve its symbol; symbols now resolve once, from just their
+  own cached body, memoized per apply run. A 478-placement sheet went from >120 s (timeout)
+  to 1.7 s.
 - **Duplicate pin numbers across units no longer collide:** multi-unit parts with shared pads
   (e.g. dual DirectFETs — unit A pins 1,2,3 / unit B pins 1,4,5) legitimately repeat a pin
   number, but the writer seeded every per-pin UUID with just `designator.pin<N>`, so the two

@@ -13,6 +13,9 @@ LOCKED pipeline (``build_nets``):
 2. Union each junction(29) point onto every segment it lies on.
 3. T-junction: union every wire vertex lying on another wire's mid-span.
 4. Union pins/labels lying on a segment (exact-integer cross-product ``on_seg``).
+   Pins connect at segment ENDPOINTS or at a junction-marked point — a bare
+   mid-span touch does not connect (eeschema's rule; Altium's editor inserts a
+   junction record for every pin tap). Labels connect anywhere along the wire.
 5. GLOBAL same-name merge: group label/power-port names, union every pair of
    clusters sharing any name. This stitches the two STAT clusters AND collapses
    same-name ``GND`` ports. Net labels are sheet-local; power ports / ports /
@@ -142,10 +145,12 @@ def build_nets(prims: model.NetPrimitives) -> list[model.Net]:
         segs_by_sheet[w.sheet].append((qa, qb))
 
     # (2) junctions(29) — union a junction onto every same-sheet segment it lies on.
+    junctions_by_sheet: dict[str, set[tuple[int, int]]] = defaultdict(set)
     for j in prims.junctions:
         qj = _q(j.at)
         nj = _node(j.sheet, qj)
         dsu.add(nj)
+        junctions_by_sheet[j.sheet].add(qj)
         for qa, qb in segs_by_sheet.get(j.sheet, ()):  # noqa: B007
             if _on_seg(qj, qa, qb):
                 dsu.union(nj, _node(j.sheet, qa))
@@ -160,14 +165,21 @@ def build_nets(prims: model.NetPrimitives) -> list[model.Net]:
                     if _on_seg(v, a2, b2):
                         dsu.union(_node(sheet, v), _node(sheet, a2))
 
-    # (4a) pins on segments (same sheet).
+    # (4a) pins on segments (same sheet). A pin connects at a segment ENDPOINT,
+    # or anywhere on the segment when a junction marks that exact point — but a
+    # bare mid-span touch does NOT connect. This is eeschema's rule (and
+    # Altium's: the editor inserts a junction record for every pin tap), and
+    # diverging from it made `akcli net` claim connectivity KiCad rejects.
     pin_nodes: list[tuple[model.PinRef, tuple]] = []
     for ph in prims.pins:
         qp = _q(ph.at)
         np_ = _node(ph.sheet, qp)
         dsu.add(np_)
+        has_junction = qp in junctions_by_sheet.get(ph.sheet, ())
         for qa, qb in segs_by_sheet.get(ph.sheet, ()):
-            if _on_seg(qp, qa, qb):
+            if not _on_seg(qp, qa, qb):
+                continue
+            if has_junction or qp == qa or qp == qb:
                 dsu.union(np_, _node(ph.sheet, qa))
         pin_nodes.append((ph.ref, np_))
 

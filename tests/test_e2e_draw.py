@@ -186,3 +186,67 @@ def test_duplicate_pin_numbers_across_units_apply(tmp_path):
     pins = re.findall(r'\(pin "(\d+)" \(uuid "([0-9a-f-]+)"\)\)', text)
     assert [n for n, _ in pins] == ["1", "2", "1", "3"]
     assert len({u for _, u in pins}) == 4   # all uuids unique
+
+
+# --------------------------------------------------------------------------- #
+# auto-junction under a pin tapping a wire mid-span (eeschema semantics)
+# --------------------------------------------------------------------------- #
+def test_pin_on_wire_midspan_gets_auto_junction(tmp_path):
+    """A placed pin whose tip lands on a wire's INTERIOR must get a junction.
+
+    eeschema connects a pin tap only at a wire endpoint or a junction; without
+    this, akcli's own netlist claimed connectivity that dangled in KiCad (the
+    PWR_FLAG-on-a-rail case)."""
+    tgt = tmp_path / "board.kicad_sch"
+    tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
+                   '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
+    # Fixture Device:R pins point up/down 150 mil from the body. Place R at
+    # (2000,1000): pin 1 tip = (2000, 850). Wire passes THROUGH that point.
+    results = kw.apply(
+        _oplist(
+            {"op": "place_component", "lib_id": "Device:R",
+             "designator": "R1", "x_mil": 2000, "y_mil": 1000, "value": "1k"},
+            {"op": "add_wire", "vertices": [[1800, 850], [2200, 850]]},
+            {"op": "add_net_label", "name": "A", "at": [1800, 850], "scope": "global"},
+            {"op": "add_net_label", "name": "A", "at": [2200, 850], "scope": "global"},
+        ),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    assert all(r.status == "ok" for r in results)
+    text = tgt.read_text()
+    # 2000 mil = 50.8 mm, 850 mil = 21.59 mm
+    assert re.search(r'\(junction \(at 50\.8 21\.59\)', text), "no auto-junction at the tap"
+    # and the re-read netlist agrees the pin is on net A
+    sch = kreader.read_sch(str(tgt))
+    a = next(n for n in sch.nets if n.name == "A")
+    assert ("R1", "1") in {tuple(m) for m in a.members}
+
+
+# --------------------------------------------------------------------------- #
+# byte idempotency: ONE apply must already be the fixed point
+# --------------------------------------------------------------------------- #
+def test_reapply_is_byte_identical_after_first_apply(tmp_path):
+    """Replaying the same op-list must not reorder the document.
+
+    Regression: idempotent replay used remove-then-APPEND, migrating every op
+    node to the end while auto-junctions stayed put — the first re-apply
+    reshuffled the file and byte-identity only converged on the second apply."""
+    tgt = tmp_path / "board.kicad_sch"
+    tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
+                   '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
+    ops = _oplist(
+        {"op": "place_component", "lib_id": "Device:R",
+         "designator": "R1", "x_mil": 2000, "y_mil": 1000, "value": "1k"},
+        {"op": "place_component", "lib_id": "Device:C",
+         "designator": "C1", "x_mil": 2400, "y_mil": 1000, "value": "100n"},
+        # T meet at (2000,850) -> exercises an auto-junction, the node class
+        # that exposed the reorder.
+        {"op": "add_wire", "vertices": ["R1.1", [2400, 850], "C1.1"]},
+        {"op": "add_wire", "vertices": [[2000, 700], [2000, 850]]},
+        {"op": "add_net_label", "name": "T", "at": [2000, 700], "scope": "global"},
+        {"op": "add_text", "text": "idempotency probe", "at": [1500, 600]},
+    )
+    kw.apply(ops, str(tgt), apply=True, sources=[str(DEVICE)])
+    first = tgt.read_bytes()
+    kw.apply(ops, str(tgt), apply=True, sources=[str(DEVICE)])
+    assert tgt.read_bytes() == first, "first re-apply is not byte-identical"

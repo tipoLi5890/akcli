@@ -346,3 +346,43 @@ def test_power_priority_flag_selects_power_port_name():
     assert nets[0].name == "V3V3"
     assert "NET_LABEL_NAME" in nets[0].aliases
     assert nets[0].confidence < 1.0
+
+
+# --- pin taps: mid-span requires a junction (eeschema semantics) -------------
+
+def test_pin_on_wire_midspan_without_junction_does_not_connect():
+    """A pin tip touching a wire's INTERIOR with no junction stays floating.
+
+    eeschema connects a pin only at a wire endpoint or a junction-marked point;
+    treating a bare mid-span touch as connected made `akcli net` claim
+    connectivity KiCad rejects (the PWR_FLAG-on-a-rail case).
+    """
+    prims = model.NetPrimitives(
+        wires=[_wire(1000, 1000, 3000, 1000)],
+        pins=[
+            _pin(("R1", "1"), 1000, 1000),   # at wire endpoint -> connects
+            _pin(("Q9", "1"), 2000, 1000),   # strictly mid-span -> floats
+        ],
+        labels=[_label("RAIL", 1000, 1000)],
+    )
+    nets = build_nets(prims)
+    hits = _net_with(nets, ("R1", "1"))
+    assert len(hits) == 1
+    assert ("Q9", "1") not in hits[0].members
+
+
+def test_pin_on_wire_midspan_with_junction_connects():
+    """The same mid-span tap WITH a junction record joins the net."""
+    prims = model.NetPrimitives(
+        wires=[_wire(1000, 1000, 3000, 1000)],
+        pins=[
+            _pin(("R1", "1"), 1000, 1000),
+            _pin(("Q9", "1"), 2000, 1000),
+        ],
+        junctions=[_junction(2000, 1000)],
+        labels=[_label("RAIL", 1000, 1000)],
+    )
+    nets = build_nets(prims)
+    hits = _net_with(nets, ("R1", "1"))
+    assert len(hits) == 1
+    assert ("Q9", "1") in hits[0].members

@@ -463,9 +463,17 @@ def auto_junctions(doc: SNode, *, tol_nm: int = 0) -> None:
         end_counts[a] += 1
         end_counts[b] += 1
 
-    # Candidate points are exactly the wire-segment endpoints (a T point is the
-    # arm wire's endpoint; an X-only crossing is never an endpoint, so excluded).
-    candidates = sorted(end_counts.keys())
+    # Candidate points: every wire-segment endpoint (a T point is the arm wire's
+    # endpoint; an X-only crossing is never an endpoint, so excluded) PLUS every
+    # pin lying on a segment's mid-span — eeschema only connects a pin tap at a
+    # wire endpoint or a junction, so the mid-span-pin rule below never fired
+    # while candidates were endpoints alone (the placed part read as connected
+    # by akcli but dangled in KiCad).
+    cand_set = set(end_counts.keys())
+    for p in pin_points:
+        if p not in cand_set and any(_on_segment_interior(p, a, b) for a, b in segs):
+            cand_set.add(p)
+    candidates = sorted(cand_set)
     root_uuid = _root_uuid(doc)
 
     for p in candidates:

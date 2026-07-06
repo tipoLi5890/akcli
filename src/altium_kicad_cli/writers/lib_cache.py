@@ -47,7 +47,7 @@ from ..readers import kicad_lib, sexpr
 from ..readers.sexpr import SNode
 from ..safety import MAX_FILE_BYTES
 
-__all__ = ["ensure_cached"]
+__all__ = ["ensure_cached", "find_cached"]
 
 # Guard against a pathological / cyclic ``(extends ...)`` chain. Real chains are
 # 1-2 deep; we follow at most this many hops before declaring the library bad.
@@ -91,7 +91,7 @@ def ensure_cached(
     doc: SNode,
     lib_id: str,
     sources: object,
-) -> None:
+) -> SNode:
     """Ensure ``lib_id`` (and any ``(extends)`` base) is present in ``doc``'s cache.
 
     ``doc`` is the parsed root :class:`SNode` of a ``.kicad_sch`` document; it is
@@ -103,6 +103,10 @@ def ensure_cached(
     * a path to a ``.kicad_sym`` library file, or
     * a path to a template ``.kicad_sch`` (its inline ``lib_symbols`` is used).
 
+    Returns the cached ``(symbol ...)`` body — the freshly appended clone, or the
+    pre-existing cache entry — so callers can resolve pins from that single node
+    instead of re-parsing the whole (growing) cache per placement.
+
     Raises ``SYMBOL_NOT_FOUND`` if ``lib_id`` (or an ``extends`` base) resolves in
     none of the sources. Idempotent: a symbol already cached is left untouched.
     """
@@ -111,7 +115,22 @@ def ensure_cached(
     cached = _existing_names(libsyms)
     # The requested symbol keeps the instance's exact qualified id; a derived
     # symbol is flattened into a single standalone entry (no base is cached).
-    _cache_symbol(libsyms, request=lib_id, qualified=lib_id, libs=libs, cached=cached)
+    return _cache_symbol(libsyms, request=lib_id, qualified=lib_id, libs=libs, cached=cached)
+
+
+def find_cached(libsyms: SNode | None, lib_id: str) -> SNode | None:
+    """The cached ``(symbol ...)`` body for ``lib_id`` (exact, then unqualified)."""
+    if libsyms is None:
+        return None
+    unq = _unqual(lib_id)
+    fallback = None
+    for s in libsyms.find_all("symbol"):
+        nm = _symbol_name(s)
+        if nm == lib_id:
+            return s
+        if fallback is None and _unqual(nm) == unq:
+            fallback = s
+    return fallback
 
 
 # --------------------------------------------------------------------------- #
@@ -123,10 +142,12 @@ def _cache_symbol(
     qualified: str,
     libs: list[model.Library],
     cached: set[str],
-) -> None:
+) -> SNode:
     """Resolve ``request`` and copy it as ``qualified`` (flattening any base)."""
     if qualified in cached:
-        return  # already present (pre-existing or just added) -> dedup
+        existing = find_cached(libsyms, qualified)
+        if existing is not None:
+            return existing  # already present (pre-existing or just added) -> dedup
 
     sym = _find_symbol(request, libs)
     if sym is None:
@@ -139,6 +160,7 @@ def _cache_symbol(
     _set_symbol_name(body, qualified)
     _append_symbol(libsyms, body)
     cached.add(qualified)
+    return body
 
 
 # --------------------------------------------------------------------------- #

@@ -153,27 +153,25 @@ def _append_top(doc: SNode, child: SNode) -> None:
     doc.ws.insert(k, indent)              # type: ignore[union-attr]
 
 
-def _remove_top_by_uuid(doc: SNode, uid: str) -> bool:
-    """Remove the first top-level node whose ``(uuid ...)`` equals ``uid``."""
+def _append_top_idempotent(doc: SNode, child: SNode, uid: str) -> None:
+    """Idempotent top-level append: replace any prior node with ``uid`` IN PLACE.
+
+    Re-running an op-list yields the same deterministic ``uid`` per created node,
+    so replacing makes ``draw --apply`` converge (SPEC risk #7) instead of
+    accumulating duplicate wires/labels/junctions on every run. Replacement is
+    in place (same child index, same leading whitespace) rather than
+    remove-then-append: appending would migrate every replayed node to the end
+    of the document while non-op nodes (auto-junctions) stayed put, so the first
+    re-apply reordered the file and byte-idempotency only converged on the
+    SECOND apply.
+    """
     for i, c in enumerate(doc.children or []):
         if not c.is_list:
             continue
         u = c.find("uuid")
         if u is not None and len(u.children or []) >= 2 and u.children[1].value == uid:
-            del doc.children[i]            # type: ignore[union-attr]
-            del doc.ws[i]                  # type: ignore[union-attr]
-            return True
-    return False
-
-
-def _append_top_idempotent(doc: SNode, child: SNode, uid: str) -> None:
-    """Idempotent top-level append: drop any prior node with ``uid`` first.
-
-    Re-running an op-list yields the same deterministic ``uid`` per created node,
-    so replacing-then-appending makes ``draw --apply`` converge (SPEC risk #7)
-    instead of accumulating duplicate wires/labels/junctions on every run.
-    """
-    _remove_top_by_uuid(doc, uid)
+            doc.children[i] = child            # type: ignore[index]
+            return
     _append_top(doc, child)
 
 
@@ -230,6 +228,39 @@ def _inline_library(doc: SNode) -> model.Library:
     return model.Library(source_path="<inline>", source_format="kicad", symbols=[])
 
 
+# --------------------------------------------------------------------------- #
+# per-apply symbol-resolution context (perf: SPEC §3.5)
+# --------------------------------------------------------------------------- #
+def _ctx_new() -> dict:
+    """Per-``apply`` memo: ``lib_id -> SymbolDef`` resolved from ONE cache body.
+
+    Re-parsing the whole (growing) inline ``lib_symbols`` per placed op made a
+    large op-list quadratic (a 478-placement sheet took minutes); resolving each
+    ``lib_id`` once, from just its own cached body, is O(1) per op. Safe because
+    a cache entry never changes within a run (``ensure_cached`` dedups by id).
+    """
+    return {"symdefs": {}}
+
+
+def _symdef_from_body(body: SNode, lib_id: str) -> model.SymbolDef:
+    """Resolve a :class:`SymbolDef` from a single cached ``(symbol ...)`` body."""
+    wrapper = SNode.make_list([SNode.atom("lib_symbols"), body])
+    lib = kicad_lib.library_from_lib_symbols(wrapper, "<inline>")
+    return kicad_lib.resolve(lib_id, [lib])
+
+
+def _ctx_symdef(doc: SNode, ctx: dict, lib_id: str) -> model.SymbolDef:
+    """Memoized symbol resolution against the document's ``lib_symbols`` cache."""
+    sd = ctx["symdefs"].get(lib_id)
+    if sd is None:
+        body = lib_cache.find_cached(doc.find("lib_symbols"), lib_id)
+        if body is None:
+            fail("SYMBOL_NOT_FOUND", f"lib_id {lib_id!r} not in (lib_symbols ...) cache")
+        sd = _symdef_from_body(body, lib_id)
+        ctx["symdefs"][lib_id] = sd
+    return sd
+
+
 def _instance_component(sym: SNode, lib_id: str):
     """Minimal placement-only Component for :func:`geometry.pin_world`."""
     at = sym.find("at")
@@ -258,14 +289,14 @@ def _instance_component(sym: SNode, lib_id: str):
     )
 
 
-def _resolve_pin_world(doc: SNode, library, ref: str, pin_number: str) -> tuple[int, int]:
+def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tuple[int, int]:
     """World coordinate (nm) of ``ref.pin_number`` in the current document."""
     sym = _symbol_by_ref(doc, ref)
     if sym is None:
         fail("VERIFY_FAILED", f"pin reference {ref!r} matches no placed component")
     lib_id = sym.find("lib_id").children[1].value or ""
     try:
-        symdef = kicad_lib.resolve(lib_id, [library])
+        symdef = _ctx_symdef(doc, ctx, lib_id)
     except AkcliError:
         fail("SYMBOL_NOT_FOUND", f"pin reference {ref!r}: lib_id {lib_id!r} not in cache")
     comp = _instance_component(sym, lib_id)
@@ -275,7 +306,7 @@ def _resolve_pin_world(doc: SNode, library, ref: str, pin_number: str) -> tuple[
     fail("VERIFY_FAILED", f"component {ref!r} has no pin {pin_number!r}")
 
 
-def _resolve_endpoint(doc: SNode, library, ep: object) -> tuple[int, int]:
+def _resolve_endpoint(doc: SNode, ctx: dict, ep: object) -> tuple[int, int]:
     """Resolve a wire/port endpoint to integer-nm coordinates.
 
     ``"REF.PIN"`` snaps to the pin's world coordinate (exact, never grid-snapped);
@@ -283,7 +314,7 @@ def _resolve_endpoint(doc: SNode, library, ep: object) -> tuple[int, int]:
     """
     if isinstance(ep, str):
         ref, pin_number = ep.rsplit(".", 1)
-        return _resolve_pin_world(doc, library, ref, pin_number)
+        return _resolve_pin_world(doc, ctx, ref, pin_number)
     if isinstance(ep, (list, tuple)) and len(ep) == 2:
         nm = (geometry.mil_to_nm(float(ep[0])), geometry.mil_to_nm(float(ep[1])))
         return geometry.grid_snap_nm(nm, _GRID_NM)
@@ -363,13 +394,16 @@ def _make_symbol(
 
 
 def _place_symbol(
-    doc: SNode, library, src_libs: list, lib_id: str, designator: str,
+    doc: SNode, ctx: dict, src_libs: list, lib_id: str, designator: str,
     pos_nm: tuple[int, int], rotation: int, mirror: str, op_index: int, path: str,
 ) -> str:
     """Cache + place a symbol instance; return its (deterministic) uuid."""
-    lib_cache.ensure_cached(doc, lib_id, src_libs)
-    library = _inline_library(doc)        # refresh after caching
-    symdef = kicad_lib.resolve(lib_id, [library])
+    body = lib_cache.ensure_cached(doc, lib_id, src_libs)
+    symdef = ctx["symdefs"].get(lib_id)
+    if symdef is None:
+        # Resolve from just this one cached body — never the whole cache (perf).
+        symdef = _symdef_from_body(body, lib_id)
+        ctx["symdefs"][lib_id] = symdef
     pin_numbers = [p.number for p in symdef.pins]
 
     root = _root_uuid(doc)
@@ -398,7 +432,7 @@ def _place_symbol(
 # --------------------------------------------------------------------------- #
 # per-op handlers (each returns the list of created uuids)
 # --------------------------------------------------------------------------- #
-def _op_place_component(doc, op, idx, src_libs, path) -> list[str]:
+def _op_place_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
     sources = list(src_libs)
     if op.get("symbol_source"):
         sources = [op["symbol_source"], *sources]
@@ -409,7 +443,7 @@ def _op_place_component(doc, op, idx, src_libs, path) -> list[str]:
         _GRID_NM,
     )
     uid = _place_symbol(
-        doc, _inline_library(doc), sources, op["lib_id"], op["designator"],
+        doc, ctx, sources, op["lib_id"], op["designator"],
         pos, rotation, mirror, idx, path,
     )
     sym = _symbol_by_ref(doc, op["designator"])
@@ -420,7 +454,7 @@ def _op_place_component(doc, op, idx, src_libs, path) -> list[str]:
     return [uid]
 
 
-def _op_set_component_transform(doc, op, idx, src_libs, path) -> list[str]:
+def _op_set_component_transform(doc, op, idx, src_libs, path, ctx) -> list[str]:
     sym = _symbol_by_ref(doc, op["designator"])
     if sym is None:
         fail("VERIFY_FAILED", f"set_component_transform: no component {op['designator']!r}")
@@ -446,7 +480,7 @@ def _op_set_component_transform(doc, op, idx, src_libs, path) -> list[str]:
     return []
 
 
-def _op_set_component_parameters(doc, op, idx, src_libs, path) -> list[str]:
+def _op_set_component_parameters(doc, op, idx, src_libs, path, ctx) -> list[str]:
     sym = _symbol_by_ref(doc, op["designator"])
     if sym is None:
         fail("VERIFY_FAILED", f"set_component_parameters: no component {op['designator']!r}")
@@ -461,10 +495,9 @@ def _op_set_component_parameters(doc, op, idx, src_libs, path) -> list[str]:
     return []
 
 
-def _op_add_wire(doc, op, idx, src_libs, path, tag="wire") -> list[str]:
-    library = _inline_library(doc)
+def _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="wire") -> list[str]:
     verts = op["vertices"]
-    pts = [_resolve_endpoint(doc, library, v) for v in verts]
+    pts = [_resolve_endpoint(doc, ctx, v) for v in verts]
     root = _root_uuid(doc)
     created: list[str] = []
     for n, (a, b) in enumerate(zip(pts, pts[1:])):
@@ -477,11 +510,11 @@ def _op_add_wire(doc, op, idx, src_libs, path, tag="wire") -> list[str]:
     return created
 
 
-def _op_add_bus(doc, op, idx, src_libs, path) -> list[str]:
-    return _op_add_wire(doc, op, idx, src_libs, path, tag="bus")
+def _op_add_bus(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    return _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="bus")
 
 
-def _op_add_junction(doc, op, idx, src_libs, path) -> list[str]:
+def _op_add_junction(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     root = _root_uuid(doc)
     uid = instances.deterministic_uuid(root, f"junction:{p[0]}:{p[1]}", idx)
@@ -496,12 +529,11 @@ def _op_add_junction(doc, op, idx, src_libs, path) -> list[str]:
     return [uid]
 
 
-def _op_add_no_connect(doc, op, idx, src_libs, path) -> list[str]:
-    library = _inline_library(doc)
+def _op_add_no_connect(doc, op, idx, src_libs, path, ctx) -> list[str]:
     ep = op["pin"]
     if isinstance(ep, str) and "." in ep:
         ref, pin_number = ep.rsplit(".", 1)
-        p = _resolve_pin_world(doc, library, ref, pin_number)
+        p = _resolve_pin_world(doc, ctx, ref, pin_number)
     else:
         p = _point_nm(ep)
     root = _root_uuid(doc)
@@ -515,7 +547,7 @@ def _op_add_no_connect(doc, op, idx, src_libs, path) -> list[str]:
     return [uid]
 
 
-def _op_add_net_label(doc, op, idx, src_libs, path) -> list[str]:
+def _op_add_net_label(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     scope = op.get("scope", "local")
     orientation = int(op.get("orientation", 0))
@@ -552,7 +584,7 @@ def _existing_pwr_ref_for_op(doc: SNode, root: str | None, op_index: int) -> str
     return None
 
 
-def _op_place_power_port(doc, op, idx, src_libs, path) -> list[str]:
+def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
     name = op.get("op")
     if name in _SUGAR_POWER:
         default_lib, default_net = _SUGAR_POWER[name]
@@ -567,7 +599,7 @@ def _op_place_power_port(doc, op, idx, src_libs, path) -> list[str]:
     # designator (and thus the deterministic uuid) stays stable -> idempotent.
     ref = _existing_pwr_ref_for_op(doc, _root_uuid(doc), idx) or instances.alloc_pwr_ref(doc)
     uid = _place_symbol(
-        doc, _inline_library(doc), list(src_libs), lib_id, ref,
+        doc, ctx, list(src_libs), lib_id, ref,
         pos, rotation, "none", idx, path,
     )
     sym = _symbol_by_ref(doc, ref)
@@ -576,7 +608,7 @@ def _op_place_power_port(doc, op, idx, src_libs, path) -> list[str]:
     return [uid]
 
 
-def _op_add_bus_entry(doc, op, idx, src_libs, path) -> list[str]:
+def _op_add_bus_entry(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     if isinstance(op.get("size"), (list, tuple)) and len(op["size"]) == 2:
         size = (geometry.mil_to_nm(float(op["size"][0])), geometry.mil_to_nm(float(op["size"][1])))
@@ -595,7 +627,7 @@ def _op_add_bus_entry(doc, op, idx, src_libs, path) -> list[str]:
     return [uid]
 
 
-def _op_add_text(doc, op, idx, src_libs, path) -> list[str]:
+def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     angle = float(op.get("angle", 0))
     root = _root_uuid(doc)
@@ -692,6 +724,7 @@ def apply(
     # --- apply ops --------------------------------------------------------- #
     results: list[OpResult] = []
     any_error = False
+    ctx = _ctx_new()
     for idx, op in enumerate(oplist.get("ops", [])):
         name = op.get("op")
         handler = _HANDLERS.get(name)
@@ -704,7 +737,7 @@ def apply(
             results.append(res)
             continue
         try:
-            res.created_uuids = handler(doc, op, idx, src_libs, instances.instances_path(doc))
+            res.created_uuids = handler(doc, op, idx, src_libs, instances.instances_path(doc), ctx)
         except AkcliError as exc:
             res.status = "error"
             res.error_code = exc.code
