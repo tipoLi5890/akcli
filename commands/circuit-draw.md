@@ -22,10 +22,11 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m al
    `{ "protocol_version": 1, "target_format": "kicad", "target_file": "<board>.kicad_sch",
    "ops": [ ... ] }`. Honor the contract: coordinates in **mils, origin top-left, +Y down, 50-mil
    grid**; rotation enum `{0,90,180,270}`; mirror `{none,x,y}`; `add_wire.vertices` is an even,
-   orthogonal array of `[x,y]` points or `"REF.PIN"` endpoint strings. The 13 ops: `place_component`,
-   `set_component_transform`, `set_component_parameters`, `add_wire`, `add_junction`,
-   `add_no_connect`, `add_net_label`, `place_power_port` (sugar: `place_gnd`/`place_vcc`),
-   `add_bus`, `add_bus_entry`, `add_text`. Write it to a temp `ops.json`.
+   orthogonal array of `[x,y]` points or `"REF.PIN"` endpoint strings. The 16 ops: `place_component`
+   (optional `"unit": N` for multi-unit parts), `set_component_transform`,
+   `set_component_parameters`, `add_wire`, `add_junction`, `add_no_connect`, `add_net_label`,
+   `place_power_port` (sugar: `place_gnd`/`place_vcc`), `add_bus`, `add_bus_entry`, `add_text`,
+   `delete_component`, `delete_object`, `move_component`. Write it to a temp `ops.json`.
 
 2. **Plan (never writes):** `akcli plan <board.kicad_sch> --ops ops.json [--symbols <path>]`.
    Show the user what would change and resolve any `SYMBOL_NOT_FOUND` / off-grid / non-orthogonal
