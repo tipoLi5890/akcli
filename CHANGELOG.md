@@ -52,7 +52,26 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
 - Documentation (`README.md`, `INSTALL.md`, `SECURITY.md`, `THIRD_PARTY_NOTICES.md`, `docs/SPEC.md`,
   `docs/cli-reference.md`), reference config, and CI matrix.
 
+- **`BOM_CORRUPT_TEXT` check (NOTE):** components whose value/parameters contain the U+FFFD
+  replacement character are surfaced with an aggregated finding instead of silently printing `�`.
+  Root-cause analysis on real-world files showed the corruption is baked into the `.SchDoc` at
+  export time (a legacy-code-page value pushed through a lossy UTF-8 decode by the authoring tool --
+  both the ANSI field and its `%UTF8%` twin carry the damage), so no decoder can recover it; the
+  finding says so and points at re-export.
+
 ### Fixed
+- **CFBF DIFAT spillover (> 109 FAT sectors) is now walked**, not refused: the spillover chain is
+  read under the header-declared count, a cycle set, and the global sector cap (hostile input still
+  fails with `ALTIUM_FAT_CYCLE` / `ALTIUM_ALLOC_GUARD` / `ALTIUM_MALFORMED`). Large real-world
+  `.PcbDoc` containers now open.
+- **`BOM_MISSING_VALUE` no longer fires on vendor-library parts** whose value lives in the part
+  identity: a part-number parameter (`Manufacturer Part`, `LCSC Part Name`, ...) or a digit-bearing
+  `library_ref` (e.g. `AO2301`) now substitutes for a blank `Comment`/`Value`. Generic symbols with
+  no identity still report.
+- **`ERC_NO_POWER` / `ERC_NO_GROUND` skip `U`-prefixed parts with fewer than 3 pins** (2-pin
+  headers/jumper stubs designated `U*` are not ICs).
+- **`pinmap` without a configured MCU** now says how to fix it (`--mcu <REF>` or
+  `[project].mcu_designator`) instead of a bare warning.
 - **Footprints** now resolve via the model-link chain (RECORD-45 model → RECORD-44 implementation →
   RECORD-1 component): the owner keying was wrong, so the model-link footprint was never found; the
   RECORD-41 `Footprint` / `Supplier Footprint` parameter is the fallback. Removes false

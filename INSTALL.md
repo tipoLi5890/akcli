@@ -61,31 +61,40 @@ pip install git+https://github.com/tipoLi5890/altium-kicad-cli
 ## Use with AI coding agents
 
 `akcli` is a plain CLI, so any agent that can run shell commands drives it once it's on PATH (install it
-with one of the options above). The repo also ships a **`circuit-design` skill**
-(`skills/circuit-design/SKILL.md`) that teaches the agent how to drive `akcli`. Codex and OpenCode
-**auto-discover** any skill folder you drop into their skills directory — no plugin or extra config.
-Run the `cp` commands below from a clone of this repo.
+with one of the options above). The repo also ships **six skills** under `skills/` that teach the agent
+how to drive `akcli`: `circuit-design` (read/analyze/draw basics), `circuit-debug` (connectivity & tool
+triage), `schematic-review` (severity-ranked design review), `schematic-authoring` (new circuits from an
+op-list), `altium-interop` (working with Altium Designer), and `parts-sourcing` (JLC/LCSC parts). Codex
+and OpenCode **auto-discover** any skill folder you drop into their skills directory — no plugin or extra
+config. Run the `cp` commands below from a clone of this repo.
 
 ### Claude Code
 
-Install the plugin — it bundles the skill and the slash commands:
+Install the plugin — it bundles all six skills and the slash commands:
 
 ```text
 /plugin marketplace add tipoLi5890/altium-kicad-cli
 /plugin install altium-kicad@altium-kicad
 ```
 
-You get the `circuit-design` skill and `/altium-kicad:circuit-review`, `circuit-pinmap`,
+You get the six skills and `/altium-kicad:circuit-review`, `circuit-pinmap`,
 `circuit-draw`, and `circuit-diff`, all calling `akcli`.
 
 ### Codex
 
-`akcli` runs through Codex's built-in shell once it's on PATH. Install the skill (auto-discovered from
-`.agents/skills/`):
+`akcli` runs through Codex's built-in shell once it's on PATH. Install it as a **Codex plugin** —
+it bundles all six skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
 
 ```bash
-mkdir -p ~/.agents/skills && cp -R skills/circuit-design ~/.agents/skills/    # user-global
-# per-project instead: mkdir -p .agents/skills && cp -R skills/circuit-design .agents/skills/
+codex plugin marketplace add tipoLi5890/altium-kicad-cli   # or `add ./` from a clone
+codex plugin install altium-kicad@altium-kicad
+```
+
+Or just drop the loose skill folders in (auto-discovered from `.agents/skills/`, no plugin needed):
+
+```bash
+mkdir -p ~/.agents/skills && cp -R skills/* ~/.agents/skills/    # user-global
+# per-project instead: mkdir -p .agents/skills && cp -R skills/* .agents/skills/
 ```
 
 ### OpenCode
@@ -93,7 +102,7 @@ mkdir -p ~/.agents/skills && cp -R skills/circuit-design ~/.agents/skills/    # 
 OpenCode auto-discovers skills too, and also reads Claude-compatible locations:
 
 ```bash
-mkdir -p ~/.config/opencode/skills && cp -R skills/circuit-design ~/.config/opencode/skills/
+mkdir -p ~/.config/opencode/skills && cp -R skills/* ~/.config/opencode/skills/
 # OpenCode also reads ~/.claude/skills/ and ~/.agents/skills/, so any of those works
 ```
 
@@ -103,7 +112,7 @@ Claude Code reads `.claude/skills/`, Codex reads `.agents/skills/`, OpenCode rea
 both:
 
 ```bash
-for d in ~/.claude/skills ~/.agents/skills; do mkdir -p "$d" && cp -R skills/circuit-design "$d"/; done
+for d in ~/.claude/skills ~/.agents/skills; do mkdir -p "$d" && cp -R skills/* "$d"/; done
 ```
 
 ### Or let the agent install it
@@ -114,10 +123,10 @@ Paste this into a running Codex / OpenCode session (fix the path) and it sets it
 I cloned altium-kicad-cli at /ABS/PATH/altium-kicad-cli. Please:
 1. Put akcli on PATH: run `pipx install git+https://github.com/tipoLi5890/altium-kicad-cli`
    (or add /ABS/PATH/altium-kicad-cli/bin to PATH); verify with `akcli --version`.
-2. Install its bundled skill so you load it automatically: copy
-   /ABS/PATH/altium-kicad-cli/skills/circuit-design into your skills directory
+2. Install its bundled skills so you load them automatically: copy every folder under
+   /ABS/PATH/altium-kicad-cli/skills/ into your skills directory
    (Codex: ~/.agents/skills/ ; OpenCode: ~/.config/opencode/skills/).
-3. Read that SKILL.md and use akcli for any Altium/KiCad schematic work.
+3. Read skills/circuit-design/SKILL.md first and use akcli for any Altium/KiCad schematic work.
 ```
 
 ### Project instructions (optional)

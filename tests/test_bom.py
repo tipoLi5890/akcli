@@ -226,3 +226,53 @@ def test_all_fixtures_run_without_error(fixture):
     sch = altium_sch.read(os.path.join(FIXTURES, fixture))
     out = bom.run(sch)
     assert isinstance(out, list)
+
+
+# ---------------------------------------------------------------------------
+# part identity substitutes for a blank value (vendor-library Altium exports)
+# ---------------------------------------------------------------------------
+def test_blank_value_with_part_number_libref_not_flagged():
+    c = _comp("Q1", value=None)
+    c.library_ref = "AO2301"                      # digit-bearing part number
+    out = bom.run(_sch([c]))
+    assert "BOM_MISSING_VALUE" not in _codes(out)
+
+
+def test_blank_value_with_manufacturer_part_param_not_flagged():
+    c = _comp("U2", value=None)
+    c.library_ref = None
+    c.parameters = {"Manufacturer Part": "MCP73831T-2ACI/OT"}
+    out = bom.run(_sch([c]))
+    assert "BOM_MISSING_VALUE" not in _codes(out)
+
+
+def test_blank_value_with_generic_libref_still_flagged():
+    c = _comp("R1", value=None)
+    c.library_ref = "Device:R"                    # generic symbol: no digits
+    c.parameters = {}
+    out = bom.run(_sch([c]))
+    assert "BOM_MISSING_VALUE" in _codes(out)
+
+
+# ---------------------------------------------------------------------------
+# BOM_CORRUPT_TEXT: U+FFFD baked into the file is surfaced, not silent
+# ---------------------------------------------------------------------------
+def test_fffd_in_value_reports_corrupt_text():
+    c = _comp("R5", value="10k��")
+    out = bom.run(_sch([c]))
+    corrupt = _by_code(out, "BOM_CORRUPT_TEXT")
+    assert len(corrupt) == 1
+    assert corrupt[0].severity is Severity.NOTE
+    assert "R5" in corrupt[0].refs
+
+
+def test_fffd_in_parameter_reports_corrupt_text():
+    c = _comp("Q1", value="AO2301")
+    c.parameters = {"Manufacturer": "TECH PUBLIC(��)"}
+    out = bom.run(_sch([c]))
+    assert any(f.code == "BOM_CORRUPT_TEXT" and "Q1" in f.refs for f in out)
+
+
+def test_clean_text_reports_no_corrupt_text():
+    out = bom.run(_sch([_comp("R1", value="10kΩ")]))
+    assert "BOM_CORRUPT_TEXT" not in _codes(out)

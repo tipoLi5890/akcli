@@ -70,7 +70,7 @@ akcli pinmap <file> --mcu U3 --expected pins.csv     # expected = .csv or .json
 ```
 
 `-C/--config altium-kicad-cli.toml` supplies `mcu_designator`, `[[rail]]` voltages, and
-`[[erc_waiver]]` entries; without `-C`, discovery walks up from cwd. Always read the metadata
+`[[erc_waiver]]` entries; without `-C`, discovery walks up from the schematic's directory. Always read the metadata
 header `check` prints before declaring a board clean.
 
 ### (3) Draw / edit a **KiCad** schematic — op-list, then plan, then draw

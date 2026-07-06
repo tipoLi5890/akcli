@@ -138,7 +138,9 @@ def run(sch: Schematic, cfg: object | None, expected: dict | None = None) -> lis
             Finding(
                 "PINMAP_NO_MCU",
                 Severity.WARNING,
-                "no mcu_designator configured ([project].mcu_designator); "
+                "no MCU designator configured -- pass --mcu <REF> (e.g. "
+                "`akcli pinmap main.SchDoc --mcu U3`) or set "
+                "[project].mcu_designator in altium-kicad-cli.toml; "
                 "cannot build a pin map",
                 [],
             )

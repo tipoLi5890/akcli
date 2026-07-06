@@ -61,8 +61,10 @@ Additional structural defenses:
   `sys.setrecursionlimit` is banned. Cycle detection (seen-sets) guards every OLE2 FAT/miniFAT and
   directory-tree walk.
 - **Header validation before allocation.** Sector-shift must be `{9, 12}`, mini-sector-shift `6`,
-  mini-cutoff `4096`; the file must be ≥ 512 bytes; DIFAT spillover past 109 entries errors out
-  (`ALTIUM_ALLOC_GUARD`). No untrusted header field is used to size an allocation unchecked.
+  mini-cutoff `4096`; the file must be ≥ 512 bytes; the DIFAT spillover chain is walked under the
+  header-declared count, a cycle set, and the global sector cap (`ALTIUM_FAT_CYCLE` /
+  `ALTIUM_ALLOC_GUARD` / `ALTIUM_MALFORMED` on hostile input). No untrusted header field is used to
+  size an allocation unchecked.
 - **Time and memory budgets** are exercised by `test_fuzz_safety.py` against a corpus of malformed
   inputs (FAT cycle, OOB sector, bogus sector-shift, huge `ndifat`, mini-cutoff bomb, truncated header,
   missing root, deeply nested S-expr, 10 MB atom, unterminated quote, symlinked lib path). Each must

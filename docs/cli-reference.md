@@ -20,7 +20,7 @@ diagnostics. This keeps `akcli ... --json | jq` clean.
 |---|---|
 | `--version` | Print package version **and** `protocol_version`, then exit. |
 | `-h`, `--help` | Show help for `akcli` or a subcommand, then exit. |
-| `-C`, `--config PATH` | Use this `altium-kicad-cli.toml` instead of walk-up discovery from cwd. |
+| `-C`, `--config PATH` | Use this `altium-kicad-cli.toml` instead of walk-up discovery from the input file's directory. |
 | `-v`, `-vv` | Increase log verbosity (to stderr). `-v` info, `-vv` debug-level logs. |
 | `--quiet` | Suppress non-error logs on stderr. |
 | `--json` | Emit machine-readable JSON on stdout (carries `schema_version`). |

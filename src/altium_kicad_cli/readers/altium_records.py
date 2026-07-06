@@ -76,8 +76,23 @@ _UTF8_PREFIX = "%UTF8%"
 def fields(r: str) -> dict[str, str]:
     """Tokenize one ``|KEY=VALUE|...|`` record payload into a dict.
 
-    ``%UTF8%KEY`` twin fields are decoded (latin1 bytes -> UTF-8) and override the
-    plain ``KEY`` twin, so CJK / Ω / µ values are canonical, not mojibake.
+    Text decode strategy (deliberate, evidence-based):
+
+    * ``%UTF8%KEY`` twin fields are decoded (latin1 framing bytes -> UTF-8) and
+      override the plain ``KEY`` twin, so CJK / Ω / µ values are canonical.
+      Altium writes the twin for every non-ASCII value, so the twin IS the
+      decode strategy.
+    * Twin-less fields keep the byte-preserving latin1 framing decode. A
+      "strict-UTF-8 upgrade" heuristic is provably unsafe here: two-byte legacy
+      code-page sequences (GBK ``D6 B5`` = one CJK char) are frequently *valid*
+      UTF-8, so no locale codepage is guessed and the original bytes stay
+      recoverable via ``.encode("latin-1")``.
+
+    NOTE: if an upstream tool already wrote a value's Ω/µ/CJK as the U+FFFD
+    replacement bytes (``EF BF BD``) on a mismatched locale, the loss happened
+    at *export* time inside the file (both twins carry it) and cannot be
+    recovered here by any codec — re-export from a tool that preserves it.
+    ``checks/bom.py`` surfaces such values as ``BOM_CORRUPT_TEXT``.
     """
     d: dict[str, str] = {}
     utf8: dict[str, str] = {}
@@ -87,11 +102,6 @@ def fields(r: str) -> dict[str, str]:
         k, v = tok.split("=", 1)
         if k.startswith(_UTF8_PREFIX):
             base = k[len(_UTF8_PREFIX):]
-            # NOTE: this only re-decodes latin1 framing bytes as UTF-8. If an upstream
-            # tool already wrote a value's Ω/µ/± as the U+FFFD replacement bytes
-            # (``EF BF BD``) on a non-UTF-8 locale, the loss happened at *export* time
-            # and cannot be recovered here by any codec — re-export from a tool that
-            # preserves it instead.
             try:
                 v = v.encode("latin-1", "replace").decode("utf-8")
             except UnicodeDecodeError:

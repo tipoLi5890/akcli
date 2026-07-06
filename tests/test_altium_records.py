@@ -159,3 +159,28 @@ def _frame(fields_dict: dict) -> bytes:
     payload = "".join(f"|{k}={v}" for k, v in fields_dict.items()) + "|"
     pb = payload.encode("latin-1", "replace") + b"\x00"
     return len(pb).to_bytes(3, "little") + b"\x00" + pb
+
+
+# ---------------------------------------------------------------------------
+# twin-less plain-field decode strategy (strict UTF-8 upgrade, latin1 fallback)
+# ---------------------------------------------------------------------------
+def test_fields_twinless_high_bytes_keep_latin1_byte_preserving():
+    # Twin-less fields must NOT be codec-guessed: two-byte legacy code-page
+    # sequences (GBK \xd6\xb5 = one CJK char) are frequently *valid* UTF-8,
+    # so a "strict-UTF-8 upgrade" would silently misdecode them. The latin1
+    # framing decode is kept and the original bytes stay recoverable.
+    raw = b"\xd6\xb5"  # GBK for one CJK char; ALSO valid UTF-8 (U+05B5)
+    mangled = raw.decode("latin-1")
+    d = fields(f"|RECORD=41|Text={mangled}|Name=Foo|")
+    assert d["Text"] == mangled
+    assert d["Text"].encode("latin-1") == raw  # bytes recoverable
+
+
+def test_fields_export_corrupted_fffd_is_faithful():
+    # Upstream tool destroyed "6.65kΩ" at export: BOTH twins carry the U+FFFD
+    # replacement bytes (EF BF BD) inside the file. No codec can recover it;
+    # the decode must be faithful (U+FFFD), not silently guessed.
+    stored = "6.65k" + "��"
+    mangled = stored.encode("utf-8").decode("latin-1")
+    d = fields(f"|RECORD=41|%UTF8%Text={mangled}|Text={mangled}|Name=Value|")
+    assert d["Text"] == stored

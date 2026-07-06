@@ -335,6 +335,11 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
     for comp in sch.components:
         if comp.undesignated or _prefix(comp.designator) not in _IC_PREFIXES:
             continue
+        # A "U"-prefixed part with fewer than 3 pins cannot be an IC needing
+        # both power and ground -- it is a header/jumper stub (e.g. a 2-pin
+        # piezo header designated U9). Flagging those is pure noise.
+        if len(comp.pins) < 3:
+            continue
         touched = nets_of_comp.get(comp.designator, [])
         des_names = {_norm(comp.designator)}
         if has_power and not any(id(n) in power_ids for n in touched):

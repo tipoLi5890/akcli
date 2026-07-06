@@ -109,8 +109,13 @@ akcli jlc add    C7593                 # 抓取並轉換為 KiCad／Altium 庫
 exit code 而非 akcli 的——若要據此判斷請加 `set -o pipefail`。
 
 - **Claude Code** — 安裝隨附的外掛（見下方），即可取得 `/altium-kicad:circuit-review`、
-  `circuit-pinmap`、`circuit-draw`、`circuit-diff` 指令與 circuit-design skill。
-- **Codex／OpenCode** — 兩者都會自動探索隨附的 `circuit-design` skill；把它放進各自的 skills 目錄，
+  `circuit-pinmap`、`circuit-draw`、`circuit-diff` 指令與六個 skills：`circuit-design`（讀取／分析／
+  繪製基礎）、`circuit-debug`（連線與工具除錯）、`schematic-review`（依嚴重度分級的設計審查）、
+  `schematic-authoring`（用 op-list 從零設計電路）、`altium-interop`（與 Altium Designer 互通）、
+  `parts-sourcing`（JLC／LCSC 零件選型）。
+- **Codex** — 安裝隨附的外掛（見下方）：內含全部六個 skills 與 session hook；或把 skills 資料夾放進
+  `.agents/skills/` 讓其自動探索。見 [docs/codex-plugin.md](../docs/codex-plugin.md)。
+- **OpenCode** — 會自動探索隨附的 skills；把它們放進各自的 skills 目錄，
   並讓代理透過 shell 呼叫 `akcli`。指令與一鍵設定 prompt 見 [INSTALL.md](../INSTALL.md#use-with-ai-coding-agents)。
 
 原生 MCP server 仍在[路線圖](#路線圖)中。
@@ -136,12 +141,20 @@ Claude Code 外掛（marketplace 名稱為 `altium-kicad`）：
 /plugin install altium-kicad@altium-kicad
 ```
 
+Codex 外掛（名稱同為 `altium-kicad`）：
+
+```bash
+codex plugin marketplace add tipoLi5890/altium-kicad-cli   # 或在 clone 內用 `add ./`
+codex plugin install altium-kicad@altium-kicad
+```
+
 完整細節、各代理設定與疑難排解請見 [INSTALL.md](../INSTALL.md)。
 
 ## 路線圖
 
 目前已提供：Altium `.SchDoc`／`.SchLib` 與 KiCad `.kicad_sch` 讀取（與版本無關）、net 推論、
-ERC/power/BOM/diff/pinmap 檢查、KiCad 寫入／繪製，以及 JLCPCB／LCSC 零件搜尋。仍待開發：
+ERC/power/BOM/diff/pinmap 檢查、KiCad 寫入／繪製，以及 JLCPCB／LCSC 零件搜尋。完整里程碑規劃
+（v0.2 → v1.0，各里程碑附驗收條件）見 **[ROADMAP.md](../ROADMAP.md)**。重點待開發項目：
 
 - Altium `.PcbDoc` **二進位**區段（pad/track/via/arc/fill/region）——目前可讀 ASCII 區段。
 - **離線 Altium 寫入**與以 Altium 為權威的 ERC/netlist（目前需即時驅動）。

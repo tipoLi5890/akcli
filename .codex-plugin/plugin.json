@@ -1,0 +1,44 @@
+{
+  "name": "altium-kicad",
+  "version": "0.1.0",
+  "description": "Read Altium binary .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch with no Altium or KiCad install, run ERC/power/pinmap/BOM/diff checks, and draw KiCad schematics. Zero-dependency Python CLI for AI coding agents. Not an Altium-to-KiCad converter.",
+  "author": {
+    "name": "Li, ching yu",
+    "url": "https://github.com/tipoLi5890"
+  },
+  "homepage": "https://github.com/tipoLi5890/altium-kicad-cli",
+  "repository": "https://github.com/tipoLi5890/altium-kicad-cli",
+  "license": "MIT",
+  "keywords": [
+    "altium",
+    "kicad",
+    "eda",
+    "schematic",
+    "erc",
+    "netlist",
+    "pcb",
+    "schdoc",
+    "kicad_sch",
+    "bom",
+    "pinmap",
+    "jlcpcb"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Altium + KiCad EDA Toolkit",
+    "shortDescription": "Read Altium & KiCad schematics, run ERC/design checks, draw KiCad — no EDA install required.",
+    "longDescription": "Drives the zero-dependency `akcli` CLI: parse Altium .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch/.kicad_sym/.kicad_pcb into one normalized model, extract netlists, run ERC-lite / power-rail / BOM / pinmap / revision-diff checks, author and apply KiCad schematics from an op-list, and source real JLCPCB/LCSC parts. Bundles six task skills — circuit-design (core mechanics), schematic-authoring, schematic-review, circuit-debug, altium-interop, and parts-sourcing. It is not an Altium-to-KiCad converter: Altium is read/analyze-only; KiCad is the only writable target.",
+    "developerName": "Li, ching yu",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/tipoLi5890/altium-kicad-cli",
+    "defaultPrompt": [
+      "Read main.SchDoc and summarize the components, rails, and connectors.",
+      "Run a severity-ranked design review of board.kicad_sch and report the findings.",
+      "Draw a 3V3 LDO regulator block into board.kicad_sch, then verify the netlist.",
+      "Diff v1.SchDoc against v2.SchDoc and tell me what regressed."
+    ],
+    "brandColor": "#0E8A16"
+  }
+}
