@@ -199,7 +199,7 @@ def _build_components(
             mirror=mirror,
             value=r.get("Comment") or (params.get(idx, {}).get("Value")),
             # RECORD 45/46 model-link first; fall back to the RECORD-41 `Footprint` /
-            # `Supplier Footprint` parameter (npnp-generated parts leave the model-link
+            # `Supplier Footprint` parameter (converter-generated parts leave the model-link
             # empty but write the footprint as a parameter).
             footprint=(
                 fps.get(idx)

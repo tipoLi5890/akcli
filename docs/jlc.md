@@ -49,77 +49,6 @@ simply omitted (or shows `(metadata unavailable)`) — it never breaks `jlc show
 Exit codes: `0` when found, `0` with a `no part … found` stderr notice when the
 C-number does not exist, `7` on a network/HTTP error.
 
-### `akcli jlc add <C-number> --to {kicad,altium} [...]`
-
-Fetch a real LCSC/EasyEDA part **and convert it into a library** — a KiCad
-symbol/footprint/3D set (`--to kicad`) or an Altium `.SchLib`/`.PcbLib` pair
-(`--to altium`).
-
-```bash
-akcli jlc add C2040 --to kicad                       # symbol + footprint
-akcli jlc add C2040 --to kicad --3d                  # + 3D STEP model
-akcli jlc add C2040 --to kicad --out ./mylib --lib-name akcli
-akcli jlc add C2040 --to altium                      # .SchLib + .PcbLib (Windows tool)
-akcli jlc add C2040 --to kicad --place --designator U1 --at 1000 1500
-```
-
-| flag | meaning |
-|---|---|
-| `--to {kicad,altium}` | **required** — target library format |
-| `--3d` | include the 3D STEP model (KiCad: `--full`; Altium: STEP embedded into the PcbLib) |
-| `--out DIR` | output directory (default `./akcli-parts/<C-number>/`) |
-| `--lib-name NAME` | KiCad library name (default `akcli`) |
-| `--force` | overwrite existing artifacts |
-| `--english` | pull English metadata |
-| `--auto-download` | allow fetching the pinned, checksum-verified converter binary (default **off**) |
-| `--place` | also emit a `place_component` op-list (KiCad only — see below) |
-| `--designator REF` / `--at X Y` | required with `--place` (reference + position in mils) |
-
-Exit codes: `0` on success; `2` on bad usage (missing `--to`, bad C-number, `--place`
-without `--designator`/`--at`, or `--to altium --place`); `4` when the part is not found;
-`6` when the converter ran but failed or produced nothing; `7` when the external binary
-is absent (an install hint is printed) or an enabled download fails.
-
-Every successful conversion prints a **verify caveat** — the symbol/footprint/3D are
-produced by a third-party converter from EasyEDA/LCSC data and can be wrong (pin mapping,
-courtyard, 3D origin). **Always verify against the datasheet**, and for KiCad run a
-follow-up `akcli check` / `kicad-cli erc` pass before using the part.
-
-#### `--place` (drop the fetched part into a schematic)
-
-With `--place` (KiCad only) `jlc add` writes a one-op `place_component` op-list to
-`<out>/place.json`. It does **not** mutate any schematic itself — placement stays an
-explicit, reviewable second step through the op-list executor:
-
-```bash
-akcli jlc add C2040 --to kicad --out ./mylib --place --designator U1 --at 1000 1500
-akcli draw board.kicad_sch --ops ./mylib/place.json --symbols ./mylib/akcli.kicad_sym --apply
-```
-
-The op's `lib_id` symbol name is read from the produced `.kicad_sym` (the converter names
-parts by component name, not the C-number), and the `footprint` id from the produced
-`.kicad_mod` — neither is guessed from a filename.
-
-## External tools (`jlc add`) — used at arm's length
-
-`jlc add` shells out to two **external Apache-2.0 Rust binaries** by **linkyourbin**:
-
-- **`nlbn`** — LCSC/EasyEDA → KiCad (used by `--to kicad`).
-  <https://github.com/linkyourbin/nlbn>
-- **`npnp`** — LCSC/EasyEDA → Altium `.SchLib`/`.PcbLib` (used by `--to altium`).
-  Ships **Windows-x86_64 only**; on macOS/Linux build it with
-  `cargo install --git https://github.com/linkyourbin/npnp`.
-  <https://github.com/linkyourbin/npnp>
-
-These tools are **invoked as separate subprocesses only** — altium-kicad-cli never
-imports, vendors, links, or copies source from them, and stays Python-stdlib-only with
-zero runtime dependencies. Install a binary on your `PATH` (`cargo install nlbn`, or
-download a pinned release), or re-run with `--auto-download` to let altium-kicad-cli
-fetch the **version-pinned, SHA-256-verified** prebuilt release into its cache (off by
-default; enabling it means trusting that specific pinned `linkyourbin` release). When no
-binary can be resolved, `jlc add` prints a copy-pasteable install hint and exits `7` — it
-never auto-downloads silently.
-
 ## Part fields (JSON)
 
 | field | meaning |
@@ -159,10 +88,6 @@ message, no traceback).
 
 ## Attribution
 
-Part data comes from **jlcsearch** by tscircuit
-(<https://github.com/tscircuit/jlcsearch>, MIT licensed), a search front end over
-the JLCPCB / LCSC catalog built on the **jlcparts** dataset
-(<https://github.com/yaqwsx/jlcparts>, MIT). altium-kicad-cli is an independent
-client of the public service and is not affiliated with JLCPCB, LCSC, tscircuit,
-or jlcparts. Please use the service respectfully (low request volume; the
-optional on-disk cache helps).
+Part search is backed by the public **jlcsearch** service (tscircuit, MIT) with data
+from **jlcparts** (MIT); EasyEDA/LCSC/JLCPCB are the underlying data sources. Full
+notices in `THIRD_PARTY_NOTICES.md`.

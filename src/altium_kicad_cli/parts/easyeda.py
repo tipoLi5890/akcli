@@ -3,15 +3,14 @@
 This is **not** a converter. Its only job is to enrich ``akcli jlc show`` with a few
 EasyEDA-side facts that jlcsearch does not give us — most usefully *"is a 3D/STEP model
 available for this part?"* — **without** fetching or converting any symbol/footprint/3D.
-The heavy fetch+convert stays delegated to the external ``nlbn`` / ``npnp`` binaries
-(see :mod:`..drivers.nlbn` / :mod:`..drivers.npnp`).
+Metadata lookup only; no library conversion happens here.
 
 Transport mirrors :mod:`.search` exactly: stdlib ``urllib`` only, an **injectable
 ``opener``** (any object exposing ``open(request, *, timeout=...)``) so tests run fully
 offline, a bounded timeout + response size cap, an optional on-disk cache, and every
 transport/HTTP failure mapped to :class:`EasyEdaError` (a raw traceback never escapes).
 
-Caveats (baked in; the lookup must *never* break ``jlc show``/``jlc add``)
+Caveats (baked in; the lookup must *never* break ``jlc show``)
 -------------------------------------------------------------------------
 * **Unofficial / undocumented.** The *documented* EasyEDA API is an in-editor JS
   scripting API and does **not** expose these URLs. The endpoints — especially the

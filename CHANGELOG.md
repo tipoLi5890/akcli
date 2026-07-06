@@ -32,7 +32,12 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
-Nothing yet.
+### Removed
+- **`akcli jlc add` (external library conversion):** the upstream `nlbn`/`npnp` converter
+  repositories are no longer available, so the delegation, the pinned auto-downloader, and the
+  `--place` op-list emission were removed. `jlc search`/`jlc show` (and `--easyeda` metadata)
+  are unchanged. Symbols/footprints now come from the official KiCad libraries or project
+  `.kicad_sym` files.
 
 ## [0.2.0] - 2026-07-06
 

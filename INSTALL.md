@@ -167,8 +167,6 @@ twine check dist/*
 
 - **`kicad-cli` (KiCad 8.x):** enables an *optional secondary* ERC/netlist cross-check. `akcli` detects
   it via `PATH`; if it is absent, the pure-Python connectivity verifier is used and nothing breaks.
-- **`nlbn` / `npnp`:** used by `akcli jlc add` to convert an LCSC part into a KiCad / Altium library;
-  the rest of `jlc` works without them.
 - **Altium Designer 22+ on Windows:** required only for the optional *live* write/draw driver. Offline,
   Altium files are read-only and need no Altium install.
 

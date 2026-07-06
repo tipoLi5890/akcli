@@ -6,10 +6,6 @@ project are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Fetch + convert tools (subprocesses)
 
-- **nlbn** — LCSC/EasyEDA → KiCad symbol/footprint/3D exporter, by **linkyourbin**. Apache-2.0.
-  <https://github.com/linkyourbin/nlbn>. Used by `akcli jlc add --to kicad`.
-- **npnp** — LCSC/EasyEDA → Altium `.SchLib`/`.PcbLib` exporter, by **linkyourbin**. Apache-2.0.
-  <https://github.com/linkyourbin/npnp>. Used by `akcli jlc add --to altium`.
 
 ## Search + parts data
 
