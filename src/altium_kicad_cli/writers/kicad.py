@@ -95,8 +95,15 @@ class OpResult:
 # small SNode construction helpers
 # --------------------------------------------------------------------------- #
 def _q(value: object) -> str:
+    """Quote ``value`` KiCad-style (escape ``\\``, ``"``, and control chars).
+
+    Newline/CR/tab MUST be escaped: akcli's own lexer tolerates a raw newline
+    inside a quoted atom, but eeschema does not — an unescaped multi-line text
+    op produced a file KiCad refused to open while every akcli gate passed.
+    """
     s = str(value)
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + s.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
 
 
 def _atom(text: str) -> SNode:
@@ -220,6 +227,29 @@ def _symbol_by_ref(doc: SNode, ref: str) -> SNode | None:
     return None
 
 
+def _symbols_by_ref(doc: SNode, ref: str) -> list[SNode]:
+    """ALL placed instances of ``ref`` (a multi-unit part is several)."""
+    return [s for s in _placed_symbols(doc) if _symbol_reference(s) == ref]
+
+
+def _symbol_by_uuid(doc: SNode, uid: str) -> SNode | None:
+    for sym in _placed_symbols(doc):
+        u = sym.find("uuid")
+        if u is not None and len(u.children or []) >= 2 and u.children[1].value == uid:
+            return sym
+    return None
+
+
+def _symbol_unit(sym: SNode) -> int:
+    node = sym.find("unit")
+    if node is not None and len(node.children or []) >= 2:
+        try:
+            return int(float(node.children[1].value or "1"))
+        except (TypeError, ValueError):
+            pass
+    return 1
+
+
 def _inline_library(doc: SNode) -> model.Library:
     """A :class:`model.Library` view of the document's current ``(lib_symbols)``."""
     node = doc.find("lib_symbols")
@@ -290,19 +320,37 @@ def _instance_component(sym: SNode, lib_id: str):
 
 
 def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tuple[int, int]:
-    """World coordinate (nm) of ``ref.pin_number`` in the current document."""
-    sym = _symbol_by_ref(doc, ref)
-    if sym is None:
+    """World coordinate (nm) of ``ref.pin_number`` in the current document.
+
+    A multi-unit part is several placed instances sharing ``ref``; the pin is
+    looked up on the instance whose UNIT owns it (eeschema exposes only that
+    unit's pins there). A pin living on an unplaced unit fails loudly instead
+    of silently snapping to another unit's body — that divergence merged all
+    four 74xx gates onto one instance.
+    """
+    syms = _symbols_by_ref(doc, ref)
+    if not syms:
         fail("VERIFY_FAILED", f"pin reference {ref!r} matches no placed component")
-    lib_id = sym.find("lib_id").children[1].value or ""
-    try:
-        symdef = _ctx_symdef(doc, ctx, lib_id)
-    except AkcliError:
-        fail("SYMBOL_NOT_FOUND", f"pin reference {ref!r}: lib_id {lib_id!r} not in cache")
-    comp = _instance_component(sym, lib_id)
-    for pin in symdef.pins:
-        if pin.number == pin_number:
-            return geometry.pin_world(symdef, comp, pin)
+    symdef = None
+    for sym in syms:
+        lib_id = sym.find("lib_id").children[1].value or ""
+        try:
+            symdef = _ctx_symdef(doc, ctx, lib_id)
+        except AkcliError:
+            fail("SYMBOL_NOT_FOUND", f"pin reference {ref!r}: lib_id {lib_id!r} not in cache")
+        unit = _symbol_unit(sym)
+        comp = _instance_component(sym, lib_id)
+        for pin in kicad_lib.unit_pins(symdef, unit):
+            if pin.number == pin_number:
+                return geometry.pin_world(symdef, comp, pin)
+    if symdef is not None:
+        owners = sorted({p.owner_part_id for p in symdef.pins if p.number == pin_number})
+        if owners:
+            fail(
+                "VERIFY_FAILED",
+                f"pin {ref}.{pin_number} is on unit {owners[0]} which is not placed; "
+                f'place it first (place_component with "unit": {owners[0]})',
+            )
     fail("VERIFY_FAILED", f"component {ref!r} has no pin {pin_number!r}")
 
 
@@ -377,13 +425,13 @@ def _at_nm(at: SNode) -> tuple[int, int]:
 # --------------------------------------------------------------------------- #
 def _make_symbol(
     lib_id: str, pos_nm: tuple[int, int], rotation: int, mirror: str,
-    uuid_str: str, pin_numbers: list[str], pin_uuids: list[str],
+    uuid_str: str, pin_numbers: list[str], pin_uuids: list[str], unit: int = 1,
 ) -> SNode:
     """Build a placed ``(symbol ...)`` node with per-pin ``(pin "N" (uuid))``."""
     children = [
         _list(_atom("lib_id"), _atom(_q(lib_id))),
         _at(pos_nm, rotation),
-        _list(_atom("unit"), _atom("1")),
+        _list(_atom("unit"), _atom(str(int(unit)))),
     ]
     if mirror in ("x", "y"):
         children.insert(2, _list(_atom("mirror"), _atom(mirror)))
@@ -396,18 +444,27 @@ def _make_symbol(
 def _place_symbol(
     doc: SNode, ctx: dict, src_libs: list, lib_id: str, designator: str,
     pos_nm: tuple[int, int], rotation: int, mirror: str, op_index: int, path: str,
+    unit: int = 1,
 ) -> str:
-    """Cache + place a symbol instance; return its (deterministic) uuid."""
+    """Cache + place ONE UNIT of a symbol; return its (deterministic) uuid."""
     body = lib_cache.ensure_cached(doc, lib_id, src_libs)
     symdef = ctx["symdefs"].get(lib_id)
     if symdef is None:
         # Resolve from just this one cached body — never the whole cache (perf).
         symdef = _symdef_from_body(body, lib_id)
         ctx["symdefs"][lib_id] = symdef
-    pin_numbers = [p.number for p in symdef.pins]
+    if unit < 1 or unit > max(1, symdef.part_count):
+        fail("VERIFY_FAILED",
+             f"{lib_id!r} has {symdef.part_count} unit(s); cannot place unit {unit}")
+    # The instance carries only ITS unit's pins (eeschema draws and connects
+    # only those); emitting every unit's pins mapped all gates onto one body
+    # and let phantom pin points mask real dangles in the verifier.
+    pin_numbers = [p.number for p in kicad_lib.unit_pins(symdef, unit)]
 
     root = _root_uuid(doc)
-    sym_uuid = instances.deterministic_uuid(root, designator, op_index)
+    # Unit 1 keeps the historical seed so existing files replay byte-identically.
+    ref_seed = designator if unit == 1 else f"{designator}#u{unit}"
+    sym_uuid = instances.deterministic_uuid(root, ref_seed, op_index)
     # A pin NUMBER may legitimately repeat within one symbol (multi-unit parts
     # with shared pads, e.g. dual DirectFETs: unit A pins 1,2,3 / unit B pins
     # 1,4,5). Seed later occurrences with a #k suffix so their uuids stay
@@ -419,11 +476,12 @@ def _place_symbol(
     for n in pin_numbers:
         k = _seen.get(n, 0)
         _seen[n] = k + 1
-        seed = f"{designator}.pin{n}" if k == 0 else f"{designator}.pin{n}#{k + 1}"
+        base = f"{designator}.pin{n}" if unit == 1 else f"{designator}#u{unit}.pin{n}"
+        seed = base if k == 0 else f"{base}#{k + 1}"
         pin_uuids.append(instances.deterministic_uuid(root, seed, op_index))
 
     # Idempotent replay: a same-uuid instance already present is replaced wholesale.
-    sym = _make_symbol(lib_id, pos_nm, rotation, mirror, sym_uuid, pin_numbers, pin_uuids)
+    sym = _make_symbol(lib_id, pos_nm, rotation, mirror, sym_uuid, pin_numbers, pin_uuids, unit)
     _append_top_idempotent(doc, sym, sym_uuid)
     instances.write_instance(doc, sym, designator, path)
     return sym_uuid
@@ -438,15 +496,16 @@ def _op_place_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
         sources = [op["symbol_source"], *sources]
     rotation = int(op.get("rotation", 0))
     mirror = op.get("mirror", "none")
+    unit = int(op.get("unit", 1))
     pos = geometry.grid_snap_nm(
         (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
         _GRID_NM,
     )
     uid = _place_symbol(
         doc, ctx, sources, op["lib_id"], op["designator"],
-        pos, rotation, mirror, idx, path,
+        pos, rotation, mirror, idx, path, unit,
     )
-    sym = _symbol_by_ref(doc, op["designator"])
+    sym = _symbol_by_uuid(doc, uid)
     if op.get("value") is not None and sym is not None:
         _set_property(sym, "Value", str(op["value"]))
     if op.get("footprint") is not None and sym is not None:

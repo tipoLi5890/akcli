@@ -88,6 +88,10 @@ Document shape and the 13-op vocabulary are defined in `schemas/ops.schema.json`
   auto-junctioned (by design): dogleg one wire instead.
 - **Annotation**: `add_text` (`text`, `at`, optional free `angle`) for block titles
   and design notes; it is the only graphic op.
+- **Multi-unit parts**: `place_component` takes an optional `"unit": N` — each
+  unit is its own instance sharing the designator (`U1` gate A = unit 1, gate B
+  = unit 2 ...). `"REF.PIN"` resolves against the instance whose unit owns the
+  pin; wiring a pin on an unplaced unit fails loudly.
 - **No delete/move ops exist.** `set_component_transform` changes rotation/mirror
   only; to reposition, restore the `.bak` and redraw with corrected coordinates.
 

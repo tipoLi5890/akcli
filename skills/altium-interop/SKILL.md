@@ -170,7 +170,6 @@ What will **not** carry over (plan around it, state it in the report):
 - Symbol artwork, sheet graphics, text/annotation placement — connectivity only.
 - Hierarchy: the Altium reader is flat, and the KiCad writer is flat-only v1.
 - Binary `.SchLib` symbol graphics and binary `.PcbDoc` copper (pads/tracks/vias).
-- Multi-unit symbol placement (the writer always places unit 1).
 - Altium pin electrical types map only ints 0–7 (no `POWER_OUT`/`NO_CONNECT`), so
   ERC fidelity differs slightly between the two sides.
 

@@ -166,9 +166,12 @@ _SHARED_PAD_LIB = """
 """
 
 
-def test_duplicate_pin_numbers_across_units_apply(tmp_path):
-    """Pin "1" exists in BOTH units (shared pad). Per-pin uuids must not
-    collide, or the connectivity gate refuses the whole write (DUPLICATE_UUID)."""
+def test_placed_instance_carries_only_its_units_pins(tmp_path):
+    """A placed instance exposes ITS unit's pins only (eeschema semantics).
+
+    Emitting every unit's pins mapped all units onto one body: akcli merged
+    unrelated gate pins into one net while eeschema saw two, and phantom pin
+    points masked real dangles in the verifier."""
     lib = tmp_path / "dual.kicad_sym"
     lib.write_text(_SHARED_PAD_LIB)
     tgt = tmp_path / "board.kicad_sch"
@@ -181,11 +184,63 @@ def test_duplicate_pin_numbers_across_units_apply(tmp_path):
         str(tgt), apply=True, sources=[str(lib)], verify_out=verify,
     )
     assert results[0].status == "ok"
-    assert not verify                       # no DUPLICATE_UUID findings
+    assert not verify
     text = tgt.read_text()
     pins = re.findall(r'\(pin "(\d+)" \(uuid "([0-9a-f-]+)"\)\)', text)
-    assert [n for n, _ in pins] == ["1", "2", "1", "3"]
-    assert len({u for _, u in pins}) == 4   # all uuids unique
+    assert [n for n, _ in pins] == ["1", "2"]      # unit-1 pins only
+    assert "(unit 1)" in text
+
+
+def test_place_second_unit_and_wire_across_units(tmp_path):
+    """`place_component` with "unit": 2 places gate B; REF.PIN then resolves
+    per-unit, and both instances share the designator without a BOM dup."""
+    lib = tmp_path / "dual.kicad_sym"
+    lib.write_text(_SHARED_PAD_LIB)
+    tgt = tmp_path / "board.kicad_sch"
+    tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
+                   '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
+    verify = []
+    results = kw.apply(
+        _oplist(
+            {"op": "place_component", "lib_id": "DUALFET",
+             "designator": "Q1", "x_mil": 2000, "y_mil": 2000},
+            {"op": "place_component", "lib_id": "DUALFET",
+             "designator": "Q1", "x_mil": 2000, "y_mil": 3000, "unit": 2},
+            {"op": "add_wire", "vertices": ["Q1.2", "Q1.3"]},   # unit1 S1 -> unit2 S2
+        ),
+        str(tgt), apply=True, sources=[str(lib)], verify_out=verify,
+    )
+    assert [r.status for r in results] == ["ok", "ok", "ok"]
+    assert not verify
+    text = tgt.read_text()
+    assert "(unit 1)" in text and "(unit 2)" in text
+    # ONE merged component, pins from both units, wired across units.
+    sch = kreader.read_sch(str(tgt))
+    q1 = [c for c in sch.components if c.designator == "Q1"]
+    assert len(q1) == 1
+    assert sorted(p.number for p in q1[0].pins) == ["1", "1", "2", "3"]
+    members = {tuple(m) for net in sch.nets for m in net.members}
+    assert ("Q1", "2") in members and ("Q1", "3") in members
+
+
+def test_wiring_a_pin_on_an_unplaced_unit_fails_loudly(tmp_path):
+    """A pin living on an unplaced unit must refuse, not snap to another body."""
+    lib = tmp_path / "dual.kicad_sym"
+    lib.write_text(_SHARED_PAD_LIB)
+    tgt = tmp_path / "board.kicad_sch"
+    tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
+                   '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
+    results = kw.apply(
+        _oplist(
+            {"op": "place_component", "lib_id": "DUALFET",
+             "designator": "Q1", "x_mil": 2000, "y_mil": 2000},
+            {"op": "add_wire", "vertices": ["Q1.3", [2400, 2000]]},  # pin 3 = unit 2
+        ),
+        str(tgt), apply=True, sources=[str(lib)],
+    )
+    assert results[1].status == "error"
+    assert results[1].error_code == "VERIFY_FAILED"
+    assert "unit 2" in results[1].message
 
 
 # --------------------------------------------------------------------------- #

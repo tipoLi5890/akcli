@@ -173,6 +173,7 @@ def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
     raw = _raw_lib_nodes(root)
 
     components: list[Component] = []
+    by_designator: dict[str, Component] = {}
     prims = NetPrimitives()
     sheet = ""
 
@@ -184,6 +185,7 @@ def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
         rot = int(round(_fnum(at, 3)))
         mnode = sym.find("mirror")
         mirror = (_av(mnode, 1) if mnode is not None else None) or "none"
+        unit = int(_fnum(sym.find("unit"), 1, 1.0))
 
         props = _props(sym)
         ref = _reference(sym, props)
@@ -192,24 +194,37 @@ def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
             ref = f"$U{idx}"
 
         symdef = kicad_lib.resolve(lib_id, [library])
-        fp = props.get("Footprint") or None
-        comp = Component(
-            designator=ref,
-            library_ref=lib_id,
-            x_mil=px,
-            y_mil=py,
-            rotation=rot % 360,
-            mirror=mirror,
-            value=props.get("Value") or None,
-            footprint=fp,
-            unique_id=_av(sym.find("uuid"), 1),
-            part_count=symdef.part_count,
-            sheet=sheet,
-            parameters=dict(props),
-            undesignated=undesignated,
-        )
+        # A multi-unit part is several placed instances sharing one designator
+        # (unit A..E of a 74xx). Merge them into ONE component; each instance
+        # contributes only ITS unit's pins (eeschema draws and connects only
+        # those — treating every unit's pins as present at every instance
+        # mapped all four gates onto one body and merged unrelated nets).
+        pins = kicad_lib.unit_pins(symdef, unit)
+        existing = None if undesignated else by_designator.get(ref)
+        if existing is not None and existing.library_ref == lib_id:
+            comp = existing
+        else:
+            fp = props.get("Footprint") or None
+            comp = Component(
+                designator=ref,
+                library_ref=lib_id,
+                x_mil=px,
+                y_mil=py,
+                rotation=rot % 360,
+                mirror=mirror,
+                value=props.get("Value") or None,
+                footprint=fp,
+                unique_id=_av(sym.find("uuid"), 1),
+                part_count=symdef.part_count,
+                sheet=sheet,
+                parameters=dict(props),
+                undesignated=undesignated,
+            )
+            components.append(comp)
+            if not undesignated:
+                by_designator[ref] = comp
 
-        for lp in symdef.pins:
+        for lp in pins:
             wx, wy = _pin_world(lp.x_mil, lp.y_mil, px, py, rot, mirror)
             comp.pins.append(
                 Pin(
@@ -218,6 +233,7 @@ def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
                     x_mil=wx,
                     y_mil=wy,
                     electrical_type=lp.electrical_type,
+                    owner_part_id=lp.owner_part_id,
                 )
             )
             prims.pins.append(
@@ -236,8 +252,6 @@ def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
                     sheet=sheet,
                 )
             )
-
-        components.append(comp)
 
     _collect_wires_labels(root, prims, sheet)
     return components, prims

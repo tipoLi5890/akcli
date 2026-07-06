@@ -34,6 +34,8 @@
             "y_mil": { "type": "number" },
             "rotation": { "$ref": "#/$defs/rotation" },
             "mirror": { "$ref": "#/$defs/mirror" },
+            "unit": { "type": "integer", "minimum": 1,
+                      "description": "Unit of a multi-unit part to place (default 1); each unit is its own instance sharing the designator." },
             "value": { "type": "string" },
             "footprint": { "type": "string" },
             "symbol_source": { "type": "string" }

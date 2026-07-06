@@ -263,7 +263,10 @@ def _pin_points(
             )
             continue
         comp = _instance_component(sym, lib_id)
-        for pin in symdef.pins:
+        # Only THIS instance's unit exposes pins here (eeschema semantics);
+        # counting every unit's pins let phantom points mask real dangles.
+        unit = int(_fnum(sym.find("unit"), 1, 1.0))
+        for pin in kicad_lib.unit_pins(symdef, unit):
             wp = geometry.pin_world(symdef, comp, pin)
             pts.add(wp)
             owner.setdefault(wp, (ref, pin.number))
@@ -494,7 +497,8 @@ def auto_junctions(doc: SNode, *, tol_nm: int = 0) -> None:
 # --------------------------------------------------------------------------- #
 def _q(value: object) -> str:
     s = str(value)
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + s.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
 
 
 def _atom(text: str) -> SNode:

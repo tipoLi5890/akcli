@@ -56,9 +56,10 @@ _PWR_RE = re.compile(r"#PWR0(\d+)$")
 # small SNode construction / quoting helpers
 # --------------------------------------------------------------------------- #
 def _q(value: object) -> str:
-    """Quote ``value`` as a KiCad string atom (escaping ``\\`` then ``"``)."""
+    """Quote ``value`` as a KiCad string atom (escaping ``\\``, ``"``, control chars)."""
     s = str(value)
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + s.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
 
 
 def _atom(text: str) -> SNode:

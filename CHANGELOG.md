@@ -59,7 +59,23 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
   both the ANSI field and its `%UTF8%` twin carry the damage), so no decoder can recover it; the
   finding says so and points at re-export.
 
+### Added
+- **Multi-unit placement:** `place_component` takes an optional `"unit": N` — each unit is
+  its own placed instance sharing the designator (74xx gate A/B/...). `"REF.PIN"` endpoints
+  resolve against the instance whose unit owns the pin; wiring a pin on an **unplaced** unit
+  fails loudly with the unit to place, instead of silently snapping to another unit's body.
+
 ### Fixed
+- **Placed instances expose only their own unit's pins** (reader, writer, verifier): every
+  unit of a multi-unit symbol shares local pin geometry, so treating all units' pins as
+  present at one instance mapped all four 74xx gates onto one body — `akcli net` merged
+  unrelated gate pins into one net while eeschema saw two, and phantom pin points masked
+  real dangling wires in the connectivity gate. Instances of one designator now merge into
+  a single component on read (no false `BOM_DUPLICATE_DESIGNATOR`).
+- **Multi-line/control text is escaped KiCad-style:** `_q` escaped only `\` and `"`, so an
+  `add_text` with a newline wrote a file KiCad refused to parse while every akcli gate
+  passed (akcli's lexer tolerates a raw newline in a quoted atom; eeschema does not).
+  `\n`/`\r`/`\t` are now escaped in all writer quoting helpers.
 - **Pin taps now follow eeschema connectivity:** a pin tip touching a wire's **mid-span**
   connects only when a junction marks that point (or at a segment endpoint) — both in net
   inference (`netbuild`) and, constructively, in the writer: `auto_junctions` now also

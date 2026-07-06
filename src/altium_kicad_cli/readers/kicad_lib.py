@@ -42,6 +42,7 @@ __all__ = [
     "read",
     "resolve",
     "pin_offsets",
+    "unit_pins",
     "symbols_from_lib_symbols",
     "library_from_lib_symbols",
 ]
@@ -128,7 +129,8 @@ def _collect_pins(sym: sexpr.SNode) -> list[model.Pin]:
     it would duplicate every pin (each duplicate then collides downstream — the
     writer's per-pin UUIDs are keyed by pin number, so a 74xx placement was
     refused with ``DUPLICATE_UUID``). Pins also record their owning unit in
-    ``owner_part_id`` (a ``_0_*`` sub-symbol is common to all units → unit 1).
+    ``owner_part_id`` (a ``_0_*`` sub-symbol is common to ALL units → unit 0,
+    matched by every unit in :func:`unit_pins`).
     """
     pins: list[model.Pin] = []
     stack: list[tuple] = [(iter(sym.children or []), 1)]
@@ -149,8 +151,20 @@ def _collect_pins(sym: sexpr.SNode) -> list[model.Pin]:
             u, style = _sub_unit_style(_atom_value(nd, 1))
             if style is not None and style >= 2:
                 continue  # alternate body style: same pins, skip
-            stack.append((iter(nd.children or []), u if u else unit))
+            stack.append((iter(nd.children or []), u if u is not None else unit))
     return pins
+
+
+def unit_pins(symdef: model.SymbolDef, unit: int) -> list[model.Pin]:
+    """Pins a placed instance of ``unit`` actually exposes on the canvas.
+
+    A KiCad schematic symbol instance is ONE unit of the part: eeschema draws
+    (and connects) only that unit's pins, plus any ``_0_*`` common pins. The
+    other units' pins exist only on their own placed instances — treating them
+    as present at every instance mapped all four 74xx gates onto one body and
+    merged unrelated pins into one net.
+    """
+    return [p for p in symdef.pins if p.owner_part_id in (0, unit)]
 
 
 def _part_count(sym: sexpr.SNode) -> int:
