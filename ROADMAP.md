@@ -19,7 +19,7 @@ Shipped and working today:
   `diff`, `pinmap` with DTS / pinout.md expected tables, `export` (protel / kicad / csv).
 - **KiCad writing:** `plan` / `draw` from a `protocol_version 1` op-list — 13 ops, atomic apply with
   backup, deterministic UUIDv5 idempotency, pure-Python connectivity gate, advisory `kicad-cli` ERC.
-- **Parts:** `jlc search` / `show` / `add` (LCSC → KiCad/Altium libraries via external `nlbn`/`npnp`).
+- **Parts:** `jlc search` / `show` (JLCPCB/LCSC catalog lookup; library conversion was dropped when the upstream converters disappeared).
 - **Agent surface:** Claude Code plugin (circuit-design skill + 4 slash commands), stable exit codes
   0–7, `stdout`-data/`stderr`-logs discipline, `schema_version`-stamped JSON.
 
@@ -50,7 +50,7 @@ Honest limitations:
    re-read and connectivity-gated, and a "0 findings" report always carries its metadata caveats.
    New write capabilities land together with their verification step.
 3. **Zero runtime dependencies.** Python ≥ 3.11 stdlib only. Network code stays isolated under
-   `akcli jlc`; external binaries (`nlbn`, `npnp`, `kicad-cli`) remain optional, pinned, and advisory.
+   `akcli jlc`; the external `kicad-cli` binary remains optional and advisory.
 4. **Agent-first.** Stable exit codes, one-line `ERROR: CODE:` failures, `schema_version`/
    `protocol_version` contracts, published JSON Schemas, and docs that never drift from the code.
 

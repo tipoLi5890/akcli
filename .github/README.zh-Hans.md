@@ -93,13 +93,11 @@ Altium 的*写入/绘制*仅通过可选的 Windows live driver（需运行 Alti
 
 ## 查找 JLCPCB / LCSC 元件
 
-`akcli jlc` 可搜索 JLCPCB / LCSC 元件库，并把元件转换为 KiCad 或 Altium 库
-（转换工作委托给外部的 `nlbn` / `npnp` 工具——见[致谢](#致谢)）。
+`akcli jlc` 可搜索 JLCPCB / LCSC 元件库（库存、价格阶梯、Basic/Extended 状态）。
 
 ```bash
 akcli jlc search "0.1uF 0402 X7R"     # 关键字 / MPN / 分类搜索（需联网）
 akcli jlc show   C7593                 # 按 LCSC C-number 查单个元件
-akcli jlc add    C7593                 # 抓取并转换为 KiCad / Altium 库
 ```
 
 ## 与 AI 编码代理一起使用
@@ -171,7 +169,6 @@ codex plugin install altium-kicad@altium-kicad
 `akcli jlc` 构建于以下开源项目之上（完整署名与许可证文本见
 [ACKNOWLEDGMENTS.md](../ACKNOWLEDGMENTS.md) 与 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)）：
 
-- **nlbn** 与 **npnp**，作者 **linkyourbin**（Apache-2.0）——LCSC → KiCad / Altium 库转换。
 - **jlcsearch**（tscircuit，MIT）与 **jlcparts**（MIT）——元件搜索后端。
 - **EasyEDA / LCSC / JLCPCB**——元件数据来源。
 

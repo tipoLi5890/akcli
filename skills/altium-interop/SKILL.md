@@ -147,11 +147,9 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
    `akcli net main.SchDoc --json` give the component list, values, footprints, and
    nets to reproduce.
 2. **Map the library.** For each Altium component pick a KiCad `lib_id`: use symbols
-   from a project `.kicad_sym` (passed to `plan`/`draw` via repeatable `--symbols`, or
-   config `[paths]`), or fetch real parts with `akcli jlc add <C-number> --to kicad`
-   (`--place --designator REF --at X Y` emits a ready `place.json` op-list). Carry the
-   Altium `value` and resolved `footprint` fields from the `read --json` output into
-   `place_component` ops.
+   from a project `.kicad_sym` or the official KiCad libraries (passed to `plan`/`draw`
+   via repeatable `--symbols`, or config `[paths]`). Carry the Altium `value` and
+   resolved `footprint` fields from the `read --json` output into `place_component` ops.
 3. **Draw into KiCad.** Author the op-list, then (see the circuit-design skill):
    ```bash
    akcli plan board.kicad_sch --ops ops.json

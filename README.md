@@ -94,13 +94,11 @@ offline, Altium is analysis-only.
 
 ## Find JLCPCB / LCSC parts
 
-`akcli jlc` searches the JLCPCB/LCSC catalog and converts a part into a KiCad or Altium library
-(conversion is delegated to the external `nlbn`/`npnp` tools — see [Acknowledgments](#acknowledgments)).
+`akcli jlc` searches the JLCPCB/LCSC catalog (stock, price tiers, Basic/Extended status).
 
 ```bash
 akcli jlc search "0.1uF 0402 X7R"     # keyword / MPN / category search (needs network)
-akcli jlc show   C7593                 # one part by LCSC C-number
-akcli jlc add    C7593                 # fetch + convert into a KiCad / Altium library
+akcli jlc show   C7593                 # one part by LCSC C-number (--easyeda adds 3D/MPN metadata)
 ```
 
 ## Use with AI coding agents
@@ -177,7 +175,6 @@ milestone) lives in **[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
 `akcli jlc` builds on (full attribution and license texts in
 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)):
 
-- **nlbn** and **npnp** by **linkyourbin** (Apache-2.0) — LCSC → KiCad / Altium library conversion.
 - **jlcsearch** (tscircuit, MIT) and **jlcparts** (MIT) — part-search backend.
 - **EasyEDA / LCSC / JLCPCB** — component data source.
 

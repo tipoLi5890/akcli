@@ -33,20 +33,17 @@ signal flow left→right, rails at the top, GND at the bottom. Only then write o
 
 ## (2) Part selection — `akcli jlc` when sourcing matters
 
-When the user cares about real orderable parts (or you need a symbol that no local
-library has), resolve parts first. `jlc` is the only networked subcommand (exit 7
-on network failure):
+When the user cares about real orderable parts, resolve them first. `jlc` is the
+only networked subcommand (exit 7 on network failure):
 
 ```bash
 akcli jlc search "AMS1117-3.3" --limit 10        # find candidates (B=Basic, P=Preferred)
 akcli jlc show C6186 --easyeda                    # confirm package, MPN, 3D availability
-akcli jlc add C6186 --to kicad --out akcli-parts/C6186   # fetch + convert symbol/footprint
 ```
 
-The produced `.kicad_sym` becomes a `--symbols` source for `plan`/`draw`. To get a
-ready-made placement op, add `--place --designator U1 --at 2000 1000` (KiCad-only;
-requires both flags) — it writes `akcli-parts/C6186/place.json` which you apply with
-`akcli draw`. Converter output is third-party: always `akcli check` after placing.
+Symbols/footprints come from the official KiCad libraries or a project
+`.kicad_sym` (passed via `--symbols`); record the chosen LCSC C-number as an
+`LCSC` parameter on the placed part so the BOM maps designator -> orderable part.
 
 ## (3) Seed the target file (new schematics only)
 
