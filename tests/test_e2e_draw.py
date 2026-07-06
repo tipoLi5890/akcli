@@ -8,6 +8,7 @@ that an Altium-only reviewer can't exercise.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from altium_kicad_cli.readers import kicad as kreader
 from altium_kicad_cli.writers import kicad as kw
 
 V8 = Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch"
+DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
 
 
 def _oplist(*ops):
@@ -26,6 +28,23 @@ def _oplist(*ops):
 def _seed(tmp_path: Path) -> Path:
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_bytes(V8.read_bytes())
+    return tgt
+
+
+def _draw_derived_symbol(tmp_path: Path) -> Path:
+    """Place an ``(extends)``-derived C_Polarized wired pin-to-pin to an R."""
+    tgt = _seed(tmp_path)
+    results = kw.apply(
+        _oplist(
+            {"op": "place_component", "lib_id": "Device:C_Polarized",
+             "designator": "C77", "x_mil": 4000, "y_mil": 4000, "value": "10u"},
+            {"op": "place_component", "lib_id": "Device:R",
+             "designator": "R77", "x_mil": 4000, "y_mil": 4600, "value": "1k"},
+            {"op": "add_wire", "vertices": ["C77.2", "R77.1"]},
+        ),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    assert all(r.status == "ok" for r in results)
     return tgt
 
 
@@ -56,3 +75,68 @@ def test_drawn_file_accepted_by_kicad_cli(tmp_path):
     # KiCad's own ERC must parse the file we wrote (returns a report dict, not a crash).
     report = kicad_cli.erc(str(tgt))
     assert report is not None
+
+
+# --------------------------------------------------------------------------- #
+# extends-derived symbols must be flattened into the cache (regression)
+# --------------------------------------------------------------------------- #
+def test_derived_symbol_cache_is_flattened(tmp_path):
+    """The written cache carries ONE standalone entry: no extends, no base.
+
+    Regression: an unflattened ``(extends "Base")`` cache entry loses its pins
+    in eeschema (KiCad does not resolve the bare base name against the
+    qualified cached ``Device:Base``), leaving every wire to the part dangling.
+    """
+    tgt = _draw_derived_symbol(tmp_path)
+    text = tgt.read_text(encoding="utf-8")
+    assert "(extends" not in text
+    # The derived entry exists and its unit sub-symbols are renamed to the
+    # derived name (an AP1117-style leftover base unit name inside the entry is
+    # exactly the broken case). The fixture's own plain Device:C cache entry
+    # legitimately keeps its C_0_1/C_1_1 names, so scope the check to the block.
+    from altium_kicad_cli.readers import sexpr
+
+    libsyms = sexpr.parse(text).find("lib_symbols")
+    derived = next(
+        s for s in libsyms.find_all("symbol")
+        if s.children[1].value == "Device:C_Polarized"
+    )
+    unit_names = {s.children[1].value for s in derived.find_all("symbol")}
+    assert unit_names == {"C_Polarized_0_1", "C_Polarized_1_1"}
+
+    # And the re-read netlist agrees the derived part's pins are connected.
+    sch = kreader.read_sch(str(tgt))
+    members = {tuple(m) for net in sch.nets for m in net.members}
+    assert ("C77", "2") in members and ("R77", "1") in members
+
+
+def test_derived_symbol_pins_connect_in_kicad_erc(tmp_path):
+    """KiCad itself must see the derived part's pins on the wire.
+
+    The broken (unflattened) cache made KiCad drop the derived symbol's pins:
+    ERC reported ``unconnected_wire_endpoint`` on every wire to the part and the
+    exported netlist omitted it entirely. We assert both KiCad-visible
+    signatures. (``lib_symbol_mismatch`` is NOT asserted — the repo's minimal
+    fixture symbols legitimately differ from any installed official library.)
+    """
+    if not kicad_cli.available():
+        pytest.skip("kicad-cli not installed (runs in the CI KiCad job)")
+    tgt = _draw_derived_symbol(tmp_path)
+
+    wrapper = kicad_cli.erc(str(tgt))
+    report = wrapper.get("report") if isinstance(wrapper, dict) else None
+    if not isinstance(report, dict) or "sheets" not in report:
+        pytest.skip("kicad-cli produced no JSON ERC report (KiCad < 8 fallback)")
+    types = {
+        v.get("type")
+        for sheet in report.get("sheets", [])
+        for v in sheet.get("violations", [])
+    }
+    assert "unconnected_wire_endpoint" not in types
+
+    # Strongest, environment-independent proof: KiCad's own netlist export
+    # places the derived part's wired pin on a net.
+    net = kicad_cli.netlist(str(tgt))
+    text = (net or {}).get("netlist") or ""
+    assert '(ref "C77")' in text
+    assert re.search(r'\(ref "C77"\)\s*\(pin "2"\)', text)

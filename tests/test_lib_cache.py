@@ -2,7 +2,9 @@
 
 Covers caching a plain symbol, dedup/idempotency, requalification of the parent
 name with unqualified child-unit names, full pin-electrical-type preservation,
-the ``C_Polarized`` ``(extends "C")`` base-copy case, sourcing from both a
+the ``C_Polarized`` ``(extends "C")`` flatten case (KiCad-save style: base
+inlined under the derived name, units renamed, properties overlaid, no
+``extends`` clause and no separately cached base), sourcing from both a
 ``.kicad_sym`` library and a template ``.kicad_sch``, creating a missing
 ``lib_symbols`` node, ``SYMBOL_NOT_FOUND`` on a miss, and round-trip
 serializability of the mutated document.
@@ -166,40 +168,66 @@ def test_does_not_duplicate_preexisting_cache_entry():
 
 
 # --------------------------------------------------------------------------- #
-# extends (C_Polarized) — base must be copied too
+# extends (C_Polarized) — derived symbols are FLATTENED, KiCad-save style.
+# KiCad's loader does not resolve a bare (extends "Base") against a qualified
+# cached base: an unflattened cache entry loses its pins and every wire to the
+# part dangles in eeschema (lib_symbol_mismatch + unconnected_wire_endpoint).
 # --------------------------------------------------------------------------- #
-def test_extends_caches_both_derived_and_base():
+def test_extends_caches_only_the_flattened_derived():
     doc = _doc()
     lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
     names = _symbol_names(_libsyms(doc))
     assert "Device:C_Polarized" in names
-    assert "Device:C" in names  # base resolved + copied
+    assert "Device:C" not in names  # base is inlined, never cached separately
 
 
-def test_extends_reference_stays_unqualified():
+def test_extends_clause_is_dropped():
     doc = _doc()
     lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
     derived = _cached_symbol(_libsyms(doc), "Device:C_Polarized")
-    ext = derived.find("extends")
-    assert ext is not None
-    # KiCad stores the base reference unqualified; the cached base is Device:C.
-    assert ext.children[1].value == "C"
+    assert derived.find("extends") is None
 
 
-def test_extends_base_carries_the_pins():
+def test_flattened_derived_carries_the_base_pins():
     doc = _doc()
     lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
-    base = _cached_symbol(_libsyms(doc), "Device:C")
-    # The derived symbol has no pins of its own; the base supplies them.
-    assert _pin_types(base) == ["passive", "passive"]
+    derived = _cached_symbol(_libsyms(doc), "Device:C_Polarized")
+    # The base's pins (with electrical types) now live in the derived entry.
+    assert _pin_types(derived) == ["passive", "passive"]
 
 
-def test_extends_child_units_unqualified():
+def test_flattened_child_units_renamed_to_derived():
     doc = _doc()
     lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
     derived = _cached_symbol(_libsyms(doc), "Device:C_Polarized")
     child_unit_names = {s.children[1].value for s in derived.find_all("symbol")}
-    assert child_unit_names == {"C_Polarized_0_1"}
+    # Base units C_0_1/C_1_1 -> C_Polarized_0_1/C_Polarized_1_1; the derived
+    # symbol's own C_Polarized_0_1 graphics replace the renamed base unit.
+    assert child_unit_names == {"C_Polarized_0_1", "C_Polarized_1_1"}
+    assert all(":" not in n for n in child_unit_names)
+
+
+def test_flattened_properties_prefer_the_derived_values():
+    doc = _doc()
+    lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
+    derived = _cached_symbol(_libsyms(doc), "Device:C_Polarized")
+    props = {
+        p.children[1].value: p.children[2].value
+        for p in derived.find_all("property")
+        if len(p.children) >= 3 and p.children[2].is_atom
+    }
+    assert props["Value"] == "C_Polarized"  # derived override, not the base's "C"
+
+
+def test_flattened_derived_keeps_its_own_unit_graphics():
+    doc = _doc()
+    lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
+    derived = _cached_symbol(_libsyms(doc), "Device:C_Polarized")
+    unit_0_1 = next(
+        s for s in derived.find_all("symbol") if s.children[1].value == "C_Polarized_0_1"
+    )
+    # The fixture's derived C_Polarized_0_1 carries two polarity polylines.
+    assert len(unit_0_1.find_all("polyline")) == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -253,7 +281,10 @@ def test_mutated_doc_reparses_with_symbol_present():
     lib_cache.ensure_cached(doc, "Device:C_Polarized", [DEVICE])
     re = _reparse(doc)
     names = _symbol_names(_libsyms(re))
-    assert {"Device:C_Polarized", "Device:C"} <= set(names)
+    assert "Device:C_Polarized" in names
+    # And the flattened entry survives the round-trip with its pins intact.
+    derived = _cached_symbol(_libsyms(re), "Device:C_Polarized")
+    assert _pin_types(derived) == ["passive", "passive"]
 
 
 def test_source_library_node_not_mutated():

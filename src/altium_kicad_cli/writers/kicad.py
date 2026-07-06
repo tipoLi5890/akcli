@@ -8,8 +8,9 @@ keeps untouched nodes verbatim).
 
 Per-op behaviour (SPEC §2.2):
 
-* ``place_component`` — :func:`lib_cache.ensure_cached` copies the symbol (and any
-  ``(extends)`` base) into ``(lib_symbols ...)``, then a placed ``(symbol ...)``
+* ``place_component`` — :func:`lib_cache.ensure_cached` copies the symbol (any
+  ``(extends)`` chain flattened, KiCad-save style) into ``(lib_symbols ...)``,
+  then a placed ``(symbol ...)``
   instance is emitted with **per-pin** ``(pin "N" (uuid ...))`` nodes and a
   reference written into BOTH the ``Reference`` property and the ``(instances)``
   block (via :mod:`.instances`).

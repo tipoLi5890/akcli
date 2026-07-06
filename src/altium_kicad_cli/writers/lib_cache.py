@@ -18,9 +18,15 @@ component, the symbol must be present in ``lib_symbols``.
   preserved** (ERC needs them);
 * **requalifies the parent symbol name** to ``Nick:Name`` (the instance's
   ``lib_id``) while keeping the child unit sub-symbol names unqualified
-  (``Name_0_1`` / ``Name_1_1``) and any ``(extends "Base")`` reference unqualified;
-* **resolves and copies an ``(extends ...)`` base** symbol too (KiCad caches both
-  the derived part and its base, e.g. ``Device:C_Polarized`` + ``Device:C``);
+  (``Name_0_1`` / ``Name_1_1``);
+* **flattens an ``(extends ...)`` derived symbol** into a standalone definition:
+  the base's units/pins/graphics are copied under the derived name (unit
+  sub-symbols renamed ``Base_u_s`` -> ``Derived_u_s``) with the derived symbol's
+  own properties/settings overlaid, and the ``(extends)`` clause dropped. This is
+  what KiCad itself does when caching a derived symbol into a schematic —
+  KiCad's loader does *not* resolve a bare ``(extends "Base")`` against a
+  library-qualified cached base, so an unflattened cache entry loses its pins
+  (``lib_symbol_mismatch`` + every wire to the part dangling in eeschema);
 * **dedups by qualified lib_id**: a symbol already present is left untouched, so
   ``ensure_cached`` is idempotent and safe to call once per placed component.
 
@@ -32,6 +38,7 @@ the mutated ``doc`` back to text.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from .. import model
@@ -45,6 +52,9 @@ __all__ = ["ensure_cached"]
 # Guard against a pathological / cyclic ``(extends ...)`` chain. Real chains are
 # 1-2 deep; we follow at most this many hops before declaring the library bad.
 _MAX_EXTENDS = 64
+
+# Trailing ``_<unit>_<body-style>`` of a unit sub-symbol name (``R_0_1`` -> ``_0_1``).
+_UNIT_SUFFIX_RE = re.compile(r"_\d+_\d+$")
 
 # Default whitespace used when synthesizing a fresh ``(lib_symbols ...)`` node or
 # when a sibling-derived indent cannot be recovered (KiCad uses tab indentation).
@@ -98,11 +108,10 @@ def ensure_cached(
     """
     libs = _coerce_sources(sources)
     libsyms = _ensure_lib_symbols_node(doc)
-    nick = _nick_of(lib_id)
     cached = _existing_names(libsyms)
-    # The requested symbol keeps the instance's exact qualified id; bases are
-    # requalified within the same nick (their (extends) ref is unqualified).
-    _cache_symbol(libsyms, request=lib_id, qualified=lib_id, nick=nick, libs=libs, cached=cached)
+    # The requested symbol keeps the instance's exact qualified id; a derived
+    # symbol is flattened into a single standalone entry (no base is cached).
+    _cache_symbol(libsyms, request=lib_id, qualified=lib_id, libs=libs, cached=cached)
 
 
 # --------------------------------------------------------------------------- #
@@ -112,16 +121,12 @@ def _cache_symbol(
     libsyms: SNode,
     request: str,
     qualified: str,
-    nick: str | None,
     libs: list[model.Library],
     cached: set[str],
-    _hops: int = 0,
 ) -> None:
-    """Resolve ``request``, copy it as ``qualified``, then recurse into its base."""
+    """Resolve ``request`` and copy it as ``qualified`` (flattening any base)."""
     if qualified in cached:
-        return  # already present (pre-existing or just added) -> dedup + cycle guard
-    if _hops > _MAX_EXTENDS:
-        fail("SYMBOL_NOT_FOUND", f"extends chain too deep resolving {request!r}")
+        return  # already present (pre-existing or just added) -> dedup
 
     sym = _find_symbol(request, libs)
     if sym is None:
@@ -130,23 +135,168 @@ def _cache_symbol(
         # Only KiCad-sourced SymbolDefs carry a raw body we can copy.
         fail("SYMBOL_NOT_FOUND", f"symbol {request!r} has no copyable KiCad body")
 
-    body = _clone(sym.body_sexpr)
+    body = _flattened_body(sym, libs)
     _set_symbol_name(body, qualified)
     _append_symbol(libsyms, body)
     cached.add(qualified)
 
-    if sym.extends:
-        base_request = sym.extends                      # unqualified base name (kept as-is)
-        base_qualified = _requalify(nick, sym.extends)  # cached under Nick:Base
-        _cache_symbol(
-            libsyms,
-            request=base_request,
-            qualified=base_qualified,
-            nick=nick,
-            libs=libs,
-            cached=cached,
-            _hops=_hops + 1,
-        )
+
+# --------------------------------------------------------------------------- #
+# Derived-symbol flattening (the KiCad-save behavior)
+# --------------------------------------------------------------------------- #
+def _flattened_body(sym: model.SymbolDef, libs: list[model.Library]) -> SNode:
+    """Deep-copied standalone body for ``sym``, its ``(extends)`` chain flattened.
+
+    KiCad never caches a derived symbol as-is into a ``.kicad_sch``: its save
+    path flattens (``LIB_SYMBOL::Flatten``), and its loader does not resolve a
+    bare ``(extends "Base")`` against a library-qualified cached base — an
+    unflattened entry therefore loses its unit sub-symbols and pins, and every
+    wire to the placed part dangles in eeschema. We mirror the flatten: start
+    from the root base's body, rename its unit sub-symbols to the derived name,
+    then overlay each descendant's own children (derived-most last) with
+    property-by-name / tag replacement, dropping ``(extends)`` itself.
+    """
+    if not sym.extends:
+        return _clone(sym.body_sexpr)
+
+    # Resolve derived -> ... -> root base (cycle- and depth-guarded).
+    chain: list[model.SymbolDef] = [sym]
+    seen = {_unqual(sym.name)}
+    cur = sym
+    while cur.extends:
+        if len(chain) > _MAX_EXTENDS:
+            fail("SYMBOL_NOT_FOUND", f"extends chain too deep resolving {sym.name!r}")
+        base = _find_symbol(cur.extends, libs)
+        if base is None:
+            fail(
+                "SYMBOL_NOT_FOUND",
+                f"extends base {cur.extends!r} of {cur.name!r} not found in any source library",
+            )
+        if not isinstance(base.body_sexpr, SNode):
+            fail("SYMBOL_NOT_FOUND", f"extends base {cur.extends!r} has no copyable KiCad body")
+        if _unqual(base.name) in seen:
+            fail("SYMBOL_NOT_FOUND", f"cyclic extends chain at {base.name!r}")
+        seen.add(_unqual(base.name))
+        chain.append(base)
+        cur = base
+
+    derived_unqual = _unqual(sym.name)
+    body = _clone(chain[-1].body_sexpr)
+    _rename_child_units(body, derived_unqual)
+    # Overlay from the root-most derived layer up to ``sym`` (nearest wins).
+    for layer in chain[-2::-1]:
+        _overlay_symbol(body, layer.body_sexpr, derived_unqual)
+    return body
+
+
+def _overlay_symbol(body: SNode, overlay: SNode, derived_unqual: str) -> None:
+    """Merge ``overlay``'s list children into ``body`` (KiCad flatten semantics).
+
+    ``(property "Name" ...)`` replaces the same-named property (else is inserted
+    after the last property); a ``(symbol "..._u_s")`` unit replaces the unit
+    with the same ``_u_s`` suffix (else appended), renamed to the derived name;
+    ``(extends ...)`` is dropped; any other tag replaces its first same-tag
+    sibling (else is inserted before the properties).
+    """
+    for ch in list(overlay.children or []):
+        if not ch.is_list:
+            continue
+        tag = ch.tag
+        if tag == "extends":
+            continue
+        copy = _clone(ch)
+        if tag == "property":
+            _merge_property(body, copy)
+        elif tag == "symbol":
+            _merge_child_unit(body, copy, derived_unqual)
+        else:
+            _merge_plain(body, copy)
+
+
+def _merge_property(body: SNode, prop: SNode) -> None:
+    name = _property_name(prop)
+    last_prop = -1
+    for i, ch in enumerate(body.children or []):
+        if ch.is_list and ch.tag == "property":
+            last_prop = i
+            if name is not None and _property_name(ch) == name:
+                body.children[i] = prop
+                return
+    if last_prop >= 0:
+        _insert_child(body, last_prop + 1, prop)
+    else:
+        _insert_child(body, _first_child_unit_index(body), prop)
+
+
+def _merge_child_unit(body: SNode, unit: SNode, derived_unqual: str) -> None:
+    suffix = _unit_suffix(_symbol_name(unit))
+    if suffix is not None:
+        _set_symbol_name(unit, f"{derived_unqual}{suffix}")
+    for i, ch in enumerate(body.children or []):
+        if ch.is_list and ch.tag == "symbol" and _unit_suffix(_symbol_name(ch)) == suffix:
+            body.children[i] = unit
+            return
+    _insert_child(body, len(body.children), unit)
+
+
+def _merge_plain(body: SNode, node: SNode) -> None:
+    for i, ch in enumerate(body.children or []):
+        if ch.is_list and ch.tag == node.tag:
+            body.children[i] = node
+            return
+    # New setting: keep it in the header region, before the first property/unit.
+    idx = _first_child_unit_index(body)
+    for i, ch in enumerate(body.children or []):
+        if ch.is_list and ch.tag == "property":
+            idx = i
+            break
+    _insert_child(body, idx, node)
+
+
+def _rename_child_units(body: SNode, derived_unqual: str) -> None:
+    """Rename every ``(symbol "Base_u_s")`` child to ``Derived_u_s`` in place."""
+    for ch in body.children or []:
+        if ch.is_list and ch.tag == "symbol":
+            suffix = _unit_suffix(_symbol_name(ch))
+            if suffix is not None:
+                _set_symbol_name(ch, f"{derived_unqual}{suffix}")
+
+
+def _unit_suffix(name: str | None) -> str | None:
+    """The trailing ``_<unit>_<style>`` of a unit sub-symbol name (or ``None``)."""
+    if not name:
+        return None
+    m = _UNIT_SUFFIX_RE.search(name)
+    return m.group(0) if m else None
+
+
+def _property_name(prop: SNode) -> str | None:
+    kids = prop.children or []
+    if len(kids) >= 2 and kids[1].is_atom:
+        return kids[1].value
+    return None
+
+
+def _first_child_unit_index(body: SNode) -> int:
+    for i, ch in enumerate(body.children or []):
+        if ch.is_list and ch.tag == "symbol":
+            return i
+    return len(body.children or [])
+
+
+def _insert_child(body: SNode, idx: int, node: SNode) -> None:
+    """Insert ``node`` at ``idx`` with the body's child indentation."""
+    indent = _body_child_indent(body)
+    body.children.insert(idx, node)
+    # ``ws[i]`` precedes ``children[i]``; the trailing entry belongs to ")".
+    body.ws.insert(idx, indent)
+
+
+def _body_child_indent(body: SNode) -> str:
+    for w in (body.ws or [])[1:-1]:
+        if "\n" in w:
+            return w
+    return _SYM_CHILD_WS + "\t"
 
 
 def _find_symbol(name: str, libs: list[model.Library]) -> model.SymbolDef | None:
@@ -299,20 +449,9 @@ def _new_list(node: SNode) -> SNode:
 # --------------------------------------------------------------------------- #
 # Name / quoting helpers
 # --------------------------------------------------------------------------- #
-def _nick_of(lib_id: str) -> str | None:
-    """Library nickname of ``Nick:Name`` (``None`` when ``lib_id`` has no nick)."""
-    return lib_id.split(":", 1)[0] if ":" in lib_id else None
-
-
 def _unqual(name: str | None) -> str:
     """Library-unqualified symbol name (``Device:R`` -> ``R``)."""
     return name.split(":")[-1] if name else ""
-
-
-def _requalify(nick: str | None, name: str) -> str:
-    """Build ``Nick:Name`` from a (possibly already-qualified) source ``name``."""
-    unq = _unqual(name)
-    return f"{nick}:{unq}" if nick else unq
 
 
 def _quote(s: str) -> str:

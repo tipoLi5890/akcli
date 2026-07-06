@@ -60,6 +60,20 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
   finding says so and points at re-export.
 
 ### Fixed
+- **`(extends)`-derived symbols are now FLATTENED into the written `lib_symbols` cache**
+  (KiCad-save style): the base's units/pins/graphics are inlined under the derived name (unit
+  sub-symbols renamed `Base_u_s` → `Derived_u_s`), the derived symbol's own properties/settings
+  overlaid, and the `extends` clause dropped — no base is cached separately. Previously the cache
+  kept a bare `(extends "Base")` next to a library-qualified `Nick:Base` entry, which KiCad's
+  loader does **not** resolve: eeschema reported `lib_symbol_mismatch`, the derived part lost all
+  its pins, every wire to it dangled (`unconnected_wire_endpoint`), and KiCad's netlist omitted
+  the part entirely — while akcli's own verifier and netlist looked clean. Found by running a
+  drawn AMS1117-3.3 LDO block through KiCad 10's own ERC; regression-tested in
+  `test_e2e_draw.py` (cache shape everywhere; pins-on-net via real `kicad-cli` in the KiCad CI job).
+- **`kicad-cli` advisory runs work on KiCad 10 again:** KiCad 10's argument parser rejects the
+  `--` end-of-options separator (`Unknown argument: --`), so every advisory ERC/netlist run was
+  silently degrading to `report: null` (exit 1). Paths are now passed absolute instead of behind
+  `--`, keeping the option-injection guard (an absolute path cannot start with `-`).
 - **CFBF DIFAT spillover (> 109 FAT sectors) is now walked**, not refused: the spillover chain is
   read under the header-declared count, a cycle set, and the global sector cap (hostile input still
   fails with `ALTIUM_FAT_CYCLE` / `ALTIUM_ALLOC_GUARD` / `ALTIUM_MALFORMED`). Large real-world

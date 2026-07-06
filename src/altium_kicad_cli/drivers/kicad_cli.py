@@ -6,8 +6,11 @@ present — provides a second opinion via KiCad's own ERC / netlist export.
 
 Every entry point is **gated on** :func:`shutil.which`: a missing ``kicad-cli`` is
 **non-fatal** and returns ``None`` (never raises). Subprocesses run through
-:func:`..safety.run_subprocess` (``shell=False``, absolute exe, ``--`` before paths,
-timeout + output cap).
+:func:`..safety.run_subprocess` (``shell=False``, absolute exe, timeout + output
+cap). Input paths are passed **absolute** instead of behind a ``--`` separator:
+KiCad 10's argument parser rejects ``--`` ("Unknown argument"), which silently
+degraded every advisory run to ``report: null``; an absolute path cannot start
+with ``-``, so the option-injection property is kept.
 
 Critical correctness note (SPEC §3.7, risk #14): we **never** pass
 ``--exit-code-violations`` to ``sch erc``. With that flag KiCad exits non-zero when
@@ -93,7 +96,7 @@ def erc(path: str) -> dict | None:
         try:
             proc = run_subprocess(
                 [EXE, "sch", "erc", "--format", "json", "--output", str(out),
-                 "--", str(path)],
+                 str(Path(path).absolute())],
                 timeout=_TIMEOUT,
             )
         except Exception:  # pragma: no cover - tool present but failed to spawn
@@ -126,7 +129,7 @@ def netlist(path: str) -> dict | None:
         try:
             proc = run_subprocess(
                 [EXE, "sch", "export", "netlist", "--output", str(out),
-                 "--", str(path)],
+                 str(Path(path).absolute())],
                 timeout=_TIMEOUT,
             )
         except Exception:  # pragma: no cover
