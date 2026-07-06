@@ -24,10 +24,6 @@ only writable target; the writer is flat (single-sheet) v1.
 requirements → block plan → part selection → op-list → `akcli plan` →
 `akcli draw` (dry-run) → `akcli draw --apply` → re-read + `akcli check`.
 
-> CLI drift warning: `docs/cli-reference.md` shows an older `plan <oplist> --target`
-> signature. The real surface is `akcli plan <target.kicad_sch> --ops FILE` — trust
-> `akcli plan --help` and this skill, never invent flags.
-
 ## (1) Block plan before any op
 
 Decompose the requirements into named blocks (power entry, regulation, MCU,

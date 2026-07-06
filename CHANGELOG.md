@@ -9,10 +9,9 @@ All notable changes to `altium-kicad-cli` are documented here. The format is bas
 `altium-kicad-cli` ships **three** version numbers; this section is their contract.
 
 - **Package version (SemVer `MAJOR.MINOR.PATCH`).** The single source of truth is
-  `pyproject.toml`; `tools/sync_version.py` stamps it into `.claude-plugin/plugin.json` and
-  `.claude-plugin/marketplace.json`, and CI fails on drift. During active pre-1.0 development the
-  plugin manifests intentionally carry **no `version`** (commit-SHA versioning); a `version` is added
-  at the first tagged release. SemVer rules:
+  `pyproject.toml`; `tools/sync_version.py` stamps it into `.claude-plugin/plugin.json`,
+  `.claude-plugin/marketplace.json`, and `.codex-plugin/plugin.json`, and CI fails on drift.
+  SemVer rules:
   - **MAJOR** — backwards-incompatible change to the public CLI surface, the normalized data model, or
     the on-disk JSON exports.
   - **MINOR** — backwards-compatible new subcommands, flags, checks, readers, or ops.
@@ -33,7 +32,11 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
-Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
+Nothing yet.
+
+## [0.2.0] - 2026-07-06
+
+Not yet published to PyPI; install from source (see `INSTALL.md`).
 
 ### Added
 - **Readers:** Altium `.SchDoc` / `.SchLib` and ASCII `.PcbDoc`; KiCad `.kicad_sch` (v7/v8) via a

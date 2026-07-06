@@ -29,22 +29,30 @@ diagnostics. This keeps `akcli ... --json | jq` clean.
 
 ## Subcommands
 
-### `akcli read <file>`
-Parse an Altium or KiCad schematic/PCB into the normalized model and print it.
-- Input: `.SchDoc`, `.kicad_sch` (and PCB variants).
-- `--json` prints the full `Schematic`/`Pcb` export with `schema_version`.
+### `akcli read <file> [--md]`
+Parse an Altium or KiCad schematic/PCB/library into the normalized model and print it.
+- Input: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.kicad_sch`, `.kicad_sym`, `.kicad_pcb`.
+- A KiCad root sheet **recurses into its `(sheet ...)` children** (paths relative to the parent
+  file, cycle- and depth-guarded); every sheet instance contributes its components under the
+  designator from the matching `(instances (path ...))` entry.
+- `--json` prints the full `Schematic`/`Pcb`/`Library` export with `schema_version`; `--md` prints
+  a human Markdown summary.
 
-### `akcli net <file>`
+### `akcli net <file> [NAME]`
 Extract the netlist (net → pin membership) using the shared `netbuild` engine.
+- With `NAME`, print just that net; a miss prints a notice to **stderr** and still exits `0`.
 - Output: nets with members, aliases, and source names; `--json` validates against
   `schemas/netlist.schema.json`.
 
-### `akcli component <file>`
-List components: designator, library reference, value, footprint, pin count, and sheet provenance.
+### `akcli component <file> [REF]`
+Without `REF`: list components (designator, library reference, value, footprint, pin count, sheet).
+With `REF`: that component's pin → net table. A missing `REF` prints a notice to **stderr** and
+exits `0`.
 
 ### `akcli check <file>`
 Run the design checks (ERC-lite + power + BOM hygiene) and print findings.
 - `-C/--config` supplies rails, MCU designator, and `[[erc_waiver]]` entries.
+- `--erc` / `--power` / `--bom` select check families (default: all).
 - **Lint-style exit:** non-zero (`1`) when findings are present.
 - `--exit-zero` forces exit `0` even with findings (report mode).
 
@@ -53,25 +61,35 @@ Diff two schematic revisions. Nets are matched by **membership** (not display na
 UniqueID, then `(value, footprint, pin-count)` signature, then refdes.
 
 ### `akcli pinmap <file>`
-Emit the MCU pin → net table (MCU chosen by `mcu_designator` in config).
+Emit the MCU pin → net table (MCU chosen by `mcu_designator` in config, or `--mcu REF`).
 - `--expected PATH` cross-checks against an external expected pin→signal table (CSV or JSON). The
   schematic is authoritative; the expected table is advisory.
 
-### `akcli export <file>`
-Export the normalized model as JSON (the canonical `--json` shape) for downstream tooling. Honors
-`--json` formatting flags; stamps `schema_version`.
+### `akcli export <file> [--format protel|kicad|csv] [-o FILE]`
+Export the schematic's **netlist** for other EDA tools. Default `--format protel` (an
+Altium-importable `.NET`); `kicad` emits a legacy eeschema netlist; `csv` flat `net,ref,pin` rows.
+Writes stdout unless `-o` is given. Deterministically sorted; unnamed nets are named by their
+membership-derived `stable_id`, so re-exports diff cleanly. `--json` is **refused** (exit `2`) —
+use `akcli net --json` for structured output.
 
-### `akcli plan <oplist.json> [--target FILE]`
+### `akcli plan <target.kicad_sch> --ops FILE [--symbols PATH ...]`
 Validate an op-list against `protocol_version` and `schemas/ops.schema.json`, resolve it against the
-target `.kicad_sch`, and print what *would* change. Never writes. `--target` overrides the op-list's
-`target_file`.
+target `.kicad_sch` (symbols from repeatable `--symbols` sources and the target's inline cache), and
+print what *would* change. Never writes.
 
-### `akcli draw <oplist.json> [--target FILE] [--apply]`
-Execute an op-list against a KiCad `.kicad_sch`.
-- **Default is a dry run** (no file written): prints per-op results and the connectivity verification.
-- `--apply` performs the write via the atomic snapshot → temp → verify-on-temp → `os.replace` pipeline,
-  writing a `<target>.bak` copy alongside the file. The write is rejected if the connectivity verifier fails.
-- `--target` overrides the op-list's `target_file`.
+### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply]`
+Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 16 ops (see
+`schemas/ops.schema.json`), including `delete_component` / `delete_object` / `move_component` and
+multi-unit placement via `place_component`'s optional `"unit"` field.
+- **Default is a dry run** (no file written): prints per-op results and the connectivity
+  verification. (`--dry-run` is accepted but inert — omitting `--apply` already is the dry run.)
+- `--apply` performs the write via the atomic snapshot → temp → verify-on-temp → `os.replace`
+  pipeline, writing a `<target>.bak` copy alongside the file. The write is rejected (exit `6`)
+  if any op errors or the connectivity verifier finds an ERROR.
+
+### `akcli jlc <search|show|add> ...`
+JLCPCB/LCSC part search and library conversion — the only **networked** subcommand family. See
+[docs/jlc.md](jlc.md) for the full reference.
 
 ## Exit codes
 
@@ -109,6 +127,7 @@ akcli net  board.kicad_sch --json > netlist.json
 akcli check main.SchDoc -C altium-kicad-cli.toml          # exit 1 if findings
 akcli diff  v1.SchDoc v2.SchDoc
 akcli pinmap main.SchDoc -C altium-kicad-cli.toml --expected pins.csv
-akcli plan ops.json --target board.kicad_sch
-akcli draw ops.json --target board.kicad_sch --apply
+akcli export main.SchDoc --format protel -o board.net
+akcli plan board.kicad_sch --ops ops.json --symbols Device.kicad_sym
+akcli draw board.kicad_sch --ops ops.json --symbols Device.kicad_sym --apply
 ```

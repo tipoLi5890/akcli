@@ -25,18 +25,20 @@ Shipped and working today:
 
 Honest limitations:
 
-- **Flat sheets only**, both directions: the readers return `sheets=[]` for hierarchical Altium and
-  KiCad projects, and the writer rejects any non-root `instances_path` (`HIERARCHICAL_UNSUPPORTED`).
+- **Flat sheets on the Altium side and in the writer**: the Altium reader returns `sheets=[]` for
+  hierarchical projects and the writer rejects any non-root `instances_path`
+  (`HIERARCHICAL_UNSUPPORTED`). *(v0.2.0: the KiCad READER now recurses `(sheet ...)` children with
+  per-instance namespaces and sheet-pin↔hierarchical-label connectivity.)*
 - **Binary Altium payloads are not parsed:** binary `.SchLib` symbol records are refused loudly
   (exit 5), but binary `.PcbDoc` sections (`Pads6`, `Tracks6`, `Vias6`, …) are silently *skipped*
   by `read` — the board opens with copper geometry omitted.
 - **The Altium live driver is a preview:** the Python bridge is tested, but the DelphiScript half is
   an unvalidated scaffold (no CJK text, parameters/footprints not applied, no CLI entry point), and
   "ok" means *ops placed*, not *electrically verified*.
-- **Op vocabulary is additive-only:** no delete, no move-to-x/y, always `(unit 1)`, no sheet ops.
+- **No sheet ops in the writer.** *(v0.2.0 added `delete_component`/`delete_object`/`move_component` and multi-unit `place_component "unit"`.)*
 - **Agents parse some JSON blind:** `check`/`diff`/`pinmap` output has no published schema; `net`/
-  `component` misses exit 0 with only a stderr note; `docs/cli-reference.md` has drifted from the
-  actual `plan`/`draw`/`jlc` surface.
+  `component` misses exit 0 with only a stderr note. *(v0.2.0: `docs/cli-reference.md` re-synced to
+  the actual `plan`/`draw`/`jlc` surface.)*
 - Not yet tagged or published to PyPI; install from source.
 
 ## Guiding principles
@@ -69,8 +71,8 @@ edges before building on them.
 - [ ] Publish `findings.schema.json`, `diff.schema.json`, `pinmap.schema.json`, and a draw-result
       schema, `schema_version`-stamped like the existing exports (M)
 - [x] CFBF DIFAT spillover support (> 109 FAT sectors) so large `.PcbDoc`/`.SchDoc` containers open (S)
-- [ ] Multi-unit symbol placement: `unit` field on `place_component` (drop the hard-coded
-      `(unit 1)`) (S)
+- [x] Multi-unit symbol placement: `unit` field on `place_component` (drop the hard-coded
+      `(unit 1)`) (S) — *shipped in v0.2.0, with unit-true pin semantics across reader/writer/verifier*
 - [ ] `akcli expected <file.dts|pinout.md> [-o expected.json]` subcommand wrapping the DTS /
       pinout.md adapters for the `pinmap --expected` pipeline (S)
 - [ ] `/circuit-parts` slash command wiring `jlc search → show → add --to kicad --place → plan →
@@ -88,8 +90,9 @@ without hitting a nonexistent flag.
 Goal: real multi-sheet designs produce correct netlists on both sides, and `check` grows from
 ERC-lite into a tunable, CI-consumable rule engine.
 
-- [ ] Hierarchical KiCad **read**: recurse `(sheet)` nodes into a full multi-sheet netlist with
-      correct hierarchical-label scoping (M)
+- [x] Hierarchical KiCad **read**: recurse `(sheet)` nodes into a full multi-sheet netlist with
+      correct hierarchical-label scoping (M) — *shipped in v0.2.0 (per-instance namespaces,
+      twice-instantiated sheets, cycle/depth guards)*
 - [ ] Altium multi-sheet: RECORD 15 `SheetSymbol` handler plus a `.PrjPcb` project reader (sheet
       list, `PowerPortNamesTakePriority` and friends) (L)
 - [ ] Binary `.SchLib` symbol decoder (framed records with non-zero flag byte: pins + basic
@@ -114,8 +117,8 @@ in config rather than ignored.
 Goal: agents can *fix* a schematic, not just add to it — and authoring an op-list stops being
 hand-computed mil arithmetic.
 
-- [ ] Editing ops: `delete_component` / `remove_wire` / `remove_label` and a real move (x/y) op,
-      reusing the deterministic-UUID replacement machinery (M)
+- [x] Editing ops: `delete_component` / `delete_object` (any node by uuid, covering wires/labels)
+      and a real `move_component` (x/y, properties travel along) (M) — *shipped in v0.2.0*
 - [ ] Op-list authoring kit: the missing `docs/op-list-authoring.md`, `akcli ops template <op>`
       scaffolder driven by `ops.schema.json` + `ops.capabilities.json`, next-free-grid-slot
       placement helper (M)

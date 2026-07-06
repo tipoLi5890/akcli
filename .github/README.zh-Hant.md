@@ -152,13 +152,14 @@ codex plugin install altium-kicad@altium-kicad
 
 ## 路線圖
 
-目前已提供：Altium `.SchDoc`／`.SchLib` 與 KiCad `.kicad_sch` 讀取（與版本無關）、net 推論、
-ERC/power/BOM/diff/pinmap 檢查、KiCad 寫入／繪製，以及 JLCPCB／LCSC 零件搜尋。完整里程碑規劃
+目前已提供：Altium `.SchDoc`／`.SchLib` 與 KiCad `.kicad_sch` 讀取（與版本無關，KiCad **含階層
+sheet**）、net 推論、ERC/power/BOM/diff/pinmap 檢查、KiCad 寫入／繪製（16 種 op,含 delete／move
+與多單元放置,輸出經 KiCad 自身 ERC 驗證）,以及 JLCPCB／LCSC 零件搜尋。完整里程碑規劃
 （v0.2 → v1.0，各里程碑附驗收條件）見 **[ROADMAP.md](../ROADMAP.md)**。重點待開發項目：
 
 - Altium `.PcbDoc` **二進位**區段（pad/track/via/arc/fill/region）——目前可讀 ASCII 區段。
 - **離線 Altium 寫入**與以 Altium 為權威的 ERC/netlist（目前需即時驅動）。
-- **階層／多 sheet** 的 KiCad 寫入（目前僅支援單層 flat）。
+- **階層／多 sheet** 的 KiCad *寫入*（writer 仍為單層 flat；reader 已支援階層讀取）。
 - 針對 Windows + Altium 22+ 的 Altium **即時驅動**（DelphiScript 部分仍為待驗證的 scaffold）。
 - 原生 **MCP server**。
 

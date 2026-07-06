@@ -158,14 +158,15 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Roadmap
 
-Shipped today: Altium `.SchDoc`/`.SchLib` and KiCad `.kicad_sch` read (version-tolerant), net inference,
-ERC/power/BOM/diff/pinmap checks, KiCad write/draw, and JLCPCB/LCSC part search. The full milestone
-plan (v0.2 → v1.0, with exit criteria per milestone) lives in **[ROADMAP.md](ROADMAP.md)**. Headline
-items still ahead:
+Shipped today: Altium `.SchDoc`/`.SchLib` and KiCad `.kicad_sch` read (version-tolerant, KiCad
+**hierarchical sheets included**), net inference, ERC/power/BOM/diff/pinmap checks, KiCad write/draw
+(16-op vocabulary incl. delete/move and multi-unit placement, output verified against KiCad's own
+ERC), and JLCPCB/LCSC part search. The full milestone plan (v0.2 → v1.0, with exit criteria per
+milestone) lives in **[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
 
 - Altium `.PcbDoc` **binary** sections (pads/tracks/vias/arcs/fills/regions) — ASCII sections read today.
 - **Offline Altium writing** and Altium-authoritative ERC/netlist (today these need the live driver).
-- **Hierarchical / multi-sheet** KiCad writing (flat-only today).
+- **Hierarchical / multi-sheet** KiCad *writing* (the writer is flat-only; the reader follows hierarchy).
 - Altium **live driver** for Windows + Altium 22+ (the DelphiScript half is a scaffold pending validation).
 - A native **MCP server**.
 
