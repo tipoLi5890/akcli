@@ -45,7 +45,10 @@ _QUANT = 10_000
 # Scope buckets. Local net labels are sheet-LOCAL (only merge within one sheet);
 # everything else is global and merges across sheets by name.
 _POWER_SCOPES = frozenset({"power"})
-_GLOBAL_SCOPES = frozenset({"global", "power", "port", "sheet_entry"})
+# "hier" carries synthetic parent-sheet-pin <-> child-hierarchical-label
+# connectors: unique per (sheet instance, pin name), so the global merge joins
+# exactly that pair — and NOTHING else. They never name a net (see below).
+_GLOBAL_SCOPES = frozenset({"global", "power", "port", "sheet_entry", "hier"})
 _LABEL_SCOPES = frozenset({"local", "global", "port", "sheet_entry"})
 
 # Confidence assigned to a net that carries more than one distinct explicit name.
@@ -214,6 +217,8 @@ def build_nets(prims: model.NetPrimitives) -> list[model.Net]:
         members_by_root[dsu.find(qp)].append(ref)
     names_by_root: dict = defaultdict(list)
     for text, scope, sheet, ql in label_nodes:
+        if scope == "hier":
+            continue  # synthetic connector: merges clusters, never names them
         names_by_root[dsu.find(ql)].append((text, scope))
 
     nets: list[model.Net] = []

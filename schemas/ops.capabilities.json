@@ -4,20 +4,87 @@
   "title": "AkcliOpCapabilities",
   "protocol_version": 1,
   "description": "Per-executor support matrix. true = supported; false = ERROR: OP_UNSUPPORTED.",
-  "executors": ["kicad", "altium"],
+  "executors": [
+    "kicad",
+    "altium"
+  ],
   "ops": {
-    "place_component":        { "kicad": true, "altium": true,  "notes": "" },
-    "set_component_transform":{ "kicad": true, "altium": true,  "notes": "rotate/mirror existing component" },
-    "set_component_parameters":{ "kicad": true, "altium": true, "notes": "ref/value/footprint/params" },
-    "add_wire":               { "kicad": true, "altium": true,  "notes": "orthogonal; may emit many segments" },
-    "add_junction":           { "kicad": true, "altium": true,  "notes": "" },
-    "add_no_connect":         { "kicad": true, "altium": true,  "notes": "" },
-    "add_net_label":          { "kicad": true, "altium": true,  "notes": "scope local|global|hierarchical" },
-    "place_power_port":       { "kicad": true, "altium": true,  "notes": "" },
-    "add_bus":                { "kicad": true, "altium": false, "notes": "OP_UNSUPPORTED on Altium live v1" },
-    "add_bus_entry":          { "kicad": true, "altium": false, "notes": "OP_UNSUPPORTED on Altium live v1" },
-    "add_text":               { "kicad": true, "altium": true,  "notes": "free angle allowed" },
-    "place_gnd":              { "kicad": true, "altium": true,  "notes": "sugar over place_power_port" },
-    "place_vcc":              { "kicad": true, "altium": true,  "notes": "sugar over place_power_port" }
+    "place_component": {
+      "kicad": true,
+      "altium": true,
+      "notes": ""
+    },
+    "set_component_transform": {
+      "kicad": true,
+      "altium": true,
+      "notes": "rotate/mirror existing component"
+    },
+    "set_component_parameters": {
+      "kicad": true,
+      "altium": true,
+      "notes": "ref/value/footprint/params"
+    },
+    "add_wire": {
+      "kicad": true,
+      "altium": true,
+      "notes": "orthogonal; may emit many segments"
+    },
+    "add_junction": {
+      "kicad": true,
+      "altium": true,
+      "notes": ""
+    },
+    "add_no_connect": {
+      "kicad": true,
+      "altium": true,
+      "notes": ""
+    },
+    "add_net_label": {
+      "kicad": true,
+      "altium": true,
+      "notes": "scope local|global|hierarchical"
+    },
+    "place_power_port": {
+      "kicad": true,
+      "altium": true,
+      "notes": ""
+    },
+    "add_bus": {
+      "kicad": true,
+      "altium": false,
+      "notes": "OP_UNSUPPORTED on Altium live v1"
+    },
+    "add_bus_entry": {
+      "kicad": true,
+      "altium": false,
+      "notes": "OP_UNSUPPORTED on Altium live v1"
+    },
+    "add_text": {
+      "kicad": true,
+      "altium": true,
+      "notes": "free angle allowed"
+    },
+    "place_gnd": {
+      "kicad": true,
+      "altium": true,
+      "notes": "sugar over place_power_port"
+    },
+    "place_vcc": {
+      "kicad": true,
+      "altium": true,
+      "notes": "sugar over place_power_port"
+    },
+    "delete_component": {
+      "kicad": true,
+      "altium": false
+    },
+    "delete_object": {
+      "kicad": true,
+      "altium": false
+    },
+    "move_component": {
+      "kicad": true,
+      "altium": false
+    }
   }
 }

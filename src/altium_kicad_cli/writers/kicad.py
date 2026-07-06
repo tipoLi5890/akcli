@@ -135,11 +135,14 @@ def _stroke() -> SNode:
     )
 
 
-def _effects() -> SNode:
-    return _list(
-        _atom("effects"),
-        _list(_atom("font"), _list(_atom("size"), _atom("1.27"), _atom("1.27"))),
-    )
+def _effects(hide: bool = False, justify: str | None = None) -> SNode:
+    kids = [_atom("effects"),
+            _list(_atom("font"), _list(_atom("size"), _atom("1.27"), _atom("1.27")))]
+    if justify:
+        kids.append(_list(_atom("justify"), _atom(justify)))
+    if hide:
+        kids.append(_list(_atom("hide"), _atom("yes")))
+    return _list(*kids)
 
 
 def _uuid_node(value: str) -> SNode:
@@ -394,12 +397,15 @@ def _set_property(sym: SNode, key: str, value: str) -> None:
             return
     at = sym.find("at")
     pos = (_at_nm(at) if at is not None else (0, 0))
+    # Bookkeeping fields render as raw text on top of the body in eeschema;
+    # KiCad itself creates them hidden, so do the same.
+    hide = key in _HIDDEN_PROPERTIES
     prop = _list(
         _atom("property"),
         _atom(_q(key)),
         _atom(_q(value)),
         _at(pos, 0),
-        _effects(),
+        _effects(hide=hide),
     )
     indent = _doc_child_indent(sym)
     k = len(sym.children or [])
@@ -418,6 +424,77 @@ def _at_nm(at: SNode) -> tuple[int, int]:
         return 0.0
 
     return (units.mm_to_nm(_f(1)), units.mm_to_nm(_f(2)))
+
+
+# Properties eeschema creates hidden (raw text over the body otherwise).
+_HIDDEN_PROPERTIES = frozenset({"Footprint", "Datasheet", "Description"})
+
+# Gap between a symbol's pin bounding box and its Reference/Value text (nm).
+_PROP_MARGIN_NM = units.mm_to_nm(1.27)
+
+
+def _autoplace_ref_value(sym: SNode, symdef, unit: int, ctxpos: tuple[int, int]) -> None:
+    """Position Reference/Value clear of the body (KiCad-autoplace style).
+
+    The writer used to leave every property at the component origin (and the
+    synthesized Reference at absolute 0,0), stacking raw text over the symbol
+    body. Heuristic: from the placed unit's pin bounding box, put the text to
+    the RIGHT of a tall (vertical-pin) part, or ABOVE/BELOW a wide one; power
+    symbols show only their value below the anchor and hide the #PWR reference,
+    exactly like eeschema. Deterministic, so replays stay byte-identical.
+    """
+    lib_id_node = sym.find("lib_id")
+    lib_id = (lib_id_node.children[1].value or "") if lib_id_node is not None else ""
+    comp = _instance_component(sym, lib_id)
+    pts = [geometry.pin_world(symdef, comp, p) for p in kicad_lib.unit_pins(symdef, unit)]
+    ref = _symbol_reference(sym) or ""
+    is_power = ref.startswith("#")
+
+    if pts:
+        min_x = min(p[0] for p in pts); max_x = max(p[0] for p in pts)
+        min_y = min(p[1] for p in pts); max_y = max(p[1] for p in pts)
+    else:
+        min_x = max_x = ctxpos[0]
+        min_y = max_y = ctxpos[1]
+
+    if is_power:
+        # eeschema: hidden #PWR reference; value just below the anchor.
+        _place_prop(sym, "Reference", (ctxpos[0], max_y + _PROP_MARGIN_NM), hide=True)
+        _place_prop(sym, "Value", (ctxpos[0], max_y + 2 * _PROP_MARGIN_NM))
+        return
+    tall = (max_y - min_y) >= (max_x - min_x)
+    if tall:   # vertical pins (R/C/L...): text to the right, left-justified
+        x = max_x + _PROP_MARGIN_NM
+        _place_prop(sym, "Reference", (x, ctxpos[1] - _PROP_MARGIN_NM), justify="left")
+        _place_prop(sym, "Value", (x, ctxpos[1] + _PROP_MARGIN_NM), justify="left")
+    else:      # horizontal pins (ICs, connectors): text above/below the body
+        _place_prop(sym, "Reference", (ctxpos[0], min_y - _PROP_MARGIN_NM))
+        _place_prop(sym, "Value", (ctxpos[0], max_y + _PROP_MARGIN_NM))
+
+
+def _place_prop(
+    sym: SNode, key: str, pos_nm: tuple[int, int],
+    *, justify: str | None = None, hide: bool = False,
+) -> None:
+    """Set an existing property's ``(at ...)`` / ``(effects ...)`` in place."""
+    for prop in sym.find_all("property"):
+        kids = prop.children or []
+        if len(kids) >= 2 and kids[1].value == key:
+            at = prop.find("at")
+            new_at = _at(pos_nm, 0)
+            if at is not None:
+                kids[kids.index(at)] = new_at
+            else:
+                prop.children.append(new_at)          # type: ignore[union-attr]
+                prop.ws.insert(len(prop.ws) - 1, " ")  # type: ignore[union-attr]
+            eff = prop.find("effects")
+            new_eff = _effects(hide=hide, justify=justify)
+            if eff is not None:
+                kids[kids.index(eff)] = new_eff
+            else:
+                prop.children.append(new_eff)          # type: ignore[union-attr]
+                prop.ws.insert(len(prop.ws) - 1, " ")  # type: ignore[union-attr]
+            return
 
 
 # --------------------------------------------------------------------------- #
@@ -510,6 +587,8 @@ def _op_place_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
         _set_property(sym, "Value", str(op["value"]))
     if op.get("footprint") is not None and sym is not None:
         _set_property(sym, "Footprint", str(op["footprint"]))
+    if sym is not None:
+        _autoplace_ref_value(sym, _ctx_symdef(doc, ctx, op["lib_id"]), unit, pos)
     return [uid]
 
 
@@ -661,9 +740,10 @@ def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
         doc, ctx, list(src_libs), lib_id, ref,
         pos, rotation, "none", idx, path,
     )
-    sym = _symbol_by_ref(doc, ref)
+    sym = _symbol_by_uuid(doc, uid)
     if sym is not None:
         _set_property(sym, "Value", str(net_name))
+        _autoplace_ref_value(sym, _ctx_symdef(doc, ctx, lib_id), 1, pos)
     return [uid]
 
 
@@ -702,6 +782,101 @@ def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
     return [uid]
 
 
+def _delete_top_nodes(doc: SNode, keep) -> int:
+    """Delete top-level list nodes for which ``keep(node)`` is False; return count."""
+    removed = 0
+    kids = doc.children or []
+    for i in range(len(kids) - 1, -1, -1):
+        c = kids[i]
+        if c.is_list and not keep(c):
+            del doc.children[i]
+            del doc.ws[i]
+            removed += 1
+    return removed
+
+
+def _op_delete_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Remove every placed instance of a designator (all units).
+
+    Attached wires are intentionally left in place: the connectivity gate then
+    reports their now-dangling endpoints, so stale wiring is cleaned up
+    explicitly instead of silently. Deleting an absent designator is a no-op
+    (idempotent replay of a delta op-list must converge), reported in the
+    result message.
+    """
+    ref = op["designator"]
+    targets = {id(s) for s in _symbols_by_ref(doc, ref)}
+    removed = _delete_top_nodes(doc, lambda c: id(c) not in targets)
+    if removed == 0:
+        # replay-safe no-op; surfaced via the op result message (not an error)
+        raise _Note(f"no placed instance of {ref!r} (already absent)")
+    return []
+
+
+def _op_delete_object(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Remove ONE top-level object (wire/label/junction/text/...) by uuid."""
+    uid = op["uuid"]
+
+    def keep(c: SNode) -> bool:
+        u = c.find("uuid")
+        return not (u is not None and len(u.children or []) >= 2 and u.children[1].value == uid)
+
+    removed = _delete_top_nodes(doc, keep)
+    if removed == 0:
+        raise _Note(f"no object with uuid {uid!r} (already absent)")
+    return []
+
+
+def _op_move_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Move ONE placed instance (designator + optional unit) to x/y.
+
+    Properties travel with the body (their ``(at)`` is absolute, so the same
+    delta is applied). Wires do NOT stretch — the connectivity gate flags any
+    endpoint the move disconnected, keeping the edit loud instead of silently
+    leaving wires behind.
+    """
+    ref = op["designator"]
+    unit = int(op.get("unit", 1))
+    sym = next((s for s in _symbols_by_ref(doc, ref) if _symbol_unit(s) == unit), None)
+    if sym is None:
+        fail("VERIFY_FAILED", f"move_component: no placed instance of {ref!r} unit {unit}")
+    new = geometry.grid_snap_nm(
+        (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
+        _GRID_NM,
+    )
+    at = sym.find("at")
+    old = _at_nm(at) if at is not None else (0, 0)
+    rot = _fnum_at(at, 3)
+    kids = sym.children or []
+    kids[kids.index(at)] = _at(new, rot)
+    dx, dy = new[0] - old[0], new[1] - old[1]
+    for prop in sym.find_all("property"):
+        pat = prop.find("at")
+        if pat is None:
+            continue
+        px, py = _at_nm(pat)
+        pkids = prop.children or []
+        pkids[pkids.index(pat)] = _at((px + dx, py + dy), _fnum_at(pat, 3))
+    return []
+
+
+def _fnum_at(at: SNode | None, idx: int) -> float:
+    if at is not None and at.children and idx < len(at.children or []):
+        try:
+            return float(at.children[idx].value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
+class _Note(Exception):
+    """Non-error op outcome carrying a human-readable message (status stays ok)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 _HANDLERS = {
     "place_component": _op_place_component,
     "set_component_transform": _op_set_component_transform,
@@ -716,6 +891,9 @@ _HANDLERS = {
     "place_vcc": _op_place_power_port,
     "add_bus_entry": _op_add_bus_entry,
     "add_text": _op_add_text,
+    "delete_component": _op_delete_component,
+    "delete_object": _op_delete_object,
+    "move_component": _op_move_component,
 }
 
 
@@ -797,6 +975,8 @@ def apply(
             continue
         try:
             res.created_uuids = handler(doc, op, idx, src_libs, instances.instances_path(doc), ctx)
+        except _Note as note:
+            res.message = note.message
         except AkcliError as exc:
             res.status = "error"
             res.error_code = exc.code

@@ -44,6 +44,30 @@
         },
         {
           "properties": {
+            "op": { "const": "delete_component" },
+            "designator": { "type": "string" }
+          },
+          "required": ["op", "designator"]
+        },
+        {
+          "properties": {
+            "op": { "const": "delete_object" },
+            "uuid": { "type": "string" }
+          },
+          "required": ["op", "uuid"]
+        },
+        {
+          "properties": {
+            "op": { "const": "move_component" },
+            "designator": { "type": "string" },
+            "x_mil": { "type": "number" },
+            "y_mil": { "type": "number" },
+            "unit": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["op", "designator", "x_mil", "y_mil"]
+        },
+        {
+          "properties": {
             "op": { "const": "set_component_transform" },
             "designator": { "type": "string" },
             "rotation": { "$ref": "#/$defs/rotation" },

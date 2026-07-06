@@ -305,3 +305,99 @@ def test_reapply_is_byte_identical_after_first_apply(tmp_path):
     first = tgt.read_bytes()
     kw.apply(ops, str(tgt), apply=True, sources=[str(DEVICE)])
     assert tgt.read_bytes() == first, "first re-apply is not byte-identical"
+
+
+# --------------------------------------------------------------------------- #
+# delete / move ops
+# --------------------------------------------------------------------------- #
+def _seed_rc(tmp_path):
+    tgt = tmp_path / "board.kicad_sch"
+    tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
+                   '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
+    kw.apply(
+        _oplist(
+            {"op": "place_component", "lib_id": "Device:R",
+             "designator": "R1", "x_mil": 2000, "y_mil": 1000, "value": "1k"},
+            {"op": "place_component", "lib_id": "Device:C",
+             "designator": "C1", "x_mil": 2400, "y_mil": 1000, "value": "100n"},
+            {"op": "add_wire", "vertices": ["R1.1", [2400, 850], "C1.1"]},
+        ),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    return tgt
+
+
+def test_delete_component_removes_all_instances(tmp_path):
+    tgt = _seed_rc(tmp_path)
+    verify = []
+    rs = kw.apply(
+        _oplist({"op": "delete_component", "designator": "C1"}),
+        str(tgt), apply=True, sources=[str(DEVICE)], verify_out=verify,
+    )
+    # The delete succeeded but the write is REFUSED: the wire into C1.1 is now
+    # dangling — stale wiring must be cleaned up explicitly, never silently.
+    assert rs[0].status == "ok"
+    assert any(f.code == "DANGLING_ENDPOINT" for f in verify)
+    sch = kreader.read_sch(str(tgt))
+    assert "C1" in {c.designator for c in sch.components}  # refused -> untouched
+
+    # Deleting the wire too makes the edit self-consistent -> applies.
+    sch0 = kreader.read_sch(str(tgt))
+    rs = kw.apply(
+        _oplist({"op": "delete_component", "designator": "C1"},
+                {"op": "delete_object", "uuid": _wire_uuid(tgt)}),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    assert [r.status for r in rs] == ["ok", "ok"]
+    sch = kreader.read_sch(str(tgt))
+    assert "C1" not in {c.designator for c in sch.components}
+    assert "R1" in {c.designator for c in sch.components}
+
+
+def _wire_uuid(tgt) -> str:
+    text = tgt.read_text()
+    m = re.search(r'\(wire .*?\(uuid "([0-9a-f-]+)"\)\)', text)
+    return m.group(1)
+
+
+def test_delete_absent_component_is_replay_safe_noop(tmp_path):
+    tgt = _seed_rc(tmp_path)
+    rs = kw.apply(
+        _oplist({"op": "delete_component", "designator": "R99"}),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    assert rs[0].status == "ok"
+    assert "already absent" in rs[0].message
+
+
+def test_move_component_carries_its_properties(tmp_path):
+    tgt = _seed_rc(tmp_path)
+    rs = kw.apply(
+        # Move R1 clear of the wire AND delete the wire so nothing dangles.
+        _oplist({"op": "delete_object", "uuid": _wire_uuid(tgt)},
+                {"op": "move_component", "designator": "R1",
+                 "x_mil": 3000, "y_mil": 2000}),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    assert [r.status for r in rs] == ["ok", "ok"]
+    sch = kreader.read_sch(str(tgt))
+    r1 = next(c for c in sch.components if c.designator == "R1")
+    assert (r1.x_mil, r1.y_mil) == (3000, 2000)
+    # Reference/Value moved WITH the body (same delta), not left behind.
+    text = tgt.read_text()
+    sym = text[text.index('"Device:R"'):]
+    m = re.search(r'\(property "Reference" "R1"\s*\(at ([\d.]+) ([\d.]+)', sym)
+    assert m, "no Reference property"
+    # body moved +1000mil x (25.4mm) / +1000mil y; ref must be near the new spot
+    assert abs(float(m.group(1)) - 76.2) < 26 and abs(float(m.group(2)) - 50.8) < 26
+
+
+def test_move_missing_component_fails_loudly(tmp_path):
+    tgt = _seed_rc(tmp_path)
+    rs = kw.apply(
+        _oplist({"op": "move_component", "designator": "R99",
+                 "x_mil": 1000, "y_mil": 1000}),
+        str(tgt), apply=True, sources=[str(DEVICE)],
+    )
+    assert rs[0].status == "error"
+    assert rs[0].error_code == "VERIFY_FAILED"

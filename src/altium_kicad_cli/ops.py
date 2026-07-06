@@ -35,6 +35,9 @@ _CORE_OPS: frozenset[str] = frozenset(
         "add_bus",
         "add_bus_entry",
         "add_text",
+        "delete_component",
+        "delete_object",
+        "move_component",
     }
 )
 _SUGAR_OPS: frozenset[str] = frozenset({"place_gnd", "place_vcc"})
@@ -60,6 +63,9 @@ _OP_REQUIRED: dict[str, list[str]] = {
     "add_text": ["text", "at"],
     "place_gnd": ["at"],
     "place_vcc": ["at"],
+    "delete_component": ["designator"],
+    "delete_object": ["uuid"],
+    "move_component": ["designator", "x_mil", "y_mil"],
 }
 
 

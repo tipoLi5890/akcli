@@ -168,7 +168,7 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
 
 What will **not** carry over (plan around it, state it in the report):
 - Symbol artwork, sheet graphics, text/annotation placement — connectivity only.
-- Hierarchy: the Altium reader is flat, and the KiCad writer is flat-only v1.
+- Hierarchy: the Altium reader is flat and the KiCad writer is flat-only v1; the KiCad READER does follow `(sheet ...)` children (per-instance namespaces, sheet-pin<->hierarchical-label connectivity).
 - Binary `.SchLib` symbol graphics and binary `.PcbDoc` copper (pads/tracks/vias).
 - Altium pin electrical types map only ints 0–7 (no `POWER_OUT`/`NO_CONNECT`), so
   ERC fidelity differs slightly between the two sides.

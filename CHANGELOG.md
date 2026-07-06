@@ -60,6 +60,23 @@ Not yet tagged or published to PyPI; install from source (see `INSTALL.md`).
   finding says so and points at re-export.
 
 ### Added
+- **Hierarchical sheets (KiCad reader):** `read`/`net`/`check`/`diff`/`pinmap` on a root
+  `.kicad_sch` now recurse into `(sheet ...)` children (paths relative to the parent file,
+  cycle- and depth-guarded). Every sheet INSTANCE is its own geometric namespace — a file
+  instantiated twice contributes its components once per instance with designators resolved
+  from the matching `(instances (path ...))` entry — and connectivity crosses sheets only
+  through sheet-pin↔hierarchical-label pairs (strictly parent↔child, never global), global
+  labels, and power ports. The writer stays flat-only v1.
+- **`delete_component` / `delete_object` / `move_component` ops:** delete removes all placed
+  instances of a designator (or one object by uuid) — attached wires are left for the
+  connectivity gate to flag, so stale wiring is cleaned up explicitly, and deleting an
+  already-absent target is a replay-safe no-op; move repositions one instance (designator +
+  optional unit) with its properties travelling along, wires intentionally not stretched.
+- **Property autoplace:** placed symbols now get eeschema-style field layout — Reference/Value
+  beside a tall (vertical-pin) body or above/below a wide one, `Footprint`/`Datasheet`/
+  `Description` created hidden, power symbols with hidden `#PWR` references and the value
+  below the anchor. Previously every field rendered at the component origin (the synthesized
+  Reference even at absolute 0,0), stacking raw text over the body.
 - **Multi-unit placement:** `place_component` takes an optional `"unit": N` — each unit is
   its own placed instance sharing the designator (74xx gate A/B/...). `"REF.PIN"` endpoints
   resolve against the instance whose unit owns the pin; wiring a pin on an **unplaced** unit

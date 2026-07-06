@@ -82,8 +82,9 @@ table via `akcli pinmap --expected`). Interpretation guide:
 - **Floating pin:** if the pin is absent from every net's members, cross-check its coordinates —
   `akcli read <file> --json` gives pin electrical-tip positions (mils, top-left origin, +Y down).
   A pin tip that misses the wire end by a few mils is a draw error in the source schematic.
-- Cross-sheet note: geometry never connects across sheets; only power ports, global labels,
-  ports/sheet entries merge by name. A "split" between sheets with only local labels is expected.
+- Cross-sheet note: geometry never connects across sheets; power ports, global labels and
+  ports/sheet entries merge by name, and (KiCad) a parent sheet pin joins exactly its child's
+  same-named hierarchical label. A "split" between sheets with only local labels is expected.
 
 ## 2. Triaging `akcli check` findings
 

@@ -18,7 +18,9 @@ def test_protocol_version_and_op_names():
     assert ops.PROTOCOL_VERSION == 1
     assert "place_component" in ops.OP_NAMES
     assert "place_gnd" in ops.OP_NAMES and "place_vcc" in ops.OP_NAMES
-    assert len(ops.OP_NAMES) == 13
+    # 13 original + delete_component / delete_object / move_component
+    assert len(ops.OP_NAMES) == 16
+    assert {"delete_component", "delete_object", "move_component"} <= ops.OP_NAMES
 
 
 def test_valid_oplist_has_no_errors():
