@@ -32,6 +32,16 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+### Added
+- **`akcli jlc add` is back — in-process, zero-install:** LCSC → KiCad symbol/footprint/3D
+  conversion now runs inside akcli via the vendored MIT conversion core of
+  **JLC2KiCadLib** (TousstNicolas; license + provenance in
+  `src/altium_kicad_cli/_vendor/jlc2kicadlib/` and `THIRD_PARTY_NOTICES.md`). Upstream's two
+  dependencies are deliberately not vendored: `requests` is replaced by a stdlib shim and the
+  GPLv3 `KicadModTree` by a clean-room `.kicad_mod` writer that emits the modern
+  `(footprint ...)` dialect. `--place` emits a `place_component` op-list as before; no external
+  binary and no pip dependency required.
+
 ### Removed
 - **`akcli jlc add` (external library conversion):** the upstream `nlbn`/`npnp` converter
   repositories are no longer available, so the delegation, the pinned auto-downloader, and the

@@ -9,6 +9,10 @@ project are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Search + parts data
 
+- **JLC2KiCadLib** — LCSC/EasyEDA → KiCad symbol/footprint/3D converter, by
+  **TousstNicolas**. MIT. <https://github.com/TousstNicolas/JLC2KiCad_lib>.
+  Vendored (conversion core) into `src/altium_kicad_cli/_vendor/jlc2kicadlib/`;
+  see `THIRD_PARTY_NOTICES.md` and the in-tree `PROVENANCE.md`.
 - **jlcsearch** (tscircuit) — MIT — search front end over the JLCPCB/LCSC catalog; used by
   `akcli jlc search` / `jlc show`. <https://github.com/tscircuit/jlcsearch>.
 - **jlcparts** — MIT — open dataset/tooling behind that catalog data.

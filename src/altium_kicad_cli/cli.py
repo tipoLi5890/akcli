@@ -663,6 +663,146 @@ def _cmd_jlc_show(args: argparse.Namespace) -> int:
     return EXIT["OK"]
 
 
+_VERIFY_CAVEAT = (
+    "NOTE: symbol/footprint/3D converted from EasyEDA/LCSC CAD data. Verify pin "
+    "mapping, footprint dimensions, and 3D alignment against the datasheet before use."
+)
+
+_ADD_EXIT = {
+    "NETWORK": EXIT["TOOL_MISSING"],
+    "CONVERT_PART_NOT_FOUND": EXIT["NOT_FOUND"],
+    "CONVERT_FAILED": EXIT["OPLIST"],
+    "CONVERT_NO_ARTIFACTS": EXIT["OPLIST"],
+}
+
+
+def _read_symbol_name(kicad_sym_path: str) -> str | None:
+    """Read the first symbol id from a produced ``.kicad_sym`` (don't guess from files)."""
+    try:
+        from .readers import kicad_lib  # lazy
+        lib = kicad_lib.read(kicad_sym_path)
+    except Exception:
+        return None
+    return lib.symbols[0].name if lib.symbols else None
+
+
+def _build_place_oplist(result, args, value: str | None) -> dict | None:
+    """Build a one-op ``place_component`` op-list from a successful conversion.
+
+    ``lib_id``'s symbol name is read from the produced ``.kicad_sym`` (the converter
+    names by component name, not the C-number); the footprint id comes from the
+    produced ``.kicad_mod`` stem. Returns ``None`` if no symbol artifact was produced.
+    """
+    from .ops import PROTOCOL_VERSION
+
+    lib_name = getattr(args, "lib_name", None) or "akcli"
+    sym_art = next((a for a in result.artifacts if a.endswith(".kicad_sym")), None)
+    if sym_art is None:
+        return None
+    sym_name = _read_symbol_name(sym_art)
+    if not sym_name:
+        return None
+    fp_art = next((a for a in result.artifacts if a.endswith(".kicad_mod")), None)
+    fp_name = Path(fp_art).stem if fp_art else sym_name
+
+    x_mil, y_mil = args.at
+    op: dict = {
+        "op": "place_component",
+        "lib_id": f"{lib_name}:{sym_name}",
+        "designator": args.designator,
+        "x_mil": float(x_mil),
+        "y_mil": float(y_mil),
+        "footprint": f"footprint:{fp_name}",
+    }
+    if value:
+        op["value"] = value
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "target_format": "kicad",
+        "ops": [op],
+    }
+
+
+def _cmd_jlc_add(args: argparse.Namespace) -> int:
+    from .parts import search as parts_search  # lazy: reuse the C-number normalizer
+
+    digits = parts_search._lcsc_digits(getattr(args, "lcsc", None))
+    if not digits:
+        raise _ExitWith(EXIT["USAGE"], "ERROR: missing/invalid LCSC C-number")
+    lcsc = "C" + digits
+
+    place = bool(getattr(args, "place", False))
+    if place:
+        if not getattr(args, "designator", None):
+            raise _ExitWith(EXIT["USAGE"], "ERROR: --place requires --designator REF")
+        if not getattr(args, "at", None):
+            raise _ExitWith(EXIT["USAGE"], "ERROR: --place requires --at X Y")
+
+    out_dir = getattr(args, "out", None) or str(Path("akcli-parts") / lcsc)
+    with_3d = bool(getattr(args, "with_3d", False))
+
+    # Advisory EasyEDA lookup: what is being fetched + whether 3D exists.
+    info = _easyeda_enrich(lcsc)
+    if with_3d and info is not None and not info.has_3d:
+        sys.stderr.write(
+            f"warning: no 3D model is published for {lcsc} on EasyEDA; "
+            "no STEP will be produced\n"
+        )
+
+    from .drivers import jlc2kicad  # lazy: vendored converter (networked)
+
+    result = jlc2kicad.convert(
+        lcsc,
+        out_dir,
+        with_3d=with_3d,
+        lib_name=getattr(args, "lib_name", None) or "akcli",
+        force=bool(getattr(args, "force", False)),
+    )
+
+    if result.error_code is not None:
+        sys.stderr.write(f"ERROR: {result.error_code}: {result.message}\n")
+        return _ADD_EXIT.get(result.error_code, EXIT["OPLIST"])
+
+    value = (info.mpn or info.title) if info is not None else None
+    place_doc = None
+    place_path = None
+    if place:
+        place_doc = _build_place_oplist(result, args, value)
+        if place_doc is not None:
+            place_path = Path(out_dir) / "place.json"
+            try:
+                place_path.write_text(_dumps(place_doc) + "\n", encoding="utf-8")
+            except OSError:  # pragma: no cover - best-effort file write
+                place_path = None
+        else:
+            sys.stderr.write(
+                "warning: --place skipped: no KiCad symbol artifact to place\n"
+            )
+
+    if args.json:
+        payload = result.to_dict()
+        payload["note"] = _VERIFY_CAVEAT
+        if place:
+            payload["place"] = place_doc
+        _emit(_dumps(payload))
+    else:
+        lines = [
+            f"converted {lcsc} -> kicad (in-process, vendored JLC2KiCadLib)",
+            f"out: {result.out_dir}",
+            "artifacts:",
+        ]
+        for a in result.artifacts:
+            lines.append(f"  {a}")
+        if place and place_path is not None:
+            lines.append(f"placement op-list: {place_path}")
+            lines.append("  apply with: akcli draw <target.kicad_sch> --ops "
+                         f"{place_path} --apply")
+        lines.append(_VERIFY_CAVEAT)
+        lines.append("hint: review with `akcli check`/`kicad-cli erc` before use.")
+        _emit("\n".join(lines))
+    return EXIT["OK"]
+
+
 def _read_symbol_name(kicad_sym_path: str) -> str | None:
     """Read the first symbol id from a produced ``.kicad_sym`` (don't guess from files)."""
     try:
@@ -908,6 +1048,27 @@ def build_parser() -> argparse.ArgumentParser:
     psh.add_argument("--easyeda", action="store_true",
                      help="also query EasyEDA for metadata + 3D-model availability")
     psh.set_defaults(handler=_cmd_jlc_show)
+
+    pa = jlc_sub.add_parser(
+        "add", parents=[common],
+        help="fetch an LCSC part and convert it into a KiCad library (networked)",
+    )
+    pa.add_argument("lcsc", nargs="?", help="LCSC part number, e.g. C2040")
+    pa.add_argument("--3d", dest="with_3d", action="store_true",
+                    help="also download the 3D STEP model")
+    pa.add_argument("--out", metavar="DIR",
+                    help="output directory (default: ./akcli-parts/<C-number>/)")
+    pa.add_argument("--lib-name", metavar="NAME", default="akcli",
+                    help="KiCad symbol library name (default: akcli)")
+    pa.add_argument("--force", action="store_true",
+                    help="overwrite existing artifacts")
+    pa.add_argument("--place", action="store_true",
+                    help="also emit a place_component op-list")
+    pa.add_argument("--designator", metavar="REF",
+                    help="reference designator for --place (e.g. U1)")
+    pa.add_argument("--at", nargs=2, type=float, metavar=("X", "Y"),
+                    help="placement position in mils for --place")
+    pa.set_defaults(handler=_cmd_jlc_add)
 
     return parser
 

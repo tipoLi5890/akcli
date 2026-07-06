@@ -39,10 +39,13 @@ only networked subcommand (exit 7 on network failure):
 ```bash
 akcli jlc search "AMS1117-3.3" --limit 10        # find candidates (B=Basic, P=Preferred)
 akcli jlc show C6186 --easyeda                    # confirm package, MPN, 3D availability
+akcli jlc add C6186 --out akcli-parts/C6186       # convert symbol/footprint (in-process)
 ```
 
-Symbols/footprints come from the official KiCad libraries or a project
-`.kicad_sym` (passed via `--symbols`); record the chosen LCSC C-number as an
+The produced `symbol/akcli.kicad_sym` becomes a `--symbols` source for
+`plan`/`draw`; `--place --designator U1 --at 2000 1000` also emits a ready
+`place.json`. Converted CAD data is third-party: always verify against the
+datasheet and `akcli check` after placing. Record the LCSC C-number as an
 `LCSC` parameter on the placed part so the BOM maps designator -> orderable part.
 
 ## (3) Seed the target file (new schematics only)

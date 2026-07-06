@@ -98,9 +98,50 @@ SOFTWARE.
 
 ## JLC/EasyEDA fetch + convert (subprocess / service; no source vendored)
 
-`altium-kicad-cli` ships **zero bundled third-party source code**. The `jlc`
-feature queries the following HTTP services over the network. No source files
-were copied, imported, or linked from any of them.
+## Vendored third-party source — JLC2KiCadLib (MIT)
+
+`src/altium_kicad_cli/_vendor/jlc2kicadlib/` contains the conversion core of
+**JLC2KiCadLib** by **TousstNicolas**, vendored under its MIT license
+(<https://github.com/TousstNicolas/JLC2KiCad_lib>, commit `48d36032…`; the
+upstream LICENSE is preserved verbatim in that directory and reproduced below,
+and every local modification is listed in its `PROVENANCE.md`). It powers
+`akcli jlc add` (LCSC → KiCad symbol/footprint/3D), running in-process.
+
+Deliberately **not** vendored: upstream's two dependencies. `requests` is
+replaced by a stdlib shim, and the **GPLv3 `KicadModTree`** footprint writer is
+replaced by `_kmt.py` — an original, clean-room implementation of the small API
+surface the vendored files use, written against the public KiCad footprint file
+format (KicadModTree source was neither copied nor consulted). This keeps the
+project MIT-licensed and free of copyleft obligations.
+
+```
+ The MIT License (MIT)
+
+Copyright © 2021 TousstNicolas
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Network services
+
+Beyond the vendored code above, `altium-kicad-cli` bundles no third-party
+source. The `jlc` feature queries the following HTTP services over the network.
 
 ### jlcsearch (tscircuit) — MIT
 
@@ -119,7 +160,7 @@ EasyEDA's **unofficial** Std-editor REST backend (`easyeda.com/api/products/...`
 `modules.easyeda.com/...`). These endpoints are undocumented and may change without notice;
 they are the same backend the `easyeda2kicad.py` project (uPesy, GPL/community) documents.
 We do not vendor easyeda2kicad and do not reuse its conversion code — conversion is
-queried directly. EasyEDA, LCSC, and JLCPCB are trademarks of their respective owners;
+queried directly (part metadata, and CAD documents for `jlc add`). EasyEDA, LCSC, and JLCPCB are trademarks of their respective owners;
 this project is not affiliated with or endorsed by them.
 
 ---

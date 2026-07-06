@@ -49,6 +49,34 @@ simply omitted (or shows `(metadata unavailable)`) — it never breaks `jlc show
 Exit codes: `0` when found, `0` with a `no part … found` stderr notice when the
 C-number does not exist, `7` on a network/HTTP error.
 
+### `akcli jlc add <C-number> [--3d] [--out DIR] [--lib-name NAME] [--force] [--place ...]`
+
+Fetch a real LCSC/EasyEDA part and convert it into a KiCad library — **in-process**,
+via the vendored MIT [JLC2KiCadLib](https://github.com/TousstNicolas/JLC2KiCad_lib)
+core (no external tool to install; networked).
+
+```bash
+akcli jlc add C2040                       # symbol + footprint
+akcli jlc add C2040 --3d                  # + 3D STEP model
+akcli jlc add C2040 --out ./mylib --lib-name akcli
+akcli jlc add C25804 --place --designator R1 --at 2000 1000   # + one-op place.json
+```
+
+Output layout under `--out` (default `./akcli-parts/<C-number>/`):
+`symbol/<lib-name>.kicad_sym`, `footprint/<name>.kicad_mod`, and with `--3d`
+`footprint/packages3d/<name>.step`. `--place` writes `place.json` (a one-op
+`place_component` op-list with `lib_id` read from the produced `.kicad_sym` and
+the footprint id from the `.kicad_mod` stem) to apply with
+`akcli draw <target> --ops place.json --symbols <symbol lib> --apply`.
+
+Exit codes: `0` success · `2` bad usage (bad C-number, `--place` without
+`--designator`/`--at`) · `4` part has no EasyEDA CAD data · `6` conversion
+failed / produced nothing · `7` network error.
+
+**A converted library is a claim, not a fact** — the CAD data comes from
+EasyEDA/LCSC and can be wrong (pin mapping, land pattern, 3D origin). Verify
+against the datasheet before wiring the part in.
+
 ## Part fields (JSON)
 
 | field | meaning |

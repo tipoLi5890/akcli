@@ -2,8 +2,9 @@
 name: parts-sourcing
 description: >-
   Source real, orderable parts for a schematic with the `akcli jlc` command family —
-  search the JLCPCB/LCSC catalog, check stock/price/Basic-vs-Extended status, pick the
-  right candidate for the build quantity, and close the BOM-hygiene loop with
+  search the JLCPCB/LCSC catalog, check stock/price/Basic-vs-Extended status, convert a
+  chosen part into a KiCad symbol/footprint/3D library (in-process, vendored MIT
+  JLC2KiCadLib core), verify it against the datasheet, and close the BOM-hygiene loop with
   `akcli check --bom`. Use this skill whenever the task involves: finding a part by MPN,
   value, or package; looking up an LCSC C-number; checking JLCPCB stock or price tiers;
   choosing between Basic and Extended parts; recording sourced parts on a schematic; or
@@ -54,22 +55,35 @@ No results is exit `0` with a stderr notice; network/HTTP failures exit `7` with
 `ERROR: NETWORK: ...` line. `--easyeda` is best-effort: on failure it prints
 `(metadata unavailable)` and never breaks the command.
 
-### (2) Get a symbol/footprint
+### (2) Convert — turn a C-number into a KiCad library
 
-`akcli` does **not** convert LCSC parts into libraries. Source the KiCad symbol and
-footprint from the official KiCad libraries, a project `.kicad_sym`, or the vendor —
-then verify pin mapping and the land pattern against the datasheet before wiring the
-part in. Symbols feed `akcli plan`/`akcli draw` via repeatable `--symbols` (see the
-circuit-design skill).
+```bash
+akcli jlc add C2040                                   # symbol + footprint
+akcli jlc add C2040 --3d                              # + 3D STEP model
+akcli jlc add C2040 --out ./mylib --lib-name akcli --force
+```
+
+Conversion runs **in-process** (vendored MIT JLC2KiCadLib core — no external
+binary). Output layout: `symbol/<lib-name>.kicad_sym`,
+`footprint/<name>.kicad_mod`, `footprint/packages3d/<name>.step` (with `--3d`).
+Exit codes: `0` success, `2` bad usage, `4` part has no EasyEDA CAD data,
+`6` conversion failed/empty, `7` network error.
+
+**A converted library is a claim, not a fact.** Verify before wiring in:
+1. **Pin count vs datasheet** — `akcli read <out>/symbol/<lib>.kicad_sym` must match
+   the package drawing exactly; spot-check power/ground/pin-1 in `--json`.
+2. **Footprint keying** — check pin-1 marking, pad numbering and courtyard against
+   the datasheet land pattern (read the `.kicad_mod` or view it in KiCad).
 
 ### (3) Place and close the BOM loop
 
-Author a `place_component` op for the chosen symbol, then run the BOM hygiene loop
-until clean:
+`--place` emits a one-op `place_component` op-list (`place.json`) with `lib_id`
+read from the produced `.kicad_sym` — never guessed from filenames:
 
 ```bash
-akcli draw board.kicad_sch --ops place.json --symbols mylib.kicad_sym          # dry-run first
-akcli draw board.kicad_sch --ops place.json --symbols mylib.kicad_sym --apply
+akcli jlc add C2040 --out ./mylib --place --designator U1 --at 1000 1500
+akcli draw board.kicad_sch --ops ./mylib/place.json --symbols ./mylib/symbol/akcli.kicad_sym          # dry-run first
+akcli draw board.kicad_sch --ops ./mylib/place.json --symbols ./mylib/symbol/akcli.kicad_sym --apply
 akcli check board.kicad_sch --bom              # dup designators, refdes gaps, missing value/footprint
 akcli component board.kicad_sch U1             # confirm the placed part's pin -> net map
 ```
