@@ -114,11 +114,12 @@ idempotent. Note: when piping (`akcli … | head`) the shell reports the *pipe's
 use `set -o pipefail` if you branch on it.
 
 - **Claude Code** — install the bundled plugin (below) for the `/altium-kicad:circuit-review`,
-  `circuit-pinmap`, `circuit-draw`, and `circuit-diff` commands plus six skills: `circuit-design`
+  `circuit-pinmap`, `circuit-draw`, and `circuit-diff` commands plus seven skills: `circuit-design`
   (read/analyze/draw basics), `circuit-debug` (connectivity & tool triage), `schematic-review`
   (severity-ranked design review), `schematic-authoring` (new circuits from an op-list),
-  `altium-interop` (working with Altium Designer), and `parts-sourcing` (JLC/LCSC parts).
-- **Codex** — install the bundled plugin (below): it packages all six skills plus the session hook.
+  `altium-interop` (working with Altium Designer), `parts-sourcing` (JLC/LCSC parts), and
+  `jlcpcb-capabilities` (manufacturer limits to design against).
+- **Codex** — install the bundled plugin (below): it packages all seven skills plus the session hook.
   Or drop the loose skill folders into `.agents/skills/` for auto-discovery. See
   [docs/codex-plugin.md](docs/codex-plugin.md).
 - **OpenCode** — auto-discovers the bundled skills; drop them into its skills dir and let the agent

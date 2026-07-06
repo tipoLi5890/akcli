@@ -33,6 +33,11 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 ## [Unreleased]
 
 ### Added
+- **New `jlcpcb-capabilities` skill:** JLCPCB's rigid-PCB / flex-PCB / PCBA / stencil
+  manufacturing limits, extracted from the official capability pages (sources + snapshot date
+  in the skill) with guidance on applying them while designing — package/BGA-pitch gates for
+  Economic vs Standard assembly, comfortable-default vs absolute-limit trace/via numbers,
+  heavy-copper and mask-color rule changes, and panelization requirements.
 - **Converted libraries import into Altium Designer natively:** the footprint writer now
   emits the **KiCad 6 dialect** (`(layer)(width)` graphics, version `20211014`) — readable by
   every KiCad from 6 to 10 *and* by Altium Designer's built-in **Import Wizard » KiCad Design

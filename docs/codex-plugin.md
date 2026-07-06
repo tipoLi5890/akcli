@@ -26,13 +26,14 @@ altium-kicad-cli/                 # ← plugin root
 │   └── plugin.json               # Codex manifest (this is what makes it a Codex plugin)
 ├── .agents/plugins/
 │   └── marketplace.json          # repo-scoped catalog for `codex plugin marketplace add`
-├── skills/                       # 6 skills, shared with Claude & OpenCode
+├── skills/                       # 7 skills, shared with Claude & OpenCode
 │   ├── circuit-design/SKILL.md   #   core read/analyze/draw mechanics (start here)
 │   ├── schematic-authoring/SKILL.md
 │   ├── schematic-review/SKILL.md
 │   ├── circuit-debug/SKILL.md
 │   ├── altium-interop/SKILL.md
-│   └── parts-sourcing/SKILL.md
+│   ├── parts-sourcing/SKILL.md
+│   └── jlcpcb-capabilities/SKILL.md
 ├── hooks/
 │   └── hooks.json                # SessionStart Python≥3.11 advisory (portable one-liner)
 ├── .claude-plugin/               # Claude Code manifest + marketplace (unchanged)

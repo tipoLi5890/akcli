@@ -28,6 +28,8 @@ sourcing loop.
   0 stock is not sourced.
 - **Compare at the build quantity.** The `--json` output carries the full
   `price_tiers` ladder; the headline price is the lowest-`qFrom` tier only.
+- **Check assemblability before falling in love with a package.** JLCPCB's PCBA line
+  has hard minimums (0402/0201, BGA pitch, pin pitch) — see the jlcpcb-capabilities skill.
 - **The schematic is authoritative.** Record every sourcing decision on the schematic
   (an `LCSC` parameter per designator), never only in a side document.
 

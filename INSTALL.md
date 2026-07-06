@@ -61,29 +61,30 @@ pip install git+https://github.com/tipoLi5890/altium-kicad-cli
 ## Use with AI coding agents
 
 `akcli` is a plain CLI, so any agent that can run shell commands drives it once it's on PATH (install it
-with one of the options above). The repo also ships **six skills** under `skills/` that teach the agent
+with one of the options above). The repo also ships **seven skills** under `skills/` that teach the agent
 how to drive `akcli`: `circuit-design` (read/analyze/draw basics), `circuit-debug` (connectivity & tool
 triage), `schematic-review` (severity-ranked design review), `schematic-authoring` (new circuits from an
-op-list), `altium-interop` (working with Altium Designer), and `parts-sourcing` (JLC/LCSC parts). Codex
+op-list), `altium-interop` (working with Altium Designer), `parts-sourcing` (JLC/LCSC parts), and
+`jlcpcb-capabilities` (JLCPCB manufacturing limits). Codex
 and OpenCode **auto-discover** any skill folder you drop into their skills directory — no plugin or extra
 config. Run the `cp` commands below from a clone of this repo.
 
 ### Claude Code
 
-Install the plugin — it bundles all six skills and the slash commands:
+Install the plugin — it bundles all seven skills and the slash commands:
 
 ```text
 /plugin marketplace add tipoLi5890/altium-kicad-cli
 /plugin install altium-kicad@altium-kicad
 ```
 
-You get the six skills and `/altium-kicad:circuit-review`, `circuit-pinmap`,
+You get the seven skills and `/altium-kicad:circuit-review`, `circuit-pinmap`,
 `circuit-draw`, and `circuit-diff`, all calling `akcli`.
 
 ### Codex
 
 `akcli` runs through Codex's built-in shell once it's on PATH. Install it as a **Codex plugin** —
-it bundles all six skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
+it bundles all seven skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
 
 ```bash
 codex plugin marketplace add tipoLi5890/altium-kicad-cli   # or `add ./` from a clone
