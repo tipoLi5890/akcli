@@ -6,6 +6,7 @@ plugin manifests may *optionally* carry a ``version`` field:
 
 * ``.claude-plugin/plugin.json``      -> top-level ``"version"``
 * ``.claude-plugin/marketplace.json`` -> ``"version"`` on each entry of ``"plugins"``
+* ``.codex-plugin/plugin.json``       -> top-level ``"version"``
 
 During active development the manifests deliberately ship **without** a ``version`` key
 (commit-SHA versioning, per SPEC §5.1/§5.2). This tool therefore only ever touches a
@@ -32,6 +33,7 @@ from pathlib import Path
 
 PLUGIN_REL = ".claude-plugin/plugin.json"
 MARKETPLACE_REL = ".claude-plugin/marketplace.json"
+CODEX_PLUGIN_REL = ".codex-plugin/plugin.json"
 PYPROJECT_REL = "pyproject.toml"
 
 
@@ -106,6 +108,8 @@ def sync(root: Path, *, check: bool) -> tuple[int, list[str]]:
     targets = (
         (root / PLUGIN_REL, _plan_plugin, _apply_plugin),
         (root / MARKETPLACE_REL, _plan_marketplace, _apply_marketplace),
+        # the Codex plugin manifest carries the same version as the Claude one
+        (root / CODEX_PLUGIN_REL, _plan_plugin, _apply_plugin),
     )
     for path, plan, apply in targets:
         if not path.is_file():
