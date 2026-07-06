@@ -175,15 +175,23 @@ BGA ≥0.35 mm, press-fit ≤1.025 mm**, castellated ≥0.5 mm, board↔board pa
 gap ≥2 mm, circular boards ≥20×20 mm, Economic assembly 2–50 pcs / Standard
 2–80,000 pcs.
 
-### Stencil (jlcpcb.com; order alongside assembly)
+## 嘉立創 SMT 激光鋼網
+
+Source: <https://www.jlc.com/portal/smtLaserSteelNet.html> (2026-07-06).
 
 | Item | Capability |
 |---|---|
-| Material | 304 HTA stainless, laser cut, tol ±0.003 mm, aperture >0.08 mm |
-| Foil | std 0.10/0.12/0.15/0.18/0.20 mm (fee: 0.03–0.08, 0.25–0.5) |
-| Frameless | 280×380 – 700×600 mm; framework 400×300 (valid 240×140) – 736×736 (valid 500×500), rect ≤1500×500 |
-| Electropolish | recommended for pitch ≤0.5 mm / BGA |
-| Extras | fiducials none/through/half-etched; step stencils (framework); top/bottom/combined |
+| Material / cutting | 304TA 鋼片, LPKF laser, tol ±0.003 mm, 最小開孔 >0.08 mm |
+| 鋼片厚度 | 0.06/0.08/0.10/0.12/0.13/0.15/0.18/0.20/0.30 mm (常規 0.10–0.20; 特殊 0.03–0.06, 0.25–0.5) |
+| 規格 | 20+ 標準尺寸 (37×47, 42×52, 55×65, 73.6×73.6 cm ...) |
+| 拋光 | 電解拋光 / 打磨拋光 (電解建議用於 pitch ≤0.5 mm 與 BGA) |
+| 交期 / 格式 | 6 小時–2 天; Gerber / Protel / PowerPCB |
+
+JLCPCB international stencil (<https://jlcpcb.com/capabilities/pcb-stencil-manufacturing>):
+same 304 steel / ±0.003 mm / >0.08 mm aperture family; frameless 280×380–700×600 mm,
+framework 400×300 (valid 240×140) – 736×736 (valid 500×500), rect ≤1500×500; foil std
+0.10–0.20 mm (fee 0.03–0.08, 0.25–0.5); fiducials none/through/half-etched; step
+stencils (framework only); top/bottom/combined.
 
 Rule of thumb: 0.12 mm foil for mixed 0402 + fine-pitch; electropolish
 whenever pitch ≤0.5 mm.

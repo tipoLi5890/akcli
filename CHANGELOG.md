@@ -32,7 +32,14 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-07-06
+
 ### Added
+- **`tools/live-view/`:** a localhost dashboard that watches a `.kicad_sch` while akcli draws
+  it — per-step SVG (inline, auto-cropped), KiCad ERC badges, part/net counts, notes, zoom/pan,
+  follow-live; optional macOS auto-revert of an open KiCad editor. See its README.
 - **New `jlcpcb-capabilities` skill:** manufacturing limits to design against, with
   **嘉立創 (jlc.com) as the primary source** — 1–64 layers, HDI blind/buried vias, 0.1 mm
   microvias, up to 6 oz copper, FPC and 經濟/標準 SMT gates — plus a difference table against

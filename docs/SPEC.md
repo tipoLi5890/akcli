@@ -383,7 +383,7 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, PROTOCOL_MISMATCH, PATH_OUTSIDE_ROOT, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, BAD_CONFIG`. Exit table: §8 | `test_errors.py` |
 | `safety.py` | hard limits + safe IO helpers used everywhere | `MAX_FILE_BYTES, MAX_SECTORS, MAX_RECORDS, MAX_DIR_ENTRIES, MAX_DECODED_BYTES, MAX_SEXPR_DEPTH, MAX_ATOM_BYTES, MAX_NODES`; `safe_path(base,cand)->Path`; `run_subprocess(argv,timeout,maxout)->CompletedProcess`; `atomic_write_with_backup(path,data,backup_dir)->None` | stdlib `os,subprocess,resource,signal,pathlib,shutil` | `safe_path`: realpath both, reject escapes/symlinks, never expand env from untrusted files; `run_subprocess`: `shell=False`, abs exe, `--` before paths, timeout, output cap; `atomic_write`: snapshot→temp-in-same-dir→fsync→`os.replace` | `test_safety.py`, `test_fuzz_safety.py` |
 | `units.py` | all coordinate conversions + grid + tolerance | `ALTIUM_SCH_MIL_PER_UNIT=10.0`; `MIL_PER_MM=1/0.0254`; `NM_PER_MIL=25400`; `NM_PER_MM=1_000_000`; `altium_to_mil(i,frac)->float`; `mil_to_nm(m)->int`; `nm_to_mm_str(nm)->str`; `snap_mil(m,grid=50)->float`; `approx_eq(a,b,tol_nm)->bool` | stdlib | `nm_to_mm_str` strips trailing zeros/dot (KiCad float style); integer-nm math only | `test_units.py` |
-| `config.py` | discover + parse + validate `altium-kicad-cli.toml` | `find_config(start:Path)->Path\|None`; `load_config(path)->Config`; `class Config` (`mcu_designator, rails:list, paths:dict, erc_waivers:list`) | `tomllib`, `errors`, `safety` | walk-up discovery from cwd; `--config` override; paths resolve relative to toml dir; reject unknown keys → `BAD_CONFIG`; schema in §3.10 | `test_config.py` |
+| `config.py` | discover + parse + validate `altium-kicad-cli.toml` | `find_config(start:Path)->Path\|None`; `load_config(path)->Config`; `class Config` (`mcu_designator, rails:list, paths:dict, erc_waivers:list`) | `tomllib`, `errors`, `safety` | walk-up discovery from cwd; `--config` override; paths resolve relative to toml dir; reject unknown keys → `BAD_CONFIG`; schema in §3.11 | `test_config.py` |
 | `report.py` | render findings + metadata caveats; text + `--json` | `render(findings,fmt,meta)->str`; `class Finding(code,severity,message,refs)`; `Severity` enum | `model`, `errors` | Always prints metadata header: passive-pin ratio, No-ERC suppressed count, unnamed-net count, frac-coord presence — so a vacuous pass is never read as clean | `test_report.py` |
 | `__main__.py` | `python -m` entry | `from .cli import main; raise SystemExit(main())` | `cli` | thin shim only | covered by `test_cli.py` |
 | `cli.py` | argparse dispatch, exit codes, global flags | `def main(argv=None)->int`; subcommands `read net component check diff pinmap plan draw export` | everything | global `--version` (pkg + protocol), `-C/--config`, `-v/-vv/--quiet`, `--json`, `--no-color`, `--debug`; `draw` defaults `--dry-run`, needs `--apply` to write; stdout = data, stderr = logs | `test_cli.py` |
@@ -438,18 +438,28 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
 | `kicad_cli.py` | optional secondary verify wrapper | `available()->bool`; `version()->tuple\|None`; `erc(path)->dict\|None`; `netlist(path)->dict\|None` | `safety`, `errors` | `shutil.which`-gated; `sch erc --format json` (≥8), fall back `export netlist` (7); **never** pass `--exit-code-violations` (erc exits 0 even with violations); nonzero/crash = our write bug; absence non-fatal (connectivity.py is primary) | `test_kicad_cli.py` (skipif no `kicad-cli`) |
+| `jlc2kicad.py` | LCSC→KiCad library conversion (in-process) | `convert(lcsc,out_dir,*,with_3d,lib_name,force)->ConvertResult` | `_vendor.jlc2kicadlib` | Orchestrates the vendored converter: resolve CAD uuids via EasyEDA `products/<C>/svgs`, then vendored `create_footprint`/`create_symbol`; error mapping `NETWORK`/`CONVERT_PART_NOT_FOUND`/`CONVERT_FAILED`/`CONVERT_NO_ARTIFACTS`; networked (the only one besides `jlc search/show`) | `test_jlc2kicad.py` (offline fixtures, injected transport) |
 | `altium_live/bridge.py` | optional Windows file-based JSON bridge (offline-unit-testable) | `send(op:dict,reqdir:Path,timeout)->dict`; `ping()->dict` | `safety`, `ops`, `errors` | atomic `request.json.tmp`→rename; poll `response.json` every 200 ms; `.lock` single-flight; `altium_ping` handshake returns `{protocol_version,altium_version}`; reject `protocol_version` mismatch → `PROTOCOL_MISMATCH`; per-run unique 0700 dir, `O_NOFOLLOW`. **Offline test mocks response.json** | `test_bridge.py` |
 | `altium_live/scripts/altium_api.pas` | DelphiScript half (Windows + Altium 22+) | (Altium scripting entry) | — | **Clean-room** from Altium's public scripting API + documented method; reads request.json, drives running Altium, writes response.json. **Validated only on user's Windows box** | manual (Windows) |
 | `altium_live/scripts/altium_api.PrjScr` | Altium script project wrapper | — | — | pairs with `.pas` | manual (Windows) |
 
-### 3.8 Solestack adapter (`src/altium_kicad_cli/adapters/` — optional, in-repo, imports only public model)
+
+### 3.8 Vendored third-party source (`src/altium_kicad_cli/_vendor/`)
+
+| Module | Purpose | Key surface | Notes | Tests |
+|---|---|---|---|---|
+| `jlc2kicadlib/` (upstream files) | JLC2KiCadLib conversion core (MIT, © TousstNicolas, commit `48d36032`) | `footprint.create_footprint`, `symbol.create_symbol`, `helper` | Vendored verbatim except import-level patches (all listed in its `PROVENANCE.md`); upstream `LICENSE` preserved in-tree; upstream CLI entry NOT vendored | `test_jlc2kicad.py` |
+| `jlc2kicadlib/_http.py` (ours) | stdlib drop-in for the `requests` slice the vendored code uses | `get(url,headers)->Response`, `codes.ok`, injectable `opener` | urllib-based, size-capped, never raises on HTTP errors (returns status) | idem |
+| `jlc2kicadlib/_kmt.py` (ours) | **clean-room** replacement for GPLv3 `KicadModTree` | `Footprint/Pad/Line/Arc/Circle/Polygon/Rect*/Text/Model/Translation/Vector2D`, `KicadFileHandler.writeFile` | Implemented from the public KiCad footprint file format (KicadModTree source neither copied nor consulted); emits the **KiCad-6 dialect** (`(layer)(width)` tails, version `20211014`) so output is readable by KiCad 6–10 AND Altium Designer's Import Wizard; `Model.at` legacy-inches → `(offset (xyz mm))` | idem |
+
+### 3.9 Solestack adapter (`src/altium_kicad_cli/adapters/` — optional, in-repo, imports only public model)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
 | `dts.py` | Zephyr DTS/overlay + pinctrl parser → expected pin→signal table | `parse_dts(path)->dict`; `to_expected_table(dts)->dict` | stdlib | Extract `&gpio0 25`, `nordic,nrf-psel`/`NRF_PSEL` node→GPIO; output the external table `pinmap.run` consumes. Generic-Zephyr, not board-hardcoded | `test_dts.py` |
 | `pinout_md.py` | parse human `pinout.md` table (columns `網路名`/`韌體節點`) → expected table | `parse_pinout_md(path)->dict` | stdlib | Markdown table by header; advisory source (low-severity on mismatch; pinout.md is explicitly untrusted) | `test_pinout_md.py` |
 
-### 3.9 Plugin / packaging / tooling (repo root)
+### 3.10 Plugin / packaging / tooling (repo root)
 
 | File | Purpose | Key contents | Tested by |
 |---|---|---|---|
@@ -462,7 +472,7 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | `tools/sync_version.py` | stamp plugin.json/marketplace.json from pyproject version | `main()`; CI fails on drift | `test_sync_version.py` |
 | `.gitattributes` | binary/text fixture rules | §6 — `tests/fixtures/** binary`, golden/`*.kicad_sch text eol=lf` | implicit (Windows CI) |
 | `.github/workflows/ci.yml` | CI matrix + validators | §6.4 | self |
-| `examples/altium-kicad-cli.toml.example` | tested reference config incl. `[[erc_waiver]]` for LED1/STAT | §3.10 | `test_config.py` |
+| `examples/altium-kicad-cli.toml.example` | tested reference config incl. `[[erc_waiver]]` for LED1/STAT | §3.11 | `test_config.py` |
 | `LICENSE` | MIT (repo) | — | — |
 | `THIRD_PARTY_NOTICES.md` | MIT attribution chain for altium-mcp **patterns** | credits flaco-source (2026) + coffeenmusic/Siddharth Ahuja (2025) | — |
 | `SECURITY.md` | untrusted-input threat model + enforced limits | — | — |
@@ -470,7 +480,7 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | `README.md`, `INSTALL.md` | docs + install UX | — | link-check (optional) |
 | `docs/config-schema.md`, `docs/cli-reference.md`, `docs/op-list-authoring.md`, `docs/op-capability-matrix.md` | contracts | — | — |
 
-### 3.10 Config schema (`altium-kicad-cli.toml`)
+### 3.11 Config schema (`altium-kicad-cli.toml`)
 
 ```toml
 [project]
@@ -494,7 +504,7 @@ reason = "LED1 shares MCP73831 open-drain STAT (P0.25) by design; FW reads it as
 
 `config.load_config` rejects unknown keys → `BAD_CONFIG`; discovery walks up from cwd; `-C/--config` overrides.
 
-### 3.11 Schemas (`schemas/`)
+### 3.12 Schemas (`schemas/`)
 
 | File | Purpose |
 |---|---|
