@@ -1,6 +1,6 @@
 {
   "name": "altium-kicad",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Read Altium binary .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch with no Altium or KiCad install, run ERC/power/pinmap/BOM/diff checks, and draw KiCad schematics. Zero-dependency Python CLI for AI coding agents. Not an Altium-to-KiCad converter.",
   "author": {
     "name": "Li, ching yu",

@@ -32,6 +32,10 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.1] - 2026-07-07
+
 ### Added
 - **`akcli expected` subcommand:** extract an expected pin→signal table from a Zephyr
   devicetree source/overlay (gpio phandles + Nordic `NRF_PSEL` pinctrl) or a markdown pinout
