@@ -73,6 +73,10 @@ akcli pinmap <file> --mcu U3 --expected pins.csv     # expected = .csv or .json
 `[[erc_waiver]]` entries; without `-C`, discovery walks up from the schematic's directory. Always read the metadata
 header `check` prints before declaring a board clean.
 
+Component values you place should come from **`akcli calc`** (31 standards-cited
+engineering calculators — E-series snap, dividers, IPC-2221 track width, I²C pull-ups,
+555, buck/boost, ...), not mental arithmetic — see the `design-calc` skill.
+
 ### (3) Draw / edit a **KiCad** schematic — op-list, then plan, then draw
 
 KiCad is the only writable target. Build an op-list JSON (document shape and the op vocabulary — 16 ops incl. `delete_component`/`delete_object`/`move_component`

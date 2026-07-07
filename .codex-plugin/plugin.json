@@ -28,7 +28,7 @@
   "interface": {
     "displayName": "Altium + KiCad EDA Toolkit",
     "shortDescription": "Read Altium & KiCad schematics, run ERC/design checks, draw KiCad — no EDA install required.",
-    "longDescription": "Drives the zero-dependency `akcli` CLI: parse Altium .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch/.kicad_sym/.kicad_pcb into one normalized model, extract netlists, run ERC-lite / power-rail / BOM / pinmap / revision-diff checks, author and apply KiCad schematics from an op-list, and source real JLCPCB/LCSC parts. Bundles six task skills — circuit-design (core mechanics), schematic-authoring, schematic-review, circuit-debug, altium-interop, and parts-sourcing. It is not an Altium-to-KiCad converter: Altium is read/analyze-only; KiCad is the only writable target.",
+    "longDescription": "Drives the zero-dependency `akcli` CLI: parse Altium .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch/.kicad_sym/.kicad_pcb into one normalized model, extract netlists, run ERC-lite / power-rail / BOM / pinmap / revision-diff checks, author and apply KiCad schematics from an op-list, and source real JLCPCB/LCSC parts. Bundles eight task skills — circuit-design (core mechanics), schematic-authoring, schematic-review, circuit-debug, altium-interop, parts-sourcing, jlcpcb-capabilities, and design-calc (31 standards-cited engineering calculators). It is not an Altium-to-KiCad converter: Altium is read/analyze-only; KiCad is the only writable target.",
     "developerName": "Li, ching yu",
     "category": "Developer Tools",
     "capabilities": [

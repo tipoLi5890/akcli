@@ -624,6 +624,93 @@ def _cmd_ops(args: argparse.Namespace) -> int:
     raise _ExitWith(EXIT["USAGE"], "ERROR: use `akcli ops list` or `akcli ops template <op>`")
 
 
+def _cmd_calc(args: argparse.Namespace) -> int:
+    """`calc list` / `calc info <name>` / `calc <name> key=value ...`."""
+    from . import calc as calcmod
+    from .calc.registry import CALCS, CalcError
+    from .calc.si import fmt_eng
+
+    name = getattr(args, "name", None)
+    params = list(getattr(args, "params", []) or [])
+    if not name or name == "list":
+        if getattr(args, "json", False):
+            table = {
+                c.name: {
+                    "title": c.title, "group": c.group,
+                    "params": [{"name": p.name, "unit": p.unit, "help": p.help,
+                                "required": p.default is None,
+                                **({"choices": list(p.choices)} if p.choices else {})}
+                               for p in c.params],
+                    "reference": c.reference,
+                    **({"notes": c.notes} if c.notes else {}),
+                }
+                for c in sorted(CALCS.values(), key=lambda c: (c.group, c.name))
+            }
+            _emit(_dumps(table))
+            return EXIT["OK"]
+        lines, group = [], None
+        for c in sorted(CALCS.values(), key=lambda c: (c.group, c.name)):
+            if c.group != group:
+                group = c.group
+                lines.append(f"[{group}]")
+            req = " ".join(p.name for p in c.params if p.default is None)
+            lines.append(f"  {c.name:18} {c.title}" + (f"  ({req})" if req else ""))
+        lines.append("`akcli calc info <name>` shows params + the reference; "
+                     "`akcli calc <name> key=value ...` runs it.")
+        _emit("\n".join(lines))
+        return EXIT["OK"]
+    if name == "info":
+        target = params[0] if params else None
+        c = CALCS.get(target or "")
+        if c is None:
+            raise _ExitWith(EXIT["USAGE"],
+                            f"ERROR: unknown calculator {target!r} (see `akcli calc list`)")
+        lines = [f"{c.name} — {c.title}", ""]
+        for p in c.params:
+            d = "required" if p.default is None else f"default {p.default}"
+            ch = f" one of {list(p.choices)}" if p.choices else ""
+            lines.append(f"  {p.name:14} [{p.unit or '-'}] {p.help} ({d}){ch}")
+        lines += ["", f"Reference: {c.reference}"]
+        if c.notes:
+            lines.append(f"Note: {c.notes}")
+        _emit("\n".join(lines))
+        return EXIT["OK"]
+    if name not in CALCS:
+        raise _ExitWith(EXIT["USAGE"],
+                        f"ERROR: unknown calculator {name!r} (see `akcli calc list`)")
+    raw: dict[str, str] = {}
+    for tok in params:
+        if "=" not in tok:
+            raise _ExitWith(EXIT["USAGE"],
+                            f"ERROR: expected key=value, got {tok!r}")
+        k, v = tok.split("=", 1)
+        raw[k.strip()] = v.strip()
+    try:
+        doc = calcmod.compute(name, raw)
+    except CalcError as exc:
+        raise _ExitWith(EXIT["USAGE"], f"ERROR: {exc}")
+    if getattr(args, "json", False):
+        _emit(_dumps(doc))
+        return EXIT["OK"]
+    lines = [f"{doc['title']}"]
+    for key, cell in doc["results"].items():
+        val, unit = cell["value"], cell.get("unit", "")
+        if isinstance(val, float):
+            # SI prefixes scale linearly — never prefix compound/squared units
+            plain = any(ch in unit for ch in "²/°")
+            shown = (f"{val:.6g} {unit}" if plain
+                     else fmt_eng(val, unit) if unit else f"{val:.6g}")
+        elif isinstance(val, list):
+            shown = f"{len(val)} entries (use --json for detail)"
+        else:
+            shown = f"{val} {unit}".strip()
+        note = f"   ({cell['note']})" if cell.get("note") else ""
+        lines.append(f"  {key:22} {shown}{note}")
+    lines.append(f"reference: {doc['reference']}")
+    _emit("\n".join(lines))
+    return EXIT["OK"]
+
+
 def _cmd_expected(args: argparse.Namespace) -> int:
     """Extract an expected pin->signal table from a .dts/.overlay or pinout .md.
 
@@ -1123,6 +1210,15 @@ def build_parser() -> argparse.ArgumentParser:
                      help="omit optional fields from the skeleton")
     pot.set_defaults(handler=_cmd_ops, action="template")
     p.set_defaults(handler=_cmd_ops)
+
+    p = sub.add_parser("calc", parents=[common],
+                       help="engineering calculators (E-series, IPC-2221, via, "
+                            "SMPS, 555, I2C, ... — every result cites its source)")
+    p.add_argument("name", nargs="?",
+                   help="calculator name, or `list` / `info <name>`")
+    p.add_argument("params", nargs="*", metavar="key=value",
+                   help="inputs, engineering notation ok (4k7, 100n, 35u)")
+    p.set_defaults(handler=_cmd_calc)
 
     p = sub.add_parser("export", parents=[common], help="emit a netlist")
     p.add_argument("path", nargs="?", help="input schematic")

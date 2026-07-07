@@ -459,6 +459,27 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | `jlc2kicadlib/_http.py` (ours) | stdlib drop-in for the `requests` slice the vendored code uses | `get(url,headers)->Response`, `codes.ok`, injectable `opener` | urllib-based, size-capped, never raises on HTTP errors (returns status) | idem |
 | `jlc2kicadlib/_kmt.py` (ours) | **clean-room** replacement for GPLv3 `KicadModTree` | `Footprint/Pad/Line/Arc/Circle/Polygon/Rect*/Text/Model/Translation/Vector2D`, `KicadFileHandler.writeFile` | Implemented from the public KiCad footprint file format (KicadModTree source neither copied nor consulted); emits the **KiCad-6 dialect** (`(layer)(width)` tails, version `20211014`) so output is readable by KiCad 6–10 AND Altium Designer's Import Wizard; `Model.at` legacy-inches → `(offset (xyz mm))` | idem |
 
+### 3.8b Engineering calculators (`src/altium_kicad_cli/calc/`)
+
+| File | Purpose | Public API | Reference basis | Tested by |
+|---|---|---|---|---|
+| `registry.py` | self-describing calc registry; every entry REQUIRES a formal citation | `Param`, `Result`, `Calc`, `CALCS`, `register()`, `compute(name,raw)->dict` (envelope carries `reference`) | — | `test_calc.py` |
+| `si.py` | engineering-notation parse/format (`4k7`, `100n`, `2M2`) | `parse_value`, `fmt_eng` | BIPM SI Brochure 9th ed.; IEC 60062 R-marking | idem |
+| `eseries.py` | E1–E24 tabulated + E48/E96/E192 formula series; snap; 2–4R combination search (single⊕pair, pair⊕pair meet-in-middle) | `SERIES`, `nearest`, `snap`, calcs `eseries`/`rcombo` | IEC 60063:2015 (incl. E192 9.20 exception) | idem |
+| `electrical.py` | ohm/vdivider(+design)/led/rc/rc-charge/lc/reactance | registry calcs | Horowitz & Hill 3rd ed. §1.2/§1.4/§1.7 | idem |
+| `regulator.py` | adj3 (LM317) + FB divider; exhaustive worst-case corners; pair design | `regulator`, `regulator-design` | TI SLVS044Y §8.2 | idem |
+| `pcb.py` | IPC-2221 trackwidth/trackcurrent, Table 6-1 clearance (>500 V slopes), via R/Rθ/ampacity/L/C/rise, Onderdonk/Preece fusing, ASTM B258 AWG | registry calcs | IPC-2221B; Johnson & Graham 1993 §7; Stauffacher 1928; Preece 1884; ASTM B258-18 | idem |
+| `rf.py` | wavelength, coax, twin-lead, microstrip (Hammerstad–Jensen), stripline (Cohn exact, K(k) via AGM), PI/TEE/bridged-TEE attenuators | registry calcs | H&J 1980; Cohn 1954; A&S §17.6; Pozar 4th ed.; Ref. Data for Radio Engineers 6th ed. | idem |
+| `power.py` | buck/boost power stage, battery life | registry calcs | TI SLVA477B / SLVA372C | idem |
+| `ic.py` | ne555-astable/mono, opamp-gain, i2c-pullup, crystal-caps, thermal | registry calcs | TI SLFS022I, SLOD006B; NXP UM10204 §7.1; ST AN2867; JESD51-2A | idem |
+| `codes.py` | resistor color bands, SMD/EIA-96 decode, galvanic pairs | registry calcs | IEC 60062:2016; EIA-96; MIL-STD-889C | idem |
+
+Verification: `tests/test_calc.py` pins outputs to **KiCad pcb_calculator readings** (via vector
+0.000575362 Ω / 83.29 °C/W / 2.9993 A / 0.5995 pF / 32.97 ps / 1.207 nH / 3.793 Ω; track 0.300387 /
+0.781437 mm; clearance rows; 1 kΩ E24 exact combo) plus published table values (3 dB PI 292.4/17.61 Ω,
+NE555 480 Hz, UM10204 966.7/3540 Ω, AN2867 19 pF). KiCad is a numerical cross-check only — GPL code
+neither copied nor consulted.
+
 ### 3.9 Solestack adapter (`src/altium_kicad_cli/adapters/` — optional, in-repo, imports only public model)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |

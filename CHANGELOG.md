@@ -33,6 +33,22 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 ## [Unreleased]
 
 ### Added
+- **`akcli calc` — 31 offline engineering calculators**, each stamped with its formal
+  reference: E-series snap + 2–4-resistor combination search (IEC 60063:2015, tabulated
+  E1–E24 + formula E48/E96/E192 with the 9.20 exception), dividers/LED/RC/LC
+  (Horowitz & Hill 3rd ed.), LM317/FB regulator networks with exhaustive worst-case corner
+  analysis (TI SLVS044Y), IPC-2221B §6.2 track width ↔ current and Table 6-1 clearance
+  (incl. >500 V slopes), via R/thermal/ampacity/L/C/rise (Johnson & Graham 1993),
+  Onderdonk/Preece fusing, ASTM B258 AWG, microstrip (Hammerstad–Jensen 1980), stripline
+  (Cohn 1954 exact via AGM), coax/twin-lead (Pozar), PI/TEE/bridged-TEE attenuators,
+  buck/boost stages (TI SLVA477B/372C), NE555 (SLFS022I), op-amp pairs (SLOD006B),
+  I²C pull-up window (NXP UM10204 §7.1), crystal caps (ST AN2867), JESD51 thermal, battery
+  life, resistor color/SMD/EIA-96 codes (IEC 60062:2016), galvanic pairs (MIL-STD-889C).
+  Inputs take engineering notation (`4k7`, `100n`); `--json` returns
+  `{calc, inputs, results, reference}`. Numerics cross-validated against KiCad's
+  pcb_calculator outputs (independent clean reimplementation — no GPL code) and published
+  handbook values in `tests/test_calc.py`. New **`design-calc` skill** teaches agents to
+  compute-then-place E-series values instead of guessing.
 - **Binary `.PcbDoc` copper decoded:** `Tracks6`/`Vias6`/`Arcs6`/`Pads6` are now parsed
   (new `readers/altium_pcb_bin.py` — packed little-endian records, coordinates in mils,
   native +Y-up frame) and land on the `Pcb` model as `tracks`/`vias`/`arcs`/`pads`;

@@ -84,6 +84,27 @@ Exits `1` when nothing was extracted (an empty table would make `pinmap
 --expected` vacuously pass), `2` on an unsupported input type, `4` when the
 file is missing. The schematic stays authoritative — this table is advisory.
 
+### `akcli calc [list | info <name> | <name> key=value ...]`
+Offline **engineering calculators** (31): E-series snapping and 2–4-resistor
+combination search (IEC 60063:2015), voltage dividers and LED resistors,
+LM317/FB regulator networks with worst-case corners (TI SLVS044Y), IPC-2221B
+track width ↔ current and Table 6-1 clearance, via R/thermal/ampacity/L/C
+(Johnson & Graham 1993), Onderdonk/Preece fusing, ASTM B258 AWG,
+microstrip/stripline/coax impedance (Hammerstad–Jensen 1980, Cohn 1954),
+PI/TEE/bridged-TEE attenuators, buck/boost power stages (TI SLVA477B/372C),
+NE555 (TI SLFS022I), op-amp gain pairs, I²C pull-up window (NXP UM10204),
+crystal load caps (ST AN2867), junction thermal (JESD51), battery life,
+resistor color/SMD/EIA-96 markings (IEC 60062:2016), galvanic compatibility
+(MIL-STD-889C).
+- Inputs take engineering notation (`4k7`, `100n`, `2M2`); **every result
+  prints its formal reference**. `--json` returns
+  `{calc, inputs, results{value,unit,note}, reference}`.
+- `list` groups all calculators; `info <name>` shows parameters, defaults and
+  the citation. Bad name/params exit `2`.
+- Numerics are cross-checked in the test suite against KiCad's
+  pcb_calculator (independent reimplementation — no GPL code) and published
+  datasheet/handbook values.
+
 ### `akcli export <file> [--format protel|kicad|csv] [-o FILE]`
 Export the schematic's **netlist** for other EDA tools. Default `--format protel` (an
 Altium-importable `.NET`); `kicad` emits a legacy eeschema netlist; `csv` flat `net,ref,pin` rows.
