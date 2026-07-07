@@ -73,7 +73,7 @@ akcli pinmap <file> --mcu U3 --expected pins.csv     # expected = .csv or .json
 `[[erc_waiver]]` entries; without `-C`, discovery walks up from the schematic's directory. Always read the metadata
 header `check` prints before declaring a board clean.
 
-Component values you place should come from **`akcli calc`** (36 standards-cited
+Component values you place should come from **`akcli calc`** (56 standards-cited
 engineering calculators — E-series snap, dividers, IPC-2221 track width, I²C pull-ups,
 555, buck/boost, ...), not mental arithmetic — see the `design-calc` skill.
 

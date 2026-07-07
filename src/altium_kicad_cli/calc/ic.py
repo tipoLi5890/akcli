@@ -93,7 +93,7 @@ _I2C_FMAX = {"standard": 100e3, "fast": 400e3, "fast-plus": 1e6}
 
 
 @register(
-    "i2c-pullup", "I²C bus pull-up resistor window", "ic",
+    "i2c-pullup", "I²C bus pull-up resistor window", "interface",
     "NXP UM10204 Rev.7 (2021) §7.1: Rp(min) = (VDD−0.4 V)/3 mA; "
     "Rp(max) = t_r/(0.8473·C_b)",
     (Param("vdd", "V", "bus supply voltage"),

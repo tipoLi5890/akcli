@@ -10,12 +10,16 @@ from __future__ import annotations
 
 # importing the modules populates the registry
 from . import (  # noqa: F401
+    analog,
     codes,
+    convert,
     electrical,
     eseries,
     ic,
+    interface,
     pcb,
     power,
+    protection,
     regulator,
     rf,
 )

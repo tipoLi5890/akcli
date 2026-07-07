@@ -33,6 +33,27 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 ## [Unreleased]
 
 ### Added
+- **20 more calculators (56 total)**, all standards-cited: differential pairs
+  (IPC-2141A over Hammerstad–Jensen/Cohn single-ended), `tracktemp` (IPC-2221 solved for ΔT),
+  unit conversions (dBm/W/Vrms per IEEE Std 100; mil/mm exact 25.4; oz/µm copper nominal +
+  pure-Cu physics), comparator hysteresis analysis+design (TI SLVA954, round-trip-tested),
+  RS-485 fail-safe bias (TIA-485-A/SLLA070D), CAN split termination (ISO 11898-2), LDO
+  dissipation/dropout/thermal, MOSFET gate drive (TI SLUA618A), current-sense shunts
+  (TI SBOA170), Sallen–Key equal-component design (TI SLOA024B), ADC LSB/SNR/settling
+  (MT-001), TVS selection (IEC 61000-4-5 surge), fuse derating on the IEC 60127 R10 ladder,
+  NTC inrush sizing (TDK/EPCOS guide), L- and PI-section matching (Pozar §5.1/Bowick),
+  flyback first-order design (Erickson ch. 6). **IPC-2152 deliberately not faked** —
+  chart-based licensed data with no public closed form.
+- **`akcli calc` tooling:** `calc batch <file|->` (JSON job list → envelope array, exit 1
+  if any job fails), `--md` (markdown result table), and `--ops FILE` — design-type
+  calculators emit a schema-valid `place_component` op-list with the computed E-series
+  values filled in, validated against `ops.validate_oplist` in tests.
+- **`tools/calc-view/`:** local web UI (stdlib server, localhost-only) for all 56
+  calculators — grouped sidebar with filter, auto-generated forms, results with units and
+  the formal reference, ~45 physical-style SVG illustrations (via/trace cross-sections,
+  stackups, LM317/555/I²C/RS-485/CAN/flyback networks; the resistor color-code diagram
+  colors its bands from the actual result), pinned/recent calculators, and shareable URLs
+  (the hash carries calculator + inputs and re-runs on load).
 - **`akcli calc` — 36 offline engineering calculators**, each stamped with its formal
   reference: E-series snap + 2–4-resistor combination search (IEC 60063:2015, tabulated
   E1–E24 + formula E48/E96/E192 with the 9.20 exception), dividers/LED/RC/LC

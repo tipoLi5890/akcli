@@ -470,9 +470,14 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | `regulator.py` | adj3 (LM317) + FB divider; exhaustive worst-case corners; pair design | `regulator`, `regulator-design` | TI SLVS044Y §8.2 | idem |
 | `pcb.py` | IPC-2221 trackwidth/trackcurrent, Table 6-1 clearance (>500 V slopes), via R/Rθ/ampacity/L/C/rise, Onderdonk/Preece fusing, ASTM B258 AWG | registry calcs | IPC-2221B; Johnson & Graham 1993 §7; Stauffacher 1928; Preece 1884; ASTM B258-18 | idem |
 | `rf.py` | wavelength, coax, twin-lead, microstrip (Hammerstad–Jensen), stripline (Cohn exact, K(k) via AGM), PI/TEE/bridged-TEE attenuators | registry calcs | H&J 1980; Cohn 1954; A&S §17.6; Pozar 4th ed.; Ref. Data for Radio Engineers 6th ed. | idem |
-| `power.py` | buck/boost power stage, battery life | registry calcs | TI SLVA477B / SLVA372C | idem |
+| `power.py` | buck/boost power stage, LDO dissipation, gate drive, shunt, flyback, battery life | registry calcs | TI SLVA477B/372C; SLUA618A; SBOA170; Erickson ch.6 | idem |
 | `ic.py` | ne555-astable/mono, opamp-gain, i2c-pullup, crystal-caps, thermal | registry calcs | TI SLFS022I, SLOD006B; NXP UM10204 §7.1; ST AN2867; JESD51-2A | idem |
 | `codes.py` | resistor color bands, SMD/EIA-96 decode, galvanic pairs | registry calcs | IEC 60062:2016; EIA-96; MIL-STD-889C | idem |
+| `convert.py` | dBm/W/Vrms, mil/mm/inch/µm, oz↔µm copper | registry calcs | IEEE Std 100 (dBm); NIST SP 811 (25.4 exact); IPC copper nominal 34.8 µm + pure-Cu 34.06 µm | `test_calc_extended.py` |
+| `analog.py` | comparator hysteresis (analysis+design, 3-R node), Sallen–Key equal-component LP, ADC LSB/SNR/settling | registry calcs | TI SLVA954; Sallen & Key 1955 / TI SLOA024B; MT-001, k=ln(2^(N+1)) settling | idem |
+| `interface.py` | RS-485 fail-safe bias, CAN split termination (+ i2c-pullup regrouped here) | registry calcs | TIA/EIA-485-A + TI SLLA070D; ISO 11898-2:2016 §10 | idem |
+| `protection.py` | TVS check, fuse derating (R10 ladder), NTC inrush | registry calcs | IEC 61000-4-5 + Littelfuse guide; IEC 60127; TDK/EPCOS NTC guide | idem |
+| `opsmap.py` | calc→op-list bridge (`--ops`): design calcs → `place_component` ops with E-series values | `MAPPABLE`, `to_oplist(name, envelope)->dict` | protocol-1 op-list; schema-validated in tests | idem |
 
 Verification: `tests/test_calc.py` pins outputs to **KiCad pcb_calculator readings** (via vector
 0.000575362 Ω / 83.29 °C/W / 2.9993 A / 0.5995 pF / 32.97 ps / 1.207 nH / 3.793 Ω; track 0.300387 /
