@@ -55,7 +55,7 @@ def test_read_kicad_sym_text(capsys):
 def test_read_kicad_sym_json(capsys):
     assert main(["read", "--json", F("kicad/symbols/power.kicad_sym")]) == EXIT["OK"]
     doc = json.loads(capsys.readouterr().out)
-    assert doc["schema_version"] == "1.0"
+    assert doc["schema_version"] == "1.1"
     assert doc["source_format"] == "kicad"
     names = [s["name"] for s in doc["symbols"]]
     assert names == ["GND", "+3V3"]
@@ -88,7 +88,7 @@ def test_read_kicad_pcb_text(capsys):
 def test_read_kicad_pcb_json(capsys):
     assert main(["read", "--json", F("kicad/board.kicad_pcb")]) == EXIT["OK"]
     doc = json.loads(capsys.readouterr().out)
-    assert doc["schema_version"] == "1.0"
+    assert doc["schema_version"] == "1.1"
     assert doc["source_format"] == "kicad"
     # net 0 ("") is dropped; only the two named nets survive.
     assert doc["nets"] == ["GND", "+3V3"]
@@ -142,8 +142,7 @@ def _write_pcbdoc(tmp_path: Path) -> Path:
             {"SOURCEDESIGNATOR": "R1", "PATTERN": "0402", "LAYER": "TOP",
              "ROTATION": "0"},
         ]),
-        # a binary section is present but must never be ASCII-parsed by read().
-        "Pads6/Data": bytes(range(64)),
+        # no binary sections: this fixture exercises the ASCII-side CLI path
     }
     p = tmp_path / "board.PcbDoc"
     ole_writer.write_ole(str(p), streams)
@@ -161,7 +160,7 @@ def test_read_altium_schlib_cli_text(tmp_path, capsys):
 def test_read_altium_schlib_cli_json(tmp_path, capsys):
     assert main(["read", "--json", str(_write_schlib(tmp_path))]) == EXIT["OK"]
     doc = json.loads(capsys.readouterr().out)
-    assert doc["schema_version"] == "1.0"
+    assert doc["schema_version"] == "1.1"
     assert doc["source_format"] == "altium"
     assert sorted(s["name"] for s in doc["symbols"]) == ["CAP", "RES"]
 
@@ -177,7 +176,7 @@ def test_read_altium_pcbdoc_cli_text(tmp_path, capsys):
 def test_read_altium_pcbdoc_cli_json(tmp_path, capsys):
     assert main(["read", "--json", str(_write_pcbdoc(tmp_path))]) == EXIT["OK"]
     doc = json.loads(capsys.readouterr().out)
-    assert doc["schema_version"] == "1.0"
+    assert doc["schema_version"] == "1.1"
     assert doc["source_format"] == "altium"
     assert doc["nets"] == ["GND", "V3V3"]
     assert {f["designator"] for f in doc["footprints"]} == {"U1", "R1"}

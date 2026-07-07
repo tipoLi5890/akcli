@@ -109,18 +109,28 @@ def _footprints(records: list[dict]) -> list[Footprint]:
 
 
 def read(path: os.PathLike | str | bytes | bytearray) -> Pcb:
-    """Read a ``.PcbDoc`` into a normalized :class:`model.Pcb` (ASCII sections only).
+    """Read a ``.PcbDoc`` into a normalized :class:`model.Pcb`.
 
-    Parses ``Nets6`` / ``Components6`` / ``Classes6`` / ``Rules6``. Binary
-    geometry sections (pads/vias/tracks/...) are not touched here -- a caller that
-    explicitly requests one via :func:`parse_ascii_section` is refused loudly.
+    ASCII sections (``Nets6`` / ``Components6`` / ``Classes6`` / ``Rules6``)
+    provide nets/footprints/classes/rules; the binary copper sections
+    (``Tracks6`` / ``Vias6`` / ``Arcs6`` / ``Pads6``) are decoded by
+    :mod:`.altium_pcb_bin` into ``Pcb.tracks/vias/arcs/pads`` (Altium frame,
+    mils, +Y up; net indices resolved to names). Other binary sections
+    (fills/regions/texts/polygons) remain out of scope and untouched;
+    :func:`parse_ascii_section` still refuses them loudly.
     """
+    from . import altium_pcb_bin as _bin
+
     streams = _cfbf.read_streams_qualified(path)
 
     nets = _nets(parse_ascii_section(streams, "Nets6"))
     footprints = _footprints(parse_ascii_section(streams, "Components6"))
     classes = parse_ascii_section(streams, "Classes6")
     rules = parse_ascii_section(streams, "Rules6")
+
+    def _bin_section(section: str, parser):
+        buf = _section_buf(streams, section)
+        return parser(buf, nets) if buf else []
 
     src = path if isinstance(path, (str, os.PathLike)) else "<bytes>"
     return Pcb(
@@ -130,6 +140,10 @@ def read(path: os.PathLike | str | bytes | bytearray) -> Pcb:
         footprints=footprints,
         classes=classes,
         rules=rules,
+        tracks=_bin_section("Tracks6", _bin.parse_tracks),
+        vias=_bin_section("Vias6", _bin.parse_vias),
+        arcs=_bin_section("Arcs6", _bin.parse_arcs),
+        pads=_bin_section("Pads6", _bin.parse_pads),
     )
 
 

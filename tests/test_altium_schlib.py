@@ -104,4 +104,4 @@ def test_binary_symbol_records_refused_loudly(tmp_path):
 
 def test_export_stamps_schema_version(tmp_path):
     lib = altium_schlib.read(_write_lib(tmp_path))
-    assert lib.export()["schema_version"] == "1.0"
+    assert lib.export()["schema_version"] == "1.1"

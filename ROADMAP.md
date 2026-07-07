@@ -28,9 +28,10 @@ Honest limitations:
 - **The writer is flat-only**: it rejects any non-root `instances_path`
   (`HIERARCHICAL_UNSUPPORTED`). *(Both READERS now follow hierarchy: KiCad `(sheet ...)` since
   v0.2.0; Altium sheet symbols + `.PrjPcb` since post-v0.3.1.)*
-- **Binary Altium payloads are not parsed:** binary `.SchLib` symbol records are refused loudly
-  (exit 5), but binary `.PcbDoc` sections (`Pads6`, `Tracks6`, `Vias6`, …) are silently *skipped*
-  by `read` — the board opens with copper geometry omitted.
+- **Binary Altium payloads: mostly parsed now.** Binary `.SchLib` symbol records are still
+  refused loudly (exit 5). *(Post-v0.3.1: `Tracks6`/`Vias6`/`Arcs6`/`Pads6` are decoded —
+  cross-validated against KiCad's own importer on real boards; `Fills6`/`Regions6`/`Texts6`/
+  `Polygons6` remain skipped.)*
 - **The Altium live driver is a preview:** the Python bridge is tested, but the DelphiScript half is
   an unvalidated scaffold (no CJK text, parameters/footprints not applied, no CLI entry point), and
   "ok" means *ops placed*, not *electrically verified*.
@@ -144,8 +145,10 @@ verify-everything posture the KiCad writer already has.
       protel` semantics) and stable_id-diff it against the intended ops (M)
 - [ ] Altium bus support: read `Bus`/`BusEntry` records into `netbuild`; implement `add_bus` /
       `add_bus_entry` in the live driver so `ops.capabilities.json` has no false rows (M)
-- [ ] Binary `.PcbDoc` geometry decoders: `Pads6`/`Vias6`/`Tracks6`/`Arcs6` first, then
-      fills/regions/polygons, behind the existing safety caps (L)
+- [x] Binary `.PcbDoc` geometry decoders: `Pads6`/`Vias6`/`Tracks6`/`Arcs6` — decoded and
+      cross-validated item-by-item against KiCad's own Altium importer on real boards
+      (778/778 tracks, 20/20 vias, 236/236 arcs, 48/48 pads); fills/regions/texts/polygons
+      remain deferred (L)
 
 **Exit criterion:** an op-list placed live into Altium Designer 22+ from `akcli draw --live` is
 automatically re-exported and net-diffed, and a bus-heavy `.SchDoc` reads with correct connectivity.

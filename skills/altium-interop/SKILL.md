@@ -39,16 +39,16 @@ Parses:
   edge-position scale follows the documented convention; validating against a
   real AD hierarchical design is still pending — flag it when it matters.
 - **`.SchLib`** — text-record symbol libraries (symbol names + pin counts).
-- **`.PcbDoc`** — ASCII sections only: `Nets6`, `Components6`, `Classes6`, `Rules6`
-  → nets, footprints, classes, rules.
+- **`.PcbDoc`** — ASCII sections `Nets6`, `Components6`, `Classes6`, `Rules6`
+  → nets, footprints, classes, rules; **plus binary copper**: `Tracks6`, `Vias6`,
+  `Arcs6`, `Pads6` decode into `tracks`/`vias`/`arcs`/`pads` (coordinates in mils,
+  Altium's native +Y-up frame, net indices resolved to names). Layouts were
+  cross-validated item-by-item against KiCad's own Altium importer on real boards.
+  `Fills6`/`Regions6`/`Texts6`/`Polygons6` are still skipped.
 
 Refused loudly with `ERROR: ALTIUM_UNSUPPORTED` and **exit 5** (unsupported, not
-corrupt): binary `.SchLib` symbol records. Binary `.PcbDoc` geometry sections
-(`Pads6`, `Vias6`, `Tracks6`, `Arcs6`, `Fills6`, `Regions6`, `Texts6`, `Polygons6`)
-are **silently skipped**, not refused: `akcli read board.PcbDoc` parses only the four
-ASCII sections and exits 0, so pads/tracks/vias copper is simply absent from the
-output — the `ALTIUM_UNSUPPORTED` refusal for these fires only when a library caller
-explicitly asks `parse_ascii_section()` for a binary section.
+corrupt): binary `.SchLib` symbol records, and an unknown record type inside a
+binary `.PcbDoc` copper section (truncated records exit 3, `ALTIUM_MALFORMED`).
 Corrupt containers exit **3** (`ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, ...). Also note:
 `net`/`component`/`check`/`diff`/`pinmap`/`export` accept schematics only — feeding
 them a `.SchLib` or `.PcbDoc` exits 5 with a note to use `read` instead.
@@ -56,7 +56,7 @@ them a `.SchLib` or `.PcbDoc` exits 5 with a note to use `read` instead.
 ## Getting designs OUT of Altium
 
 ```bash
-akcli read main.SchDoc --json > model.json        # full normalized model (schema_version "1.0")
+akcli read main.SchDoc --json > model.json        # full normalized model (schema_version "1.1")
 akcli net main.SchDoc --json > netlist.json       # structured netlist (stable_id per net)
 akcli export main.SchDoc --format protel -o board.net   # Altium/Protel .NET for other EDA tools
 akcli export main.SchDoc --format kicad -o board.net.kicad   # KiCad legacy eeschema netlist
@@ -179,7 +179,8 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
 What will **not** carry over (plan around it, state it in the report):
 - Symbol artwork, sheet graphics, text/annotation placement — connectivity only.
 - Hierarchy: the KiCad writer is flat-only v1; the KiCad READER does follow `(sheet ...)` children (per-instance namespaces, sheet-pin<->hierarchical-label connectivity).
-- Binary `.SchLib` symbol graphics and binary `.PcbDoc` copper (pads/tracks/vias).
+- Binary `.SchLib` symbol graphics; `.PcbDoc` fills/regions/texts/polygons (pads/tracks/
+  vias/arcs DO read now, but nothing converts them to `.kicad_pcb` — read-side only).
 - Altium pin electrical types map only ints 0–7 (no `POWER_OUT`/`NO_CONNECT`), so
   ERC fidelity differs slightly between the two sides.
 

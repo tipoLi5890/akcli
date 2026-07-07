@@ -26,6 +26,32 @@ def _frame_records(records: list[dict]) -> bytes:
     return b"".join(bytes(altium_fixture._frame(r)) for r in records)
 
 
+def _pad_record(name: str = "1", net: int = 0, x: int = 10000, y: int = 20000,
+                sx: int = 350, sy: int = 350, hole: int = 0) -> bytes:
+    """One valid Pads6 record in the empirically-verified layout
+    (see readers/altium_pcb_bin.py): 0x02 + name block + 3 reserved blocks +
+    geometry block (>= 61 bytes)."""
+    import struct
+
+    def block(payload: bytes) -> bytes:
+        return struct.pack("<I", len(payload)) + payload
+
+    nameb = bytes([len(name)]) + name.encode()
+    geo = bytearray(61)
+    geo[0] = 1                                    # layer: Top
+    struct.pack_into("<H", geo, 3, net)
+    struct.pack_into("<H", geo, 7, 0)             # component 0
+    struct.pack_into("<i", geo, 13, x)
+    struct.pack_into("<i", geo, 17, y)
+    struct.pack_into("<i", geo, 21, sx)
+    struct.pack_into("<i", geo, 25, sy)
+    struct.pack_into("<i", geo, 45, hole)
+    geo[49] = 2                                   # shape: rect
+    struct.pack_into("<d", geo, 52, 90.0)         # rotation
+    return (b"\x02" + block(nameb) + block(b"\x00") + block(b"")
+            + block(b"") + block(bytes(geo)))
+
+
 def _write_pcb(tmp_path: Path) -> Path:
     streams = {
         "FileHeader": _frame_records([{"HEADER": "PCB 6.0 Binary File"}]),
@@ -44,8 +70,8 @@ def _write_pcb(tmp_path: Path) -> Path:
         "Rules6/Data": _frame_records([
             {"NAME": "Clearance", "RULEKIND": "Clearance"},
         ]),
-        # a binary section present in the container -- never ASCII-parsed.
-        "Pads6/Data": bytes(range(64)),
+        # binary sections: one VALID pad record (decoded by altium_pcb_bin)
+        "Pads6/Data": _pad_record(),
     }
     p = tmp_path / "board.PcbDoc"
     ole_writer.write_ole(str(p), streams)
@@ -83,13 +109,18 @@ def test_binary_section_refused_loudly(tmp_path):
         assert ei.value.code == "ALTIUM_UNSUPPORTED"
 
 
-def test_read_does_not_touch_binary_sections(tmp_path):
-    # read() builds the model purely from ASCII sections; the present Pads6 binary
-    # blob must not cause a failure (it is simply never parsed).
+def test_read_decodes_binary_pads(tmp_path):
+    """read() now DECODES the binary copper sections (schema 1.1)."""
     pcb = altium_pcb.read(_write_pcb(tmp_path))
-    assert pcb.nets and pcb.footprints
+    (pad,) = pcb.pads
+    assert pad["name"] == "1"
+    assert pad["net"] == "GND"                 # net index 0 resolved by name
+    assert pad["at"] == (1.0, 2.0)             # 10000/20000 units -> mils
+    assert pad["shape"] == "rect" and pad["rotation"] == 90.0
+    assert pcb.tracks == [] and pcb.vias == [] and pcb.arcs == []
+
 
 
 def test_export_stamps_schema_version(tmp_path):
     pcb = altium_pcb.read(_write_pcb(tmp_path))
-    assert pcb.export()["schema_version"] == "1.0"
+    assert pcb.export()["schema_version"] == "1.1"

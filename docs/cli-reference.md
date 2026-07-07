@@ -38,6 +38,9 @@ Parse an Altium or KiCad schematic/PCB/library into the normalized model and pri
 - An Altium root **recurses into sheet symbols** the same way (RECORD 15/16/32/33; ports pair
   with their own sheet entry — Altium *Automatic* scope). A `.PrjPcb` reads the project's top
   sheet and honors `PowerPortNamesTakePriority`.
+- A `.PcbDoc` decodes both the ASCII sections (nets/components/classes/rules) and the **binary
+  copper sections** `Tracks6`/`Vias6`/`Arcs6`/`Pads6` into `tracks`/`vias`/`arcs`/`pads`
+  (mils, Altium's native +Y-up frame); `Fills6`/`Regions6`/`Texts6`/`Polygons6` are skipped.
 - `--json` prints the full `Schematic`/`Pcb`/`Library` export with `schema_version`; `--md` prints
   a human Markdown summary.
 

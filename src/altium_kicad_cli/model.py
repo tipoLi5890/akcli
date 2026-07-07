@@ -16,7 +16,7 @@ import enum
 import hashlib
 from dataclasses import dataclass, field, fields, is_dataclass
 
-SCHEMA_VERSION = "1.0"  # stamped on every Schematic/Pcb/Library export
+SCHEMA_VERSION = "1.1"  # 1.1: Pcb gains tracks/vias/arcs/pads (optional adds)  # stamped on every Schematic/Pcb/Library export
 
 # (designator, pin_number)
 PinRef = tuple[str, str]
@@ -149,6 +149,12 @@ class Pcb:
     footprints: list[Footprint]
     classes: list[dict] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
+    # Copper geometry decoded from the binary sections (Altium frame, mils,
+    # +Y up; empty when a section is absent). Added in schema 1.1.
+    tracks: list[dict] = field(default_factory=list)
+    vias: list[dict] = field(default_factory=list)
+    arcs: list[dict] = field(default_factory=list)
+    pads: list[dict] = field(default_factory=list)
     schema_version: str = SCHEMA_VERSION
 
     def export(self) -> dict:

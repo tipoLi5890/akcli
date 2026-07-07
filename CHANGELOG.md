@@ -33,6 +33,17 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 ## [Unreleased]
 
 ### Added
+- **Binary `.PcbDoc` copper decoded:** `Tracks6`/`Vias6`/`Arcs6`/`Pads6` are now parsed
+  (new `readers/altium_pcb_bin.py` — packed little-endian records, coordinates in mils,
+  native +Y-up frame) and land on the `Pcb` model as `tracks`/`vias`/`arcs`/`pads`;
+  `--json` schema is now **1.1**. Layouts were cross-validated item-by-item against KiCad's
+  own Altium importer (`pcbnew`) on real boards from KiCad's QA corpus: 778/778 board-level
+  copper tracks, 20/20 vias, 236/236 arcs, 48/48 pads (names, sizes, drills, positions exact
+  modulo ±3 nm importer rounding); a second board from a different AD version (3661 tracks /
+  321 vias / 88 arcs / 468 pads) decodes with zero errors. Unknown record types inside a
+  known section fail `ALTIUM_UNSUPPORTED`; truncated records fail `ALTIUM_MALFORMED` —
+  nothing is silently skipped anymore. `Fills6`/`Regions6`/`Texts6`/`Polygons6` remain out
+  of scope (still skipped, documented).
 - **Hierarchical sheets (Altium reader):** a `.SchDoc` root recurses into sheet symbols
   (RECORD 15 + name/file 32/33), each instance in its own geometric namespace, with
   sheet-entry (RECORD 16: `Name`/`Side`/`DistanceFromTop`) ↔ child-PORT pairing per Altium's

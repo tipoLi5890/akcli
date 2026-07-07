@@ -176,7 +176,8 @@ Exit-code table (frozen in `errors.py`):
 | 7 | external tool missing / network | install hint on stderr; only `jlc` needs network |
 
 Known deliberate refusals (exit 5 — **unsupported, not corrupt**; do not file these as parse bugs):
-binary `.SchLib` symbol records; binary `.PcbDoc` sections (pads/vias/tracks/arcs/fills/regions);
+binary `.SchLib` symbol records; binary `.PcbDoc` fills/regions/texts/polygons (pads/vias/
+tracks/arcs ARE decoded since post-v0.3.1 — an exit-5 there means an unknown record type);
 and feeding `.SchLib`/`.PcbDoc`/`.kicad_pcb` to schematic-only commands (`net`, `component`,
 `check`, `diff`, `pinmap`, `export`) — the stderr notice says to use `akcli read` instead, which
 does accept them. Exit 3 with `ALTIUM_ALLOC_GUARD` on a large file may be the DIFAT-spillover

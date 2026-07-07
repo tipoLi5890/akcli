@@ -59,7 +59,7 @@ def test_to_json_serializes_enum_and_stamps_schema_version():
     sch = Schematic(source_path="x.SchDoc", source_format="altium",
                     components=[comp], nets=[net])
     d = sch.export()
-    assert d["schema_version"] == SCHEMA_VERSION == "1.0"
+    assert d["schema_version"] == SCHEMA_VERSION == "1.1"
     assert d["components"][0]["pins"][0]["electrical_type"] == "power_in"
     # Net carries computed stable_id in JSON
     assert d["nets"][0]["stable_id"] == net.stable_id
@@ -78,8 +78,8 @@ def test_pcb_and_library_export_schema_version():
               footprints=[])
     lib = Library(source_path="l.SchLib", source_format="altium",
                   symbols=[SymbolDef(name="R", lib_id=None, pins=[])])
-    assert pcb.export()["schema_version"] == "1.0"
-    assert lib.export()["schema_version"] == "1.0"
+    assert pcb.export()["schema_version"] == "1.1"
+    assert lib.export()["schema_version"] == "1.1"
 
 
 def test_component_defaults():

@@ -99,7 +99,8 @@ before any coordinate is trusted. Conversion: `mil = (intval + frac/100000.0) * 
 All dataclasses; `from __future__ import annotations`. `PinRef = tuple[str, str]` = `(designator, pin_number)`.
 
 ```python
-SCHEMA_VERSION = "1.0"          # stamped on every Schematic/Pcb/Library export
+SCHEMA_VERSION = "1.1"          # stamped on every Schematic/Pcb/Library export
+                                # 1.0 -> 1.1: Pcb gained tracks/vias/arcs/pads (binary .PcbDoc copper)
 
 class PinType(enum.Enum):       # canonical, format-agnostic
     INPUT = "input"
@@ -197,6 +198,10 @@ class Pcb:
     footprints: list[Footprint]
     classes: list[dict] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
+    tracks: list[dict] = field(default_factory=list)   # binary Tracks6 (mils, +Y up)
+    vias: list[dict] = field(default_factory=list)     # binary Vias6
+    arcs: list[dict] = field(default_factory=list)     # binary Arcs6
+    pads: list[dict] = field(default_factory=list)     # binary Pads6
     schema_version: str = SCHEMA_VERSION
 
 # --- Library model (symbol defs WITH pin electrical types) ---
@@ -396,7 +401,8 @@ A per-executor **capability matrix** ships as `schemas/ops.capabilities.json`; a
 | `altium_records.py` | record framing + field tokenizer + `%UTF8%` + `_Frac` + electrical map + RECORD-ID constants | `parse_records(buf,drop_header:bool)->list[dict]`; `fields(r)->dict`; `gi(d,k,default)`; `coord(d,key)->float` (assembles int+frac→mil); `RECORDS:dict` | `units`, `model`, `safety`, `errors` | Port of lines 109–130 **with**: `%UTF8%`-prefixed keys decoded UTF-8 (re-encode latin1→bytes→utf-8); `_Frac` companion assembled via `units.altium_to_mil`; `Electrical`→`PinType`; **header detection** (drop leading record only if it's the schematic HEADER, not unconditional `[1:]`) to fix SchLib/PcbDoc OwnerIndex base; record/byte caps → `MAX_RECORDS`. RECORD IDs: 1=Component,2=Pin,6=Polyline,15=SheetSymbol,16=SheetEntry,17=PowerPort,18=Port,22=NoERC,25=NetLabel,27=Wire,29=Junction,34=Designator,41=Parameter,44/45/46/48=Implementation | `test_altium_records.py` |
 | `altium_sch.py` | `.SchDoc` → `Schematic` (READ-ONLY) | `read(path)->Schematic`; `read_primitives(path)->NetPrimitives` | `_cfbf`, `altium_records`, `model`, `netbuild`, `units` | Extract: RECORD 1 placement/orientation/mirror/UniqueID; RECORD 2 pins with `Electrical`, `OwnerPartId`, tip = `Location + PinLength*dir` (negate Y into canonical); RECORD 34 designators (synthesize `$U<idx>` when missing — never drop); RECORD 41 params (value/comment); RECORD 45/46 footprint; RECORD 27 wires, 29 junctions, 22 No-ERC, 25/17 labels+power ports → emit `NetPrimitives` → `netbuild.build_nets()` | `test_altium_sch.py` |
 | `altium_schlib.py` | `.SchLib` → `Library` | `read(path)->Library` | `_cfbf`, `altium_records`, `model` | Use `read_streams_qualified` — each symbol in its own storage `Data` stream; per-stream OwnerIndex base (no blind `[1:]`); refuse binary records (4th length byte ≠ 0) loudly | `test_altium_schlib.py` |
-| `altium_pcb.py` | `.PcbDoc` → `Pcb` (ASCII sections only, v1) | `read(path)->Pcb` | `_cfbf`, `altium_records`, `model` | Parse **only** ASCII `|KEY=VAL|` sections: `Nets6`, `Components6`, `Classes6`, `Rules6`. **Guard:** refuse to ASCII-parse a Header-declared binary section (`Pads6/Vias6/Tracks6/Arcs6/Fills6/Regions6`) — those need per-section binary struct decoders, explicitly **deferred**. No offline verify (no Altium on mac) | `test_altium_pcb.py` |
+| `altium_pcb.py` | `.PcbDoc` → `Pcb` (ASCII sections + binary copper) | `read(path)->Pcb` | `_cfbf`, `altium_records`, `altium_pcb_bin`, `model` | ASCII `|KEY=VAL|` sections `Nets6`/`Components6`/`Classes6`/`Rules6` plus binary `Tracks6`/`Vias6`/`Arcs6`/`Pads6` via `altium_pcb_bin`. **Guard:** still refuse to ASCII-parse a Header-declared binary section; `Fills6/Regions6/Texts6/Polygons6` remain deferred | `test_altium_pcb.py` |
+| `altium_pcb_bin.py` | binary `.PcbDoc` section decoders | `parse_tracks/parse_vias/parse_arcs/parse_pads(buf,nets)->list[dict]`; `UNIT_MIL` | `errors` | Framing `u8 type + u32 LE len + payload`; coords 1/10000 mil → emit mils, native +Y-up frame; nets by index into `Nets6` order (0xFFFF→None). Track: layer u8@0, net u16@3, comp u16@7, x1/y1/x2/y2 s32@13.., w s32@29. Via: x/y@13/17, dia@21, hole@25, layers u8@29/30. Arc: center@13/17, r@21, angles f64@25/33 (deg), w@41. Pad: block-structured (name pascal block + 3 reserved + geometry ≥61B: size@21/25, hole@45, shape u8@49, rot f64@52). Unknown type→`ALTIUM_UNSUPPORTED`, truncation→`ALTIUM_MALFORMED`. Layouts cross-validated item-by-item vs KiCad's pcbnew importer on real boards (778/778 tracks, 20/20 vias, 236/236 arcs, 48/48 pads) | `test_altium_pcb_bin.py` |
 
 ### 3.3 Net inference (`src/altium_kicad_cli/`)
 
@@ -748,7 +754,7 @@ where = ["src"]
 | 12 | Path traversal via lib_id / config / bridge | `safety.safe_path` allowlist; per-run 0700 bridge dir, `O_NOFOLLOW` | ✅ |
 | 13 | Destructive write corrupts user schematic | snapshot+temp+fsync+verify-temp+`os.replace`, mtime lock, `--apply` required | ✅ |
 | 14 | kicad-cli erc exit-code misread | never pass `--exit-code-violations`; parse JSON; advisory only | ⚠️ needs kicad-cli (CI ubuntu only) |
-| 15 | PCB binary sections (Pads/Tracks) | v1 ASCII-only + guard refuses binary; binary decoders deferred | ✅ (read), ❌ verify |
+| 15 | PCB binary sections (Pads/Tracks) | `altium_pcb_bin` decodes Tracks6/Vias6/Arcs6/Pads6; cross-validated vs KiCad's pcbnew importer on real boards; fills/regions/texts/polygons still guarded/deferred | ✅ (read + verify) |
 | 16 | **Altium authoritative netlist / ERC / live write** | optional Windows live driver; python `bridge.py` offline-unit-testable with mocked response | **❌ Windows + Altium 22+ only** |
 | 17 | DelphiScript half (`altium_api.pas/.PrjScr`) | scaffolded + iterated on user's Windows box | **❌ Windows-only/unvalidatable here** |
 | 18 | Multi-sheet/hierarchical merge unvalidated (no real fixture) | synthetic multi-sheet fixtures + loud caveat | ✅ synthetic only |
