@@ -624,6 +624,70 @@ def _cmd_ops(args: argparse.Namespace) -> int:
     raise _ExitWith(EXIT["USAGE"], "ERROR: use `akcli ops list` or `akcli ops template <op>`")
 
 
+def _calc_md(doc: dict) -> str:
+    """Render one compute() envelope as a markdown table."""
+    from .calc.si import fmt_eng
+
+    lines = [f"### {doc['title']}", "",
+             "| result | value | note |", "|---|---|---|"]
+    for k, cell in doc["results"].items():
+        v, unit = cell["value"], cell.get("unit", "")
+        if isinstance(v, float):
+            plain = unit not in ("Ω", "V", "A", "W", "F", "H", "Hz", "s", "m")
+            shown = f"{v:.6g} {unit}".strip() if plain else fmt_eng(v, unit)
+        elif isinstance(v, list):
+            shown = "; ".join(str(x) for x in v) if v and not isinstance(v[0], dict) \
+                else f"{len(v)} entries (use --json)"
+        else:
+            shown = f"{v} {unit}".strip()
+        lines.append(f"| {k} | {shown} | {cell.get('note', '')} |")
+    lines += ["", f"*Reference: {doc['reference']}*"]
+    return "\n".join(lines)
+
+
+def _calc_batch(args: argparse.Namespace, params: list[str]) -> int:
+    """`calc batch <file|->`: run a JSON job list, emit an array of envelopes."""
+    import json as _json
+    import sys as _sys
+
+    from . import calc as calcmod
+    from .calc.registry import CALCS, CalcError
+
+    if not params:
+        raise _ExitWith(EXIT["USAGE"], "ERROR: calc batch needs a jobs file ('-' = stdin)")
+    src = _sys.stdin.read() if params[0] == "-" else None
+    if src is None:
+        path = Path(params[0])
+        if not path.exists():
+            raise _ExitWith(EXIT["NOT_FOUND"], f"ERROR: {path} not found")
+        src = path.read_text(encoding="utf-8")
+    try:
+        doc = _json.loads(src)
+        jobs = doc["jobs"] if isinstance(doc, dict) else doc
+        assert isinstance(jobs, list)
+    except Exception:
+        raise _ExitWith(EXIT["USAGE"],
+                        'ERROR: batch input must be {"jobs": [{"calc": ..., "params": {...}}, ...]}')
+    out, failed = [], 0
+    for i, job in enumerate(jobs):
+        name = job.get("calc") if isinstance(job, dict) else None
+        raw = {k: str(v) for k, v in (job.get("params") or {}).items()} \
+            if isinstance(job, dict) else {}
+        if not name or name not in CALCS:
+            out.append({"calc": name, "error": f"job {i}: unknown calculator {name!r}"})
+            failed += 1
+            continue
+        try:
+            out.append(calcmod.compute(name, raw))
+        except CalcError as exc:
+            out.append({"calc": name, "error": str(exc)})
+            failed += 1
+    _emit(_dumps(out))
+    if failed:
+        print(f"{failed}/{len(jobs)} jobs failed", file=_sys.stderr)
+    return EXIT["FINDINGS"] if failed else EXIT["OK"]
+
+
 def _cmd_calc(args: argparse.Namespace) -> int:
     """`calc list` / `calc info <name>` / `calc <name> key=value ...`."""
     from . import calc as calcmod
@@ -675,6 +739,8 @@ def _cmd_calc(args: argparse.Namespace) -> int:
             lines.append(f"Note: {c.notes}")
         _emit("\n".join(lines))
         return EXIT["OK"]
+    if name == "batch":
+        return _calc_batch(args, params)
     if name not in CALCS:
         raise _ExitWith(EXIT["USAGE"],
                         f"ERROR: unknown calculator {name!r} (see `akcli calc list`)")
@@ -689,6 +755,24 @@ def _cmd_calc(args: argparse.Namespace) -> int:
         doc = calcmod.compute(name, raw)
     except CalcError as exc:
         raise _ExitWith(EXIT["USAGE"], f"ERROR: {exc}")
+    if getattr(args, "ops", None):
+        from .calc import opsmap
+        try:
+            opdoc = opsmap.to_oplist(name, doc)
+        except CalcError as exc:
+            raise _ExitWith(EXIT["USAGE"], f"ERROR: {exc}")
+        rendered = _dumps(opdoc)
+        if args.ops == "-":
+            _emit(rendered)
+            return EXIT["OK"]
+        Path(args.ops).write_text(rendered + "\n", encoding="utf-8")
+        import sys as _sys
+        print(f"op-list written to {args.ops} "
+              f"({len(opdoc['ops'])} ops — edit coordinates, then `akcli plan`)",
+              file=_sys.stderr)
+    if getattr(args, "md", False):
+        _emit(_calc_md(doc))
+        return EXIT["OK"]
     if getattr(args, "json", False):
         _emit(_dumps(doc))
         return EXIT["OK"]
@@ -1216,9 +1300,14 @@ def build_parser() -> argparse.ArgumentParser:
                        help="engineering calculators (E-series, IPC-2221, via, "
                             "SMPS, 555, I2C, ... — every result cites its source)")
     p.add_argument("name", nargs="?",
-                   help="calculator name, or `list` / `info <name>`")
+                   help="calculator name, or `list` / `info <name>` / `batch <file>`")
     p.add_argument("params", nargs="*", metavar="key=value",
                    help="inputs, engineering notation ok (4k7, 100n, 35u)")
+    p.add_argument("--md", action="store_true",
+                   help="render the result as a markdown table")
+    p.add_argument("--ops", metavar="FILE",
+                   help="also emit a place_component op-list with the computed "
+                        "values ('-' = stdout; design-type calculators only)")
     p.set_defaults(handler=_cmd_calc)
 
     p = sub.add_parser("export", parents=[common], help="emit a netlist")

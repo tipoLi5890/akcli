@@ -90,6 +90,29 @@ def _calc_trackcurrent(width, dtemp, thickness, layer) -> list[Result]:
     return [Result("i_max", k * dtemp ** 0.44 * a_mil2 ** 0.725, "A")]
 
 
+@register(
+    "tracktemp", "Temperature rise of an existing track (IPC-2221)", "pcb",
+    _IPC + " (solved for ΔT)",
+    (Param("width", "m", "track width"),
+     Param("i", "A", "continuous current"),
+     Param("thickness", "m", "copper thickness", default=35e-6),
+     Param("layer", "", "layer position", default="external",
+           choices=("external", "internal"))),
+    notes="IPC-2152 (measured charts) supersedes this fit but is chart-based "
+          "licensed data with no public closed form — this tool refuses to "
+          "fake it. The 2221 fit is the conservative classic.",
+)
+def _calc_tracktemp(width, i, thickness, layer) -> list[Result]:
+    if min(width, i, thickness) <= 0:
+        raise CalcError("width, i, thickness must be positive")
+    a_mil2 = (width / _MIL) * (thickness / _MIL)
+    k = 0.048 if layer == "external" else 0.024
+    dt = (i / (k * a_mil2 ** 0.725)) ** (1 / 0.44)
+    return [Result("dtemp", dt, "°C", "estimated rise above ambient"),
+            Result("fit_ok", dt <= 100.0, "",
+                   "IPC-2221 fit is only characterized to ΔT ≤ 100 °C")]
+
+
 # --- IPC-2221B Table 6-1 ---------------------------------------------------- #
 #   B1 internal · B2 external uncoated ≤3050 m · B3 external uncoated >3050 m
 #   B4 external polymer-coated · A5 external conformal-coated ·

@@ -124,7 +124,7 @@ hand-computed mil arithmetic.
       scaffolder (tables drift-guarded against `ops.schema.json`; capabilities matrix shown in
       `ops list`) — next-free-grid-slot helper still open
       placement helper (M)
-- [x] `akcli calc`: 36 offline engineering calculators (E-series/IEC 60063 combos, dividers,
+- [x] `akcli calc`: 56 offline engineering calculators (E-series/IEC 60063 combos, dividers,
       LM317/FB worst-case, IPC-2221 track width + clearance, via parasitics, fusing, AWG,
       microstrip/stripline/attenuators, buck/boost, NE555, op-amp, I²C pull-ups, crystal caps,
       thermal, markings, galvanic) — every result cites its standard/datasheet source; numerics

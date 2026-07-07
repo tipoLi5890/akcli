@@ -31,7 +31,7 @@ giving you a scriptable, install-free workflow that an automation pipeline or an
   go through an atomic snapshot → temp → verify → replace pipeline with a pure-Python connectivity gate.
 - **AI-agent native.** Ships as a Claude Code plugin with skills/commands, emits structured JSON with
   `schema_version`, and accepts a versioned op-list for deterministic, idempotent edits.
-- **Standards-cited calculators.** `akcli calc` answers 36 design questions (E-series, IPC-2221,
+- **Standards-cited calculators.** `akcli calc` answers 56 design questions (E-series, IPC-2221,
   via parasitics, I²C pull-ups, buck/boost, ...) and prints the formal reference with every result.
 
 ## Read Altium files
@@ -109,7 +109,7 @@ akcli jlc add    C2040 --3d            # LCSC part -> KiCad symbol + footprint +
 
 ## Engineering calculators
 
-`akcli calc` bundles **36 offline calculators** — E-series snapping and resistor combinations
+`akcli calc` bundles **56 offline calculators** — E-series snapping and resistor combinations
 (IEC 60063), voltage dividers, LM317/FB regulator worst-case, IPC-2221 track width and clearance,
 via parasitics, fusing current, AWG, microstrip/stripline impedance, RF attenuators, buck/boost
 stages, NE555, op-amp pairs, I²C pull-ups, crystal load caps, thermal, battery, resistor markings,
@@ -125,7 +125,10 @@ akcli calc i2c-pullup vdd=3.3 cb=100p mode=fast  # NXP UM10204 pull-up window
 ```
 
 Inputs accept engineering notation (`4k7`, `100n`, `2M2`); `--json` returns
-`{calc, inputs, results, reference}`.
+`{calc, inputs, results, reference}`, `--md` a paste-ready table, `calc batch`
+runs a JSON job list, and `--ops` turns design results (dividers, regulator
+feedback, filters, ...) into a ready `place_component` op-list. A local web UI
+with physical-style SVG diagrams and shareable URLs ships in `tools/calc-view/`.
 
 ## Use with AI coding agents
 
@@ -141,7 +144,7 @@ use `set -o pipefail` if you branch on it.
   (severity-ranked design review), `schematic-authoring` (new circuits from an op-list),
   `altium-interop` (working with Altium Designer), `parts-sourcing` (JLC/LCSC parts),
   `jlcpcb-capabilities` (manufacturer limits to design against), and `design-calc`
-  (36 standards-cited engineering calculators via `akcli calc`).
+  (56 standards-cited engineering calculators via `akcli calc`).
 - **Codex** — install the bundled plugin (below): it packages all eight skills plus the session hook.
   Or drop the loose skill folders into `.agents/skills/` for auto-discovery. See
   [docs/codex-plugin.md](docs/codex-plugin.md).

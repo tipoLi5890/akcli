@@ -2,7 +2,7 @@
 
 `akcli` (long alias `altium-kicad-cli`) is the command-line entry point of `altium-kicad-cli`. It reads
 Altium binary `.SchDoc`/`.SchLib`/`.PcbDoc` and KiCad `.kicad_sch`/`.kicad_sym`/`.kicad_pcb`, runs
-checks, diffs revisions, draws KiCad schematics, and provides 36 standards-cited engineering
+checks, diffs revisions, draws KiCad schematics, and provides 56 standards-cited engineering
 calculators (`akcli calc`) — with no Altium or KiCad install required.
 
 > This reference is the contract for the CLI surface. It tracks the subcommands and flags defined in
@@ -85,26 +85,48 @@ Exits `1` when nothing was extracted (an empty table would make `pinmap
 --expected` vacuously pass), `2` on an unsupported input type, `4` when the
 file is missing. The schematic stays authoritative — this table is advisory.
 
-### `akcli calc [list | info <name> | <name> key=value ...]`
-Offline **engineering calculators** (36): E-series snapping and 2–4-resistor
+### `akcli calc [list | info <name> | batch <file> | <name> key=value ...]`
+Offline **engineering calculators** (56): E-series snapping and 2–4-resistor
 combination search (IEC 60063:2015), voltage dividers and LED resistors,
 LM317/FB regulator networks with worst-case corners (TI SLVS044Y), IPC-2221B
-track width ↔ current and Table 6-1 clearance, via R/thermal/ampacity/L/C
-(Johnson & Graham 1993), Onderdonk/Preece fusing, ASTM B258 AWG,
+track width ↔ current ↔ temperature rise and Table 6-1 clearance, via
+R/thermal/ampacity/L/C (Johnson & Graham 1993), differential pairs
+(IPC-2141A), Onderdonk/Preece fusing, ASTM B258 AWG,
 microstrip/stripline/coax impedance (Hammerstad–Jensen 1980, Cohn 1954),
-PI/TEE/bridged-TEE attenuators, buck/boost power stages (TI SLVA477B/372C),
-NE555 (TI SLFS022I), op-amp gain pairs, I²C pull-up window (NXP UM10204),
-crystal load caps (ST AN2867), junction thermal (JESD51), battery life,
-resistor color/SMD/EIA-96 markings (IEC 60062:2016), galvanic compatibility
+PI/TEE/bridged-TEE attenuators, L/PI matching networks (Pozar §5.1),
+buck/boost/flyback power stages (TI SLVA477B/372C, Erickson ch. 6), LDO
+dissipation, MOSFET gate drive (TI SLUA618A), current-sense shunts, NE555
+(TI SLFS022I), op-amp gain pairs, comparator hysteresis (TI SLVA954),
+Sallen–Key filters (TI SLOA024B), ADC resolution/settling, I²C pull-up window
+(NXP UM10204), RS-485 fail-safe bias (TIA-485-A), CAN split termination
+(ISO 11898-2), crystal load caps (ST AN2867), junction thermal (JESD51), TVS
+selection (IEC 61000-4-5 surge), fuse derating (IEC 60127 R10), NTC inrush,
+battery life, unit conversions (dBm/W/Vrms, mil/mm, oz/µm), resistor
+color/SMD/EIA-96 markings (IEC 60062:2016), galvanic compatibility
 (MIL-STD-889C).
 - Inputs take engineering notation (`4k7`, `100n`, `2M2`); **every result
   prints its formal reference**. `--json` returns
-  `{calc, inputs, results{value,unit,note}, reference}`.
+  `{calc, inputs, results{value,unit,note}, reference}`; `--md` renders a
+  markdown table.
+- `--ops FILE` (design-type calculators: `vdivider-design`,
+  `regulator-design`, `led`, `i2c-pullup`, `crystal-caps`,
+  `hysteresis-design`, `sallen-key`, `attenuator`) additionally emits a
+  schema-valid `place_component` op-list with the computed E-series values
+  filled in (`-` = stdout) — edit coordinates, then `akcli plan`.
+- `batch <file|->` runs `{"jobs": [{"calc": ..., "params": {...}}, ...]}` and
+  emits an array of result envelopes; exits `1` if any job failed (each
+  failure carries an `error` field), `0` when all succeed.
 - `list` groups all calculators; `info <name>` shows parameters, defaults and
   the citation. Bad name/params exit `2`.
 - Numerics are cross-checked in the test suite against KiCad's
   pcb_calculator (independent reimplementation — no GPL code) and published
-  datasheet/handbook values.
+  datasheet/handbook values. IPC-2152 is deliberately NOT included: it is
+  chart-based licensed measurement data with no public closed form — this
+  tool refuses to fake it (`tracktemp`/`trackwidth` use the conservative
+  IPC-2221 fit instead).
+- A local web UI for all calculators ships in `tools/calc-view/`
+  (`python3 tools/calc-view/server.py`, localhost only): grouped sidebar,
+  physical-style SVG illustrations, pinned/recent lists, shareable URLs.
 
 ### `akcli export <file> [--format protel|kicad|csv] [-o FILE]`
 Export the schematic's **netlist** for other EDA tools. Default `--format protel` (an

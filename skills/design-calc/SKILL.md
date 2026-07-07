@@ -55,6 +55,39 @@ Inputs accept engineering notation: `4k7`, `100n`, `35u`, `2M2`, `1e-7`.
 | Battery runtime | `battery` | rule of thumb (advisory) |
 | Read/print a resistor marking | `rescolor`, `smdcode` | IEC 60062:2016; EIA-96 |
 | Dissimilar-metal contact (connector plating) | `galvanic` | MIL-STD-889C |
+| USB/LVDS/RS-485 differential routing | `diffpair` | IPC-2141A §5 |
+| "How hot does this existing trace get?" | `tracktemp` | IPC-2221B (solved for ΔT) |
+| dBm↔W↔Vrms, mil↔mm, oz↔µm | `convert-power`, `convert-length`, `convert-copper` | IEEE Std 100; NIST SP 811; IPC copper nominal |
+| Comparator switching window | `hysteresis`, `hysteresis-design` | TI SLVA954 |
+| RS-485 idle-bus bias / CAN termination | `rs485-bias`, `can-termination` | TIA-485-A; ISO 11898-2 |
+| Will the LDO cook? | `ldo` | LDO datasheet practice + JESD51 |
+| Gate resistor / driver current | `gate-drive` | TI SLUA618A (Balogh) |
+| Current measurement shunt | `shunt` | TI SBOA170 |
+| Anti-alias / smoothing filter | `sallen-key` | TI SLOA024B; Sallen & Key 1955 |
+| ADC bits, noise floor, R-C settling | `adc` | MT-001; 6.02N+1.76 dB |
+| Surge protection part | `tvs` | IEC 61000-4-5; Littelfuse guide |
+| Fuse rating | `fuse-derating` | Littelfuse Fuseology; IEC 60127 R10 |
+| Cap-charging inrush | `inrush-ntc` | TDK/EPCOS NTC guide |
+| Antenna/PA impedance match | `lmatch`, `pimatch` | Pozar §5.1; Bowick ch. 4 |
+| Isolated supply first cut | `flyback` | Erickson & Maksimović ch. 6 |
+
+**Deliberately missing:** IPC-2152 track current — chart-based licensed
+measurement data with no public closed form; this tool refuses to fake it.
+Say so when a user asks, and use the conservative IPC-2221 fit
+(`trackwidth`/`tracktemp`) instead.
+
+## Tooling
+
+- `akcli calc batch jobs.json` — `{"jobs":[{"calc":...,"params":{...}}]}` in,
+  envelope array out; exit 1 if any job failed. Use for sweeps.
+- `--md` — paste-ready markdown result table for reports.
+- `--ops out.json` — design-type calculators (`vdivider-design`,
+  `regulator-design`, `led`, `i2c-pullup`, `crystal-caps`, `hysteresis-design`,
+  `sallen-key`, `attenuator`) emit a valid `place_component` op-list with the
+  computed standard values filled in: edit coordinates, `akcli plan`, then
+  `draw`.
+- `tools/calc-view/` — local web UI (localhost) with SVG illustrations,
+  pinned/recent lists and shareable URLs, for humans reviewing your numbers.
 
 ## Workflow integration (this is the point)
 
