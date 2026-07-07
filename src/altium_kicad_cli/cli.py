@@ -696,10 +696,11 @@ def _cmd_calc(args: argparse.Namespace) -> int:
     for key, cell in doc["results"].items():
         val, unit = cell["value"], cell.get("unit", "")
         if isinstance(val, float):
-            # SI prefixes scale linearly — never prefix compound/squared units
-            plain = any(ch in unit for ch in "²/°")
-            shown = (f"{val:.6g} {unit}" if plain
-                     else fmt_eng(val, unit) if unit else f"{val:.6g}")
+            # SI prefixes scale linearly — only prefix bare base units
+            # (never mm, °C/W, m², Ω/km, ...)
+            prefixable = unit in ("Ω", "V", "A", "W", "F", "H", "Hz", "s", "m")
+            shown = (fmt_eng(val, unit) if prefixable
+                     else f"{val:.6g} {unit}".strip())
         elif isinstance(val, list):
             shown = f"{len(val)} entries (use --json for detail)"
         else:

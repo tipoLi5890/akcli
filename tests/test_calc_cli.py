@@ -41,6 +41,13 @@ def test_calc_run_human(capsys):
     assert "r_standard" in out and "reference:" in out
 
 
+def test_calc_never_double_prefixes_units(capsys):
+    # clearance values are already in mm — "200 mmm" was a real bug
+    assert cli.main(["calc", "clearance", "voltage=120"]) == 0
+    out = capsys.readouterr().out
+    assert "mmm" not in out and "0.2 mm" in out
+
+
 def test_calc_bare_lists(capsys):
     assert cli.main(["calc"]) == 0
     assert "eseries" in capsys.readouterr().out
