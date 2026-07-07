@@ -575,6 +575,53 @@ def _jlc_detail(p) -> str:
     return "\n".join(lines)
 
 
+def _cmd_expected(args: argparse.Namespace) -> int:
+    """Extract an expected pin->signal table from a .dts/.overlay or pinout .md.
+
+    Bridges the adapters into the ``pinmap --expected`` pipeline: the emitted
+    JSON object ({pin: signal}) is exactly what ``--expected`` consumes. The
+    schematic stays authoritative; this table is advisory input.
+    """
+    src = getattr(args, "input", None)
+    if not src:
+        raise _ExitWith(EXIT["USAGE"], "ERROR: missing input file (.dts/.overlay or .md)")
+    path = Path(src)
+    if not path.is_file():
+        raise _ExitWith(EXIT["NOT_FOUND"], f"ERROR: file not found: {src}")
+
+    suffix = path.suffix.lower()
+    if suffix in (".dts", ".dtsi", ".overlay"):
+        from .adapters import dts as dts_adapter  # lazy
+        table = dts_adapter.to_expected_table(dts_adapter.parse_dts(path))
+    elif suffix in (".md", ".markdown"):
+        from .adapters import pinout_md  # lazy
+        table = pinout_md.parse_pinout_md(
+            path,
+            key_header=getattr(args, "key_header", None),
+            value_header=getattr(args, "value_header", None),
+        )
+    else:
+        raise _ExitWith(
+            EXIT["USAGE"],
+            f"ERROR: unsupported input {suffix!r} (want .dts/.dtsi/.overlay or .md)",
+        )
+
+    payload = _dumps({k: table[k] for k in sorted(table)})
+    out = getattr(args, "output", None)
+    if out:
+        Path(out).write_text(payload + "\n", encoding="utf-8")
+        sys.stderr.write(f"wrote {len(table)} pin assignment(s) to {out}\n")
+    else:
+        _emit(payload)
+
+    if not table:
+        # An empty table would make `pinmap --expected` vacuously pass — treat
+        # "nothing extracted" as a finding, not a success.
+        sys.stderr.write(f"WARNING: no pin assignments found in {src}\n")
+        return EXIT["FINDINGS"]
+    return EXIT["OK"]
+
+
 def _cmd_jlc(args: argparse.Namespace) -> int:
     """No subcommand given: print usage."""
     raise _ExitWith(
@@ -1000,6 +1047,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="expected pin->signal table (.csv or .json)")
     p.add_argument("--exit-zero", action="store_true", help="always exit 0")
     p.set_defaults(handler=_cmd_pinmap)
+
+    p = sub.add_parser("expected", parents=[common],
+                       help="extract an expected pin->signal table from .dts/.overlay or pinout .md")
+    p.add_argument("input", nargs="?", help="input file (.dts, .dtsi, .overlay, .md)")
+    p.add_argument("-o", "--output", metavar="FILE",
+                   help="write JSON here instead of stdout (feed to pinmap --expected)")
+    p.add_argument("--key-header", metavar="NAME",
+                   help="markdown: explicit pin/GPIO column header")
+    p.add_argument("--value-header", metavar="NAME",
+                   help="markdown: explicit signal/net column header")
+    p.set_defaults(handler=_cmd_expected)
 
     p = sub.add_parser("export", parents=[common], help="emit a netlist")
     p.add_argument("path", nargs="?", help="input schematic")

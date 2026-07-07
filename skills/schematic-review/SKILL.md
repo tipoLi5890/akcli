@@ -100,7 +100,8 @@ akcli pinmap board.SchDoc --mcu U3 --expected pins.csv --exit-zero
 ```
 
 `--expected` accepts a 2-column CSV (`pin,signal`, optional header) or JSON (a `{pin: signal}`
-dict, or a list of `{pin, signal}` rows). Result codes: `PINMAP_MISMATCH` and
+dict, or a list of `{pin, signal}` rows). To derive that table from firmware or docs, use
+`akcli expected board.dts -o pins.json` (Zephyr DTS/overlay or a markdown pinout table). Result codes: `PINMAP_MISMATCH` and
 `PINMAP_EXPECTED_PIN_MISSING` are WARNINGs (report as Major unless clearly benign);
 `PINMAP_UNEXPECTED` is a NOTE (schematic pins the table doesn't cover — usually Info).
 The schematic always wins; a mismatch is a finding to report, never a schematic edit.

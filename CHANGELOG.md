@@ -32,7 +32,19 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- **`akcli expected` subcommand:** extract an expected pin→signal table from a Zephyr
+  devicetree source/overlay (gpio phandles + Nordic `NRF_PSEL` pinctrl) or a markdown pinout
+  table, as the JSON `pinmap --expected` consumes. Empty extraction exits `1` (a vacuous
+  table must not read as success).
+- **CLI-layer offline tests for `jlc add`** (flag validation, exit-code mapping, `--place`
+  op-list emission) against the captured EasyEDA fixtures.
+- **Altium fixture invariant sweep:** auto-discovering tests over every `.SchDoc` fixture —
+  net members must reference real component pins, membership sorted/duplicate-free, reads
+  deterministic, CSV/Protel exports agree with the inferred netlist, and the malformed corpus
+  fails loudly. New fixtures are swept automatically. (The independent cross-check against
+  Altium's own netlist export still requires a real AD install; KiCad's Altium importer is
+  GUI-only and cannot be driven headless.)
 
 ## [0.3.0] - 2026-07-06
 

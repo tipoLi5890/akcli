@@ -65,6 +65,15 @@ Emit the MCU pin → net table (MCU chosen by `mcu_designator` in config, or `--
 - `--expected PATH` cross-checks against an external expected pin→signal table (CSV or JSON). The
   schematic is authoritative; the expected table is advisory.
 
+### `akcli expected <file.dts|.overlay|.md> [-o FILE]`
+Extract an **expected pin→signal table** from a Zephyr devicetree source/overlay
+(`gpios = <&gpioN pin ...>` phandles and Nordic `NRF_PSEL(...)` pinctrl) or from a
+markdown pinout table (`--key-header`/`--value-header` pick columns explicitly).
+Emits the JSON object `pinmap --expected` consumes; `-o` writes it to a file.
+Exits `1` when nothing was extracted (an empty table would make `pinmap
+--expected` vacuously pass), `2` on an unsupported input type, `4` when the
+file is missing. The schematic stays authoritative — this table is advisory.
+
 ### `akcli export <file> [--format protel|kicad|csv] [-o FILE]`
 Export the schematic's **netlist** for other EDA tools. Default `--format protel` (an
 Altium-importable `.NET`); `kicad` emits a legacy eeschema netlist; `csv` flat `net,ref,pin` rows.

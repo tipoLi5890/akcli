@@ -73,8 +73,8 @@ edges before building on them.
 - [x] CFBF DIFAT spillover support (> 109 FAT sectors) so large `.PcbDoc`/`.SchDoc` containers open (S)
 - [x] Multi-unit symbol placement: `unit` field on `place_component` (drop the hard-coded
       `(unit 1)`) (S) — *shipped in v0.2.0, with unit-true pin semantics across reader/writer/verifier*
-- [ ] `akcli expected <file.dts|pinout.md> [-o expected.json]` subcommand wrapping the DTS /
-      pinout.md adapters for the `pinmap --expected` pipeline (S)
+- [x] `akcli expected <file.dts|pinout.md> [-o expected.json]` subcommand wrapping the DTS /
+      pinout.md adapters for the `pinmap --expected` pipeline (S) — *shipped in v0.3.1*
 - [ ] `/circuit-parts` slash command wiring `jlc search → show → add --to kicad --place → plan →
       draw` into one documented flow (S)
 - [ ] Honest flags and hints: make `draw --dry-run` explicit, add `--no-erc` to skip the advisory
