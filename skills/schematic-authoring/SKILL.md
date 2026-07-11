@@ -21,8 +21,10 @@ path, **see the circuit-design skill** — do not re-derive them here. KiCad is 
 only writable target; the writer is flat (single-sheet) v1.
 
 **The authoring loop (never skip a stage):**
-requirements → block plan → part selection → op-list → `akcli plan` →
-`akcli draw` (dry-run) → `akcli draw --apply` → re-read + `akcli check`.
+requirements → block plan → part selection → op-list → `akcli plan` (read the
+**Net changes** block) → `akcli draw` (dry-run) → `akcli draw --apply`
+(`--strict-nets` when editing an existing sheet) → re-read + `akcli check`
+(+ `--intent` when a snapshot exists).
 
 ## (1) Block plan before any op
 
@@ -68,21 +70,76 @@ deterministic op UUID, so regenerating it breaks idempotent re-runs.
 
 ## (4) Op-list authoring patterns
 
-Document shape and the op vocabulary (16 ops) are defined in `schemas/ops.schema.json`
+Document shape and the op vocabulary (17 ops + 9 macros) are defined in `schemas/ops.schema.json`
 (see also `docs/op-list-authoring.md` and `akcli ops list`/`ops template <op>`); per-executor support is in
 `schemas/ops.capabilities.json`. Envelope: `{"protocol_version": 1,
-"target_format": "kicad", "ops": [...]}`. Rules the validator and executor enforce:
+"target_format": "kicad", "ops": [...]}`. The validator is strict: unknown
+fields are errors with a did-you-mean hint (`_`-prefixed keys are safe
+annotations), field types are enforced per op, and a duplicate
+`(designator, unit)` placement in one document is rejected. Rules the
+validator and executor enforce:
 
 - **Coordinates**: mils, origin top-left, +Y down, 50-mil grid. Raw `[x,y]` points
   are grid-snapped; `"REF.PIN"` endpoints snap to the pin's exact world coordinate.
   Place two-pin passives on 100-mil multiples so wires between aligned pins stay
   orthogonal (use an L-shaped dogleg via an intermediate `[x,y]` otherwise).
+- **Pin coordinates**: run `akcli pins <lib_id> --at X Y [--rotation R] [--symbols …]`
+  to print every pin's exact WORLD `(x,y)` for a placement — target those points
+  directly instead of guessing offsets. A label / power port placed *on* a pin's
+  coordinate connects it with no wire (collision-proof in dense blocks).
+- **`"at": "REF.PIN"` anchors**: `add_net_label` and the power-port ops accept a
+  pin reference as `at` — the anchor snaps to that pin's world coordinate AND
+  the label auto-orients away from the symbol body, with the `(justify ...)`
+  KiCad needs (a bare 180° angle renders un-flipped, over the part). Explicit
+  `orientation` wins; for stub-end labels set it to the stub direction
+  (0/90/180/270 = right/up/left/down).
+- **Layout lint**: after `--apply`, run `akcli check <file> --layout` — it flags
+  overlapping symbol bodies, label text over a body/pin field, label-label
+  overlaps, coincident text anchors, wires routed through symbol bodies, and
+  power symbols anchored on another symbol's pin tip (`LAYOUT_POWER_ON_PIN` —
+  see `place_pwr_flag` below). Fix the warnings; ERC cannot see them.
+  `check --nets` adds attachment near-misses: a pin tip touching a wire
+  mid-span with no junction is NOT connected (`NET_PIN_MIDSPAN_TOUCH`), an
+  unattached label names nothing (`NET_LABEL_UNATTACHED`), and an L-wire
+  corner on a pin tip is the classic accidental short
+  (`NET_WIRE_CORNER_ON_PIN`).
+- **Live dashboard**: `akcli view live <file>` serves a localhost timeline that
+  re-renders the sheet (SVG + ERC badges + part/net counts) on every apply.
 - **Wire vs label vs power port**: wire (`add_wire`, `"REF.PIN"` endpoints) for
   short in-block connections; `add_net_label` with `"scope": "local"` on a short
   wire stub for readable in-block nets; `"scope": "global"` for nets crossing
   blocks (writer is flat — avoid `hierarchical`, sheets are unsupported);
   `place_power_port` / `place_gnd` / `place_vcc` for rails (power ports merge by
-  name everywhere and auto-allocate `#PWR` refs).
+  name everywhere and auto-allocate `#PWR` refs). Connectivity is name-based, so
+  overlapping/collinear stubs or a wire T-junctioning another net silently MERGE
+  nets — the hard write-gates are `DANGLING_ENDPOINT`/`DANGLING_BUS_ENTRY` only,
+  so read the **Net changes** block on every plan/draw and verify membership
+  with `akcli nets` after applying; never trust a clean apply alone. Label
+  scoping truth (matches eeschema): a local label DOES merge with a same-name
+  global label or power port on the SAME sheet even when physically
+  disconnected — never use a rail name as a "private" local label.
+- **Facing pins — `connect_and_label`**: two pins facing each other on one
+  axis (555.OUT→R.1, R.2→C.1 chains) must NOT each get a label-on-pin —
+  auto-orient extends both texts toward each other and `check --layout` flags
+  the overlap. `{"op": "connect_and_label", "from": "U1.3", "to": "R2.1",
+  "net": "PWM"}` emits the coaxial pin-to-pin wire plus ONE label at
+  `mid(from,to)`, auto-oriented along the wire. (The `mid(REF.PIN,REF.PIN)`
+  anchor also works directly in `add_net_label`/power-port ops: exactly
+  axis-aligned pins only, snapped along the wire axis.)
+- **`power:PWR_FLAG` — use the `place_pwr_flag` macro, mid-wire**: the flag
+  silences KiCad's `power_pin_not_driven`; it marks the net driven but never
+  names or merges a net, so it is safe on every rail. Do NOT anchor it on a
+  pin ("#PWR01.1") — two bodies stack on one point and `check --layout` flags
+  `LAYOUT_POWER_ON_PIN`/`LAYOUT_SYMBOL_OVERLAP`. `{"op": "place_pwr_flag",
+  "at": [2000, 1750]}` (or `"at": "mid(REF.PIN,REF.PIN)"`) places it on the
+  wire, rotated 90 so the body extends into empty space.
+- **Spare multi-unit units — `terminate_unused_unit`**: unused op-amp/
+  comparator units must be placed and terminated or KiCad ERC warns
+  `missing_input_pin` (and `akcli check --erc` flags `ERC_UNPLACED_UNIT`).
+  One op places the unit, ties +in to GND and −in to a rail, and no-connects
+  the output: `{"op": "terminate_unused_unit", "designator": "U1",
+  "lib_id": "Amplifier_Operational:LM358", "unit": 2, "at": [4000, 3000],
+  "in_plus": "5", "in_minus": "6", "out": "7", "vcc": "+3V3"}`.
 - **Junctions**: where 3+ wire ends meet, `auto_junctions` inserts `(junction)`
   nodes automatically before verify — do not hand-place `add_junction` unless the
   dry-run connectivity report shows a genuine miss. Pure X crossings are never
@@ -93,11 +150,17 @@ Document shape and the op vocabulary (16 ops) are defined in `schemas/ops.schema
   unit is its own instance sharing the designator (`U1` gate A = unit 1, gate B
   = unit 2 ...). `"REF.PIN"` resolves against the instance whose unit owns the
   pin; wiring a pin on an unplaced unit fails loudly.
-- **Delete/move**: `delete_component` (all instances of a designator; attached
-  wires are left for the connectivity gate to flag — delete them explicitly via
-  `delete_object` by uuid), `move_component` (one instance, properties travel
-  with the body; wires do NOT stretch, so re-wire after a move). Deleting an
-  absent target is a replay-safe no-op.
+- **Delete/move/rename**: `delete_component` (all instances of a designator;
+  attached wires are left for the connectivity gate to flag — delete them via
+  `delete_object`, or set `"cascade": true` to also remove wires ending on the
+  deleted pins plus labels/no-connects/junctions anchored there),
+  `delete_object` (by `uuid`, or by `match: {kind, name?, at?}` with
+  exactly-one semantics), `move_component` (one instance, properties travel
+  with the body; wires do NOT stretch, so re-wire after a move), `rename_net`
+  (rewrites label texts + power-port Values; zero matches is a replay-safe
+  no-op). Deleting an absent target is a replay-safe no-op. CAREFUL: deleting
+  a label can silently SPLIT a net whose fragments it held together — watch
+  the `! SPLIT` lines in the Net changes block.
 
 ### Example A — LDO regulator block (new sheet)
 
@@ -167,11 +230,28 @@ akcli draw board.kicad_sch --ops ldo.json --symbols "$SYMS/Regulator_Linear.kica
 ```
 
 Exit 6 means an op errored or connectivity found an ERROR/CRITICAL
-(`DANGLING_ENDPOINT`, `UNRESOLVED_LIB_ID`, ...): on `--apply` nothing was written.
-Use `--json` for machine output: `{applied, ops[], connectivity[]}`. On
-`OP_UNSUPPORTED`, `PROTOCOL_MISMATCH`, or geometry errors: stop and report, do not
-retry blindly. Do not pass `--dry-run` — it is accepted but inert; omitting
+(`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `UNRESOLVED_LIB_ID`, ...): on
+`--apply` nothing was written. Use `--json` for machine output:
+`{applied, status, ops[], connectivity[], net_diff}`. On `OP_UNSUPPORTED`,
+`PROTOCOL_MISMATCH`, or geometry errors: stop and report, do not retry
+blindly. Do not pass `--dry-run` — it is accepted but inert; omitting
 `--apply` already is the dry run.
+
+**Read the "Net changes" block on every plan/draw** — the before/after
+netlists are diffed by pin membership:
+
+```
+Net changes:
+  ! SPLIT THR (4 pins) -> THR(2) + <unnamed@R7.2>(2)   # DANGER: a fragment lost its name anchor
+  ! MERGE MID + +3V3 -> MID                            # DANGER: a wire/label shorted two nets
+  ~ VTH: +U1.7 (5->6 pins)                             # membership grew — is that the intent?
+  = RENAME MID -> VOUT (3 pins)                        # harmless (same pins)
+```
+
+`(none)` proves the edit was connectivity-neutral. On surgical edits to an
+existing sheet, apply with `--strict-nets`: any `!` line touching a named net
+refuses the write (exit 6). An intended merge/rename? Re-run without
+`--strict-nets` after confirming the lines are exactly the intended ones.
 
 ## (6) Idempotency and safe re-runs
 
@@ -195,9 +275,9 @@ retry blindly. Do not pass `--dry-run` — it is accepted but inert; omitting
 
 ```bash
 akcli read board.kicad_sch --md                        # parts present, values correct?
-akcli net board.kicad_sch --json | jq '.nets[] | {name, members}'   # every intended net, exact membership
+akcli nets board.kicad_sch                             # every net -> sorted members, one line each
 akcli component board.kicad_sch U1                     # pin->net map of key parts
-akcli check board.kicad_sch --exit-zero                # ERC-lite + power + BOM, report mode
+akcli check board.kicad_sch --exit-zero                # ERC-lite + power + BOM + nets + layout
 akcli diff board.kicad_sch.bak board.kicad_sch --exit-zero   # the delta is exactly what you drew
 ```
 
@@ -205,3 +285,23 @@ Compare each net's membership against your block plan pin by pin. Read `check`'s
 metadata caveats (passive-pin ratio, unnamed-net count) before declaring the sheet
 clean — a findings-free run on a mostly-passive sheet proves little. If anything
 diverges, fix the op-list and re-run the loop from `akcli plan`.
+
+**Intent snapshot → assert (make the block plan machine-checkable).** Once the
+sheet matches the plan, snapshot the netlist you MEAN; after every later edit,
+assert it instead of eyeballing:
+
+```bash
+akcli nets board.kicad_sch --intent-snapshot intent.json   # capture named nets -> pins
+# ... later surgical edits (draw --apply --strict-nets) ...
+akcli check board.kicad_sch --intent intent.json           # exit 1 on ANY intent violation
+```
+
+The intent file is plain JSON (`{"protocol_version": 1, "mode": "exact",
+"nets": {"SWCLK": ["U1.4", "J2.2"], ...}}`) — hand-edit it when the plan
+changes, or write it from the block plan BEFORE drawing and use it as the
+acceptance test. Matching is by pin membership, so renames don't false-fail;
+`INTENT_NETS_SHORTED` catches two planned nets landing on one actual net,
+`INTENT_EXTRA_MEMBER` catches accidental joins (`"mode": "subset"` skips it
+when other tools add pins). For key nets only, prefer a small hand-written
+intent file over a full snapshot — it asserts design intent, not incidental
+wiring.

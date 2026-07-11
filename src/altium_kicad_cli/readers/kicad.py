@@ -26,6 +26,7 @@ from pathlib import Path
 
 from .. import model, netbuild, units
 from ..errors import fail
+from ..writers import geometry
 from ..model import (
     Component,
     NetLabel,
@@ -111,24 +112,19 @@ def _pin_world(
 ) -> tuple[float, float]:
     """World coords (mil, +Y down) of a symbol-local pin offset.
 
-    Library pins are +Y up, so the base case (rotation 0, no mirror) is the
-    KiCad library flip ``(px + lx, py - ly)`` — this is the exact path the
-    fixtures (rotation 0 only) exercise. Rotation 0/90/180/270 and mirror x/y
-    are applied in the schematic (+Y-down) frame for completeness.
+    Delegates to :func:`writers.geometry.transform_point` — the single,
+    eeschema-verified transform (library +Y-up flip, then rotate-then-mirror;
+    see that module's docstring and ``tests/test_kicad_parity.py``). The
+    reader used to keep its own mirror-then-rotate copy, which disagreed with
+    both the writer and eeschema on part of the rot × mirror matrix. Math is
+    exact in integer nanometres; a non-right angle is snapped to the nearest
+    90° (eeschema only stores right angles for symbol instances).
     """
-    x, y = lx_mil, -ly_mil  # library (+Y up) -> schematic (+Y down)
-    if mirror == "x":       # mirror across the X axis -> flip Y
-        y = -y
-    elif mirror == "y":     # mirror across the Y axis -> flip X
-        x = -x
-    r = rot_deg % 360
-    if r == 90:
-        x, y = -y, x
-    elif r == 180:
-        x, y = -x, -y
-    elif r == 270:
-        x, y = y, -x
-    return px_mil + x, py_mil + y
+    local = (units.mil_to_nm(lx_mil), -units.mil_to_nm(ly_mil))
+    origin = (units.mil_to_nm(px_mil), units.mil_to_nm(py_mil))
+    rot = (round(rot_deg / 90) * 90) % 360
+    wx, wy = geometry.transform_point(local, rot, mirror, origin)
+    return units.nm_to_mil(wx), units.nm_to_mil(wy)
 
 
 def _props(sym: sexpr.SNode) -> dict[str, str]:
@@ -179,22 +175,33 @@ def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
     """Single-file build (no sheet recursion) — see :func:`_build_hierarchy`."""
     components: list[Component] = []
     prims = NetPrimitives()
-    _build_file(root, components, {}, prims, sheet="", want_path=None)
+    _build_file(root, components, {}, prims, sheet="", want_path=None,
+                warnings=[])
     return components, prims
 
 
 def _build_file(
     root: sexpr.SNode,
     components: list[Component],
-    by_designator: dict[str, Component],
+    by_designator: dict[str, tuple[Component, set[int]]],
     prims: NetPrimitives,
     sheet: str,
     want_path: str | None,
+    warnings: list[str],
 ) -> None:
     """Emit ONE file's components/primitives into the shared accumulators.
 
     ``sheet`` is the geometric namespace (the sheet-instance path; ``""`` for
     the root) — two sheets never connect by coordinates, only by name/hier.
+
+    ``by_designator`` maps a designator to ``(component, contributed_units)``:
+    a further placement of the same designator + lib_id merges into that
+    component only when it contributes a NEW unit (a multi-unit part). A
+    placement whose unit was already contributed is a genuine duplicate
+    designator; it becomes a SEPARATE component under the same designator
+    (distinct ``unique_id``, so ``checks/bom.py`` BOM_DUPLICATE_DESIGNATOR
+    fires) plus a reader warning — eeschema also keeps the shared reference
+    on both placements' netlist nodes, so pin refs stay under the raw ref.
     """
     libsym = root.find("lib_symbols")
     library = (
@@ -227,10 +234,14 @@ def _build_file(
         # those — treating every unit's pins as present at every instance
         # mapped all four gates onto one body and merged unrelated nets).
         pins = kicad_lib.unit_pins(symdef, unit)
-        existing = None if undesignated else by_designator.get(ref)
-        if existing is not None and existing.library_ref == lib_id:
-            comp = existing
+        entry = None if undesignated else by_designator.get(ref)
+        is_dup = False
+        if (entry is not None and entry[0].library_ref == lib_id
+                and unit not in entry[1]):
+            comp, seen_units = entry
+            seen_units.add(unit)
         else:
+            is_dup = (entry is not None and entry[0].library_ref == lib_id)
             fp = props.get("Footprint") or None
             comp = Component(
                 designator=ref,
@@ -248,8 +259,23 @@ def _build_file(
                 undesignated=undesignated,
             )
             components.append(comp)
-            if not undesignated:
-                by_designator[ref] = comp
+            if not undesignated and entry is None:
+                by_designator[ref] = (comp, {unit})
+            if is_dup:
+                # Flag the collision on the component and warn; the shared
+                # designator is kept so BOM duplicate detection (distinct
+                # unique_ids under one refdes) fires and pin refs match
+                # eeschema's netlist nodes.
+                ndup = sum(
+                    1 for c in components
+                    if c.designator == ref and c.parameters.get("akcli_duplicate")
+                ) + 1
+                comp.parameters["akcli_duplicate"] = f"{ref}@dup{ndup}"
+                warnings.append(
+                    f"duplicate designator {ref!r}: unit {unit} of {lib_id!r} "
+                    f"is placed more than once; the extra placement is kept as "
+                    f"a distinct component ({ref}@dup{ndup}) — re-annotate"
+                )
 
         for lp in pins:
             wx, wy = _pin_world(lp.x_mil, lp.y_mil, px, py, rot, mirror)
@@ -267,18 +293,25 @@ def _build_file(
                 PinHandle(ref=(ref, lp.number), at=(wx, wy), sheet=sheet)
             )
 
-        # A power symbol injects a global (power-scoped) net name at its pin.
+        # A power symbol injects a global (power-scoped) net name at its pin —
+        # EXCEPT PWR_FLAG, which is a power symbol that only marks a net as
+        # driven for ERC and must NOT name/merge a net (KiCad excludes it). Its
+        # pin is already emitted above, so it stays electrically on whatever net
+        # it is wired to; injecting a "PWR_FLAG" name here would union every rail
+        # that carries a flag into one net (a false +5V↔GND short).
         if _is_power(lib_id, raw) and comp.pins:
-            net_name = props.get("Value") or lib_id.split(":")[-1]
-            ppin = comp.pins[0]
-            prims.labels.append(
-                NetLabel(
-                    at=(ppin.x_mil, ppin.y_mil),
-                    text=net_name,
-                    scope="power",
-                    sheet=sheet,
+            sym_name = lib_id.split(":")[-1]
+            net_name = props.get("Value") or sym_name
+            if sym_name.upper() != "PWR_FLAG" and net_name.upper() != "PWR_FLAG":
+                ppin = comp.pins[0]
+                prims.labels.append(
+                    NetLabel(
+                        at=(ppin.x_mil, ppin.y_mil),
+                        text=net_name,
+                        scope="power",
+                        sheet=sheet,
+                    )
                 )
-            )
 
     _collect_wires_labels(root, prims, sheet)
 
@@ -385,11 +418,13 @@ def _walk_sheets(
     sheet_names: list[str],
     inst_path: str,
     ancestors: tuple[str, ...],
+    warnings: list[str],
 ) -> None:
     """Recursively read ``(sheet ...)`` children (cycle- and depth-guarded)."""
     geom_sheet = inst_path  # "" for the root file
     _build_file(root, components, by_designator, prims, geom_sheet,
-                want_path=f"/{root_uuid}{inst_path}" if root_uuid else None)
+                want_path=f"/{root_uuid}{inst_path}" if root_uuid else None,
+                warnings=warnings)
 
     for sh in root.find_all("sheet"):
         suuid = _av(sh.find("uuid"), 1) or ""
@@ -429,7 +464,7 @@ def _walk_sheets(
         child_root = _parse_root(child_path, "kicad_sch")
         _walk_sheets(child_root, str(child_path), root_uuid, components,
                      by_designator, prims, sheet_names, child_inst,
-                     ancestors + (str(child_path),))
+                     ancestors + (str(child_path),), warnings)
 
 
 def read_sch(path: os.PathLike | str) -> Schematic:
@@ -447,9 +482,14 @@ def read_sch(path: os.PathLike | str) -> Schematic:
     components: list[Component] = []
     prims = NetPrimitives()
     sheet_names: list[str] = []
+    warnings: list[str] = []
     _walk_sheets(root, os.fspath(path), root_uuid, components, {}, prims,
-                 sheet_names, inst_path="", ancestors=(str(Path(os.fspath(path)).resolve()),))
-    nets = netbuild.build_nets(prims)
+                 sheet_names, inst_path="",
+                 ancestors=(str(Path(os.fspath(path)).resolve()),),
+                 warnings=warnings)
+    # eeschema dialect: a wire end on another wire's mid-span joins only
+    # through an explicit junction node (kicad-cli-verified; see netbuild).
+    nets = netbuild.build_nets(prims, t_midspan_connects=False)
     return Schematic(
         source_path=str(path),
         source_format="kicad",
@@ -457,13 +497,18 @@ def read_sch(path: os.PathLike | str) -> Schematic:
         nets=nets,
         sheets=sheet_names,
         no_erc_points=list(prims.no_erc),
-        warnings=[],
+        warnings=warnings,
         metadata=_metadata(components, nets),
     )
 
 
 def read_primitives(path: os.PathLike | str) -> NetPrimitives:
-    """Read a ``.kicad_sch`` into raw :class:`model.NetPrimitives` (pre-netbuild)."""
+    """Read a ``.kicad_sch`` into raw :class:`model.NetPrimitives` (pre-netbuild).
+
+    Single-file view (no sheet recursion). A caller reproducing
+    :func:`read_sch`'s nets must run ``netbuild.build_nets(prims,
+    t_midspan_connects=False)`` — the eeschema dialect.
+    """
     root = _parse_root(path, "kicad_sch")
     _, prims = _build(root)
     return prims

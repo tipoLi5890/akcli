@@ -5,7 +5,8 @@ Search the JLCPCB / LCSC component catalog from the command line. This is the
 offline and zero-dependency.
 
 > **Needs network.** `jlc` calls the public **jlcsearch** service
-> (`https://jlcsearch.tscircuit.com`). All other `akcli` commands work with no
+> (`https://jlcsearch.tscircuit.com`; override with `AKCLI_JLC_BASE_URL` for a
+> self-hosted instance or tests). All other `akcli` commands work with no
 > network and no Altium/KiCad install. Network code is import-isolated under
 > `altium_kicad_cli.parts` and loaded lazily, so it never touches the offline paths.
 
@@ -29,6 +30,60 @@ part, else `-`. `--json` emits the full list of part objects.
 Exit codes: `0` on results **and** on a clean no-results path (a `no parts found`
 notice goes to stderr); `7` on a network/HTTP error (a single
 `ERROR: NETWORK: …` line goes to stderr — never a traceback).
+
+### `akcli jlc bom <sch> [--qty N] [--min-stock N] [--suggest] [--fix|--fix-all] [--csv OUT.csv] [--json]`
+
+Check a schematic's **BOM against the live catalog** — every BOM line is
+resolved to a part and reported with stock, price and Basic/Preferred status:
+
+```bash
+akcli jlc bom board.kicad_sch
+akcli jlc bom board.SchDoc --min-stock 100 --json
+```
+
+Resolution order per line: an **LCSC C-number parameter** (`LCSC`, `LCSC Part`,
+`JLCPCB#`, … — any parameter mentioning lcsc/jlc whose value looks like
+`C12345`) wins and is fetched directly; else an **MPN parameter** (`MPN`,
+`Manufacturer Part`, `Part Number`, …) is searched and matched exactly
+(preferring in-stock Basic parts, then the deepest stock); else the line is
+listed as `no-part-id` (advisory — guessing a part from a bare "10k 0402"
+would not be a check). Components sharing one identity group into one line
+(one lookup, `QTY` = ref count); `#`-virtual parts are excluded like the
+offline BOM check.
+
+`--qty N` evaluates at build quantity: every line needs `N x refs` pieces,
+stock is compared against that, the applicable **price tier** is chosen at
+that quantity, and the summary carries the estimated parts cost per run.
+Responses are cached on disk for an hour (`~/.cache/akcli/jlc`;
+`AKCLI_JLC_CACHE` relocates or disables). Transient network failures
+(timeouts, HTTP 429/5xx) are retried with exponential backoff honoring
+`Retry-After`; when retries are exhausted and a cached copy exists, the
+**stale copy is served with a stderr warning** (`AKCLI_JLC_CACHE_STALE=off`
+restores hard failure).
+
+`--suggest` searches the catalog for every `not-found` / `no-part-id` line
+(query = value + package size from the footprint, e.g. `100n` +
+`C_0402_...` → `100nF 0402`; candidates must match the package, ranking
+prefers in-stock Basic parts) and prints the best candidate. Each suggestion
+is graded **high** confidence (package matched AND the value is visible in
+the candidate's description/MPN) or **low** (package matched only). `--fix`
+writes only high-confidence C-numbers back into the schematic's LCSC
+parameters — in the SAME parameter key when one existed (correcting a wrong
+id in place) — through the draw pipeline (`.bak`, `akcli undo` reverts),
+then re-checks; withheld low-confidence suggestions are counted on stderr.
+`--fix-all` also writes the low-confidence ones. Suggestions are heuristics:
+**verify the datasheet before building.**
+
+`--csv OUT.csv` also writes a **JLCPCB upload BOM CSV** (header exactly
+`Comment,Designator,Footprint,LCSC Part #`; all refs of a line comma-joined
+in one quoted Designator cell; footprint shortened after the `:`;
+unresolved/dead-id lines get a **blank** LCSC cell so a dead C-number never
+lands in an order file). `'-'` writes the CSV to stdout.
+
+Statuses: `ok` · `low-stock` (below `--min-stock` or the needed quantity) · `out-of-stock` ·
+`not-found` · `no-part-id`. Exit `1` when any of the first three problems is
+present (`no-part-id` never fails the run; `--exit-zero` forces `0`); exit
+`7` on a network error.
 
 ### `akcli jlc show <C-number> [--easyeda] [--json]`
 

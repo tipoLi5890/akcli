@@ -35,17 +35,33 @@ def _schema_ops() -> dict[str, dict]:
 
 def test_tables_match_schema():
     branches = _schema_ops()
-    # every schema op is in OP_NAMES (sugar ops may share the power-port branch)
+    # every op AND macro must have a schema branch, and vice versa
+    assert set(branches) == set(ops.OP_NAMES) | set(ops.MACRO_OPS), (
+        "schema op union drifted from OP_NAMES | MACRO_OPS"
+    )
     for name, branch in branches.items():
-        assert name in ops.OP_NAMES, f"schema op {name!r} missing from OP_NAMES"
         required = [f for f in branch.get("required", []) if f != "op"]
-        assert sorted(ops._OP_REQUIRED.get(name, [])) == sorted(required), (
+        if name in ops.MACRO_OPS:
+            req_table, opt_table = ops.MACRO_REQUIRED, ops.MACRO_OPTIONAL
+        else:
+            req_table, opt_table = ops._OP_REQUIRED, ops._OP_OPTIONAL
+        assert sorted(req_table.get(name, [])) == sorted(required), (
             f"{name}: required fields drifted from schema"
         )
         schema_fields = set(branch.get("properties", {})) - {"op"}
-        known = set(ops._OP_REQUIRED.get(name, [])) | set(ops._OP_OPTIONAL.get(name, {}))
+        known = set(req_table.get(name, [])) | set(opt_table.get(name, {}))
         unknown = known - schema_fields
         assert not unknown, f"{name}: kit fields {unknown} not in schema"
+        if name in ops._OP_FIELDS:
+            # the validator's field-TYPE table is the unknown-field registry:
+            # it must cover exactly the schema branch's fields
+            assert set(ops._OP_FIELDS[name]) == schema_fields, (
+                f"{name}: _OP_FIELDS drifted from schema properties"
+            )
+
+
+def test_every_op_has_field_type_table():
+    assert set(ops._OP_FIELDS) == set(ops.OP_NAMES)
 
 
 def test_template_fills_required_fields():

@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>akcli live — schematic watch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23d08a3d'/%3E%3Ccircle cx='8' cy='8' r='3.6' fill='none' stroke='%231a1408' stroke-width='1.6'/%3E%3Ccircle cx='8' cy='8' r='1.4' fill='%231a1408'/%3E%3C/svg%3E">
+<style>
+/* ============================ theme ================================== */
+:root{
+  --mono: ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code","Fira Code",Menlo,Consolas,monospace;
+  --disp: "Avenir Next Condensed","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#14161a; --bg2:#181b20; --panel:#1d2127; --panel2:#171a1f; --inset:#101317;
+  --border:#2b3038; --border2:#3a414c;
+  --text:#ced3da; --muted:#8b929d; --faint:#5f6671;
+  --brand:#d08a3d; --brand2:#e8ab61; --oncopper:#1a1408;
+  --data:#66c8de; --live:#58c48e; --err:#e5665f; --warn:#d9a13c;
+  --sel:rgba(208,138,61,.13); --focus:rgba(102,200,222,.45);
+  --grid:rgba(102,200,222,.045); --grid2:rgba(102,200,222,.028);
+  --shadow:0 6px 24px rgba(0,0,0,.35); --paper:#fff; --paper-ink:#14161a;
+}
+:root[data-theme="light"]{
+  --bg:#e9e5db; --bg2:#efece3; --panel:#faf8f2; --panel2:#f0ede4; --inset:#fdfcf9;
+  --border:#d3ccbb; --border2:#bcb4a0;
+  --text:#2b2e33; --muted:#6c7076; --faint:#9a9c9e;
+  --brand:#a96617; --brand2:#8a5310; --oncopper:#fff8ec;
+  --data:#0f6f88; --live:#1e8a57; --err:#bf3934; --warn:#8f6408;
+  --sel:rgba(169,102,23,.10); --focus:rgba(15,111,136,.35);
+  --grid:rgba(15,111,136,.055); --grid2:rgba(15,111,136,.03);
+  --shadow:0 4px 18px rgba(60,50,30,.12); --paper:#fff; --paper-ink:#14161a;
+}
+
+/* ============================ base =================================== */
+*{box-sizing:border-box; margin:0}
+[hidden]{display:none !important}
+html,body{height:100%}
+body{background:var(--bg); color:var(--text); font:13px/1.5 var(--mono); overflow:hidden}
+button{font:inherit; color:inherit; cursor:pointer}
+:focus-visible{outline:2px solid var(--focus); outline-offset:1px; border-radius:4px}
+@media (prefers-reduced-motion:reduce){ *,*::before,*::after{animation:none !important; transition:none !important} }
+.wrap{height:100vh; display:grid; gap:12px; padding:12px;
+      grid-template-columns:1fr 320px; grid-template-rows:auto 1fr;
+      grid-template-areas:"head head" "stage side"; max-width:1720px; margin:0 auto}
+@media (max-width:940px){
+  .wrap{grid-template-columns:1fr; grid-template-rows:auto 1fr auto;
+        grid-template-areas:"head" "stage" "side"; overflow-y:auto; height:auto}
+  body{overflow:auto}
+}
+
+/* ============ header — shared bench chrome (hub/calc/live) ============ */
+header{grid-area:head; display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+#mark{font-family:var(--disp); font-size:15px; font-weight:600; letter-spacing:.1em;
+      text-transform:uppercase; color:var(--brand2); text-decoration:none; white-space:nowrap}
+#mark:hover{color:var(--brand)}
+.tabs{display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden;
+      background:var(--panel)}
+.tabs a{display:flex; align-items:center; padding:3px 13px; color:var(--muted);
+        text-decoration:none; font-family:var(--disp); font-size:11.5px; font-weight:600;
+        letter-spacing:.12em; text-transform:uppercase; border-right:1px solid var(--border)}
+.tabs a:last-child{border-right:none}
+.tabs a.on{background:var(--sel); color:var(--brand2)}
+.tabs a:hover:not(.on){color:var(--text)}
+.dot{width:9px; height:9px; border-radius:50%; background:var(--live); animation:pulse 2.2s infinite}
+.dot.stale{background:var(--err); animation:none}
+@keyframes pulse{50%{opacity:.3}}
+.chip{background:var(--panel); border:1px solid var(--border); border-radius:99px;
+      padding:2px 11px; font-size:11.5px; color:var(--muted); white-space:nowrap}
+.chip b{color:var(--text); font-weight:600}
+.chip.erc-ok b{color:var(--live)} .chip.erc-bad b{color:var(--err)}
+.chip.errchip{border-color:var(--err); color:var(--err); max-width:420px;
+              overflow:hidden; text-overflow:ellipsis}
+.chip.errchip b{color:var(--err)}
+a.chip{text-decoration:none; cursor:pointer}
+a.chip:hover{border-color:var(--brand); color:var(--brand2)}
+.spacer{flex:1}
+button.ui{background:var(--panel); color:var(--text); border:1px solid var(--border);
+          border-radius:7px; padding:4px 10px; font-size:12px}
+button.ui:hover{border-color:var(--border2)}
+button.ui.on{border-color:var(--brand); color:var(--brand2)}
+button.ui.primary{border-color:var(--live); color:var(--live); font-weight:700}
+button.ui:disabled{opacity:.4; cursor:default}
+.kbd{display:inline-block; border:1px solid var(--border2); border-bottom-width:2px;
+     border-radius:4px; padding:0 5px; font-size:10px; color:var(--muted); background:var(--panel)}
+
+/* ============================ stage ================================== */
+.stage{grid-area:stage; background:var(--panel); border:1px solid var(--border);
+       border-radius:12px; display:flex; flex-direction:column; overflow:hidden;
+       min-height:420px; box-shadow:var(--shadow)}
+.toolbar{display:flex; gap:6px; align-items:center; padding:8px 10px;
+         border-bottom:1px solid var(--border); flex-wrap:wrap}
+.toolbar .sep{width:1px; height:18px; background:var(--border); margin:0 3px}
+.toolbar .zoomlvl{font-size:11.5px; color:var(--muted); min-width:42px; text-align:center}
+#sheettabs{display:flex; gap:6px; padding:6px 10px; border-bottom:1px solid var(--border);
+           flex-wrap:wrap}
+#sheettabs button{font-size:11px; padding:2px 10px}
+.canvas{flex:1; overflow:hidden; position:relative; cursor:grab; background:
+        linear-gradient(var(--grid2) 1px, transparent 1px) 0 0/100% 96px,
+        linear-gradient(90deg,var(--grid2) 1px, transparent 1px) 0 0/96px 100%,
+        linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 24px,
+        linear-gradient(90deg,var(--grid) 1px, transparent 1px) 0 0/24px 100%,
+        var(--bg2)}
+.canvas.dragging{cursor:grabbing}
+.frame{position:absolute; background:var(--paper); border-radius:6px; padding:10px;
+       box-shadow:0 2px 18px rgba(0,0,0,.28); transform-origin:0 0}
+.frame.ink{background:var(--paper-ink)}
+.frame.ink #art svg{filter:invert(.93) hue-rotate(180deg)}
+#art{position:relative}
+#art svg{display:block}
+#ghost{position:absolute; inset:10px; pointer-events:none; opacity:.4;
+       filter:brightness(0) saturate(100%) invert(32%) sepia(84%) saturate(2600%)
+              hue-rotate(345deg) brightness(1.1)}
+#ghost svg{display:block}
+#ovl{position:absolute; inset:10px 10px auto 10px; pointer-events:none; overflow:visible}
+#ovl .mk{pointer-events:all; cursor:help}
+#ovl .ring{fill:none; stroke-width:1.6; vector-effect:non-scaling-stroke;
+           animation:ping 2.2s ease-out infinite; transform-box:fill-box; transform-origin:center}
+@keyframes ping{0%{transform:scale(.55); opacity:1} 80%{transform:scale(1.5); opacity:0} 100%{opacity:0}}
+#ovl .mk.flash .ring{animation-duration:.55s}
+.empty{position:absolute; inset:0; display:flex; flex-direction:column; gap:8px;
+       align-items:center; justify-content:center; color:var(--muted); text-align:center;
+       font-size:12.5px; padding:20px}
+.empty b{color:var(--text)}
+.empty code{background:var(--panel2); border:1px solid var(--border); padding:0 6px;
+            border-radius:4px}
+
+/* ============================ sidebar ================================ */
+aside{grid-area:side; background:var(--panel); border:1px solid var(--border);
+      border-radius:12px; display:flex; flex-direction:column; overflow:hidden;
+      min-height:200px; box-shadow:var(--shadow)}
+aside h2{font-family:var(--disp); font-size:11px; color:var(--muted); text-transform:uppercase;
+         letter-spacing:.16em; padding:12px 14px 6px; display:flex; align-items:center; gap:8px}
+#spark{margin-left:auto}
+.steps{overflow-y:auto; padding:0 8px 10px; flex:1; min-height:80px; scrollbar-width:thin}
+/* steps are real <button>s (keyboard + AT reachable) styled as list rows */
+.step{display:block; width:100%; text-align:left; background:none;
+      padding:8px 10px; border-radius:9px; cursor:pointer;
+      border:1px solid transparent; margin-bottom:4px}
+.step:hover{border-color:var(--border)}
+.step.active{border-color:var(--brand); background:var(--sel)}
+.step .row{display:flex; align-items:baseline; gap:8px}
+.step .n{font-weight:700}
+.step .t{color:var(--faint); font-size:11px}
+.live-tag{font-size:9.5px; font-weight:700; color:var(--live); border:1px solid var(--live);
+          border-radius:4px; padding:0 4px; letter-spacing:.05em}
+.badge{font-size:10.5px; border-radius:5px; padding:0 6px; font-weight:700; margin-left:auto}
+.badge.ok{color:var(--live); background:color-mix(in srgb, var(--live) 13%, transparent)}
+.badge.err{color:var(--err); background:color-mix(in srgb, var(--err) 13%, transparent)}
+.badge.warn{color:var(--warn); background:color-mix(in srgb, var(--warn) 15%, transparent)}
+.badge.mute{color:var(--muted); background:var(--panel2)}
+.step .note{font-size:12px; margin-top:2px; color:var(--text)}
+.step .meta{font-size:10.5px; color:var(--muted); margin-top:1px}
+.step .meta .d{color:var(--data)}
+#ercpanel{border-top:1px solid var(--border); max-height:34%; display:flex;
+          flex-direction:column; min-height:0}
+#ercpanel h2{cursor:pointer; user-select:none; padding-bottom:8px}
+#ercpanel h2 .cnt{margin-left:auto; font-family:var(--mono); letter-spacing:0}
+#erclist{overflow-y:auto; padding:0 8px 10px; scrollbar-width:thin}
+.viol{display:flex; gap:8px; align-items:baseline; padding:5px 8px; border-radius:7px;
+      cursor:pointer; font-size:11.5px; background:none; border:none; width:100%; text-align:left}
+.viol:hover{background:var(--sel)}
+.viol .sv{flex:none; font-weight:700; width:14px}
+.viol .sv.e{color:var(--err)} .viol .sv.w{color:var(--warn)}
+.viol .tx{color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.viol .it{color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+          flex:none; max-width:40%}
+.newtag{flex:none; font-size:9px; font-weight:700; color:var(--err); border:1px solid var(--err);
+        border-radius:4px; padding:0 4px; letter-spacing:.05em}
+.erc-resolved{color:var(--live)}
+#notebar{display:flex; gap:6px; padding:8px 10px; border-top:1px solid var(--border)}
+#notebar input{flex:1; min-width:0; padding:5px 9px; background:var(--inset);
+               border:1px solid var(--border); color:var(--text); border-radius:7px;
+               font:inherit; font-size:12px}
+#notebar input::placeholder{color:var(--faint)}
+#clearbtn{margin-left:6px; font-size:10px; padding:0 6px; border-radius:5px;
+          background:none; border:1px solid transparent; color:var(--faint)}
+#clearbtn:hover{border-color:var(--err); color:var(--err)}
+.hint{border-top:1px solid var(--border); padding:8px 14px; font-size:10.5px; color:var(--faint)}
+.hint code{background:var(--panel2); padding:0 4px; border-radius:4px}
+
+/* ============================ overlays / toast ======================= */
+.overlay{position:fixed; inset:0; background:rgba(8,10,12,.55); display:flex;
+         justify-content:center; align-items:flex-start; padding-top:14vh; z-index:50;
+         backdrop-filter:blur(2px)}
+#helpbox{width:min(560px,90vw); background:var(--panel); border:1px solid var(--border2);
+         border-radius:12px; box-shadow:var(--shadow); padding:20px 24px}
+#helpbox h3{margin:0 0 12px; font-family:var(--disp); letter-spacing:.14em;
+            text-transform:uppercase; color:var(--brand2); font-size:14px}
+#helpbox table{width:100%; border-collapse:collapse; font-size:12.5px}
+#helpbox td{padding:4px 6px; border-bottom:1px solid var(--border)}
+#helpbox td:first-child{width:150px; color:var(--muted)}
+#bombox{width:min(860px,94vw); max-height:76vh; background:var(--panel);
+        border:1px solid var(--border2); border-radius:12px; box-shadow:var(--shadow);
+        padding:18px 22px; display:flex; flex-direction:column}
+#bombox h3{margin:0 0 10px; font-family:var(--disp); letter-spacing:.14em;
+           text-transform:uppercase; color:var(--brand2); font-size:14px;
+           display:flex; align-items:baseline; gap:12px}
+#bombox h3 .sum{font-family:var(--mono); font-size:11.5px; color:var(--muted);
+                text-transform:none; letter-spacing:0}
+#bomtable{overflow:auto; flex:1; min-height:60px}
+#bomtable table{border-collapse:collapse; width:100%; font-size:12px}
+#bomtable th,#bomtable td{border:1px solid var(--border); padding:4px 9px; text-align:left}
+#bomtable th{background:var(--panel2); color:var(--muted); font-family:var(--disp);
+             font-size:10.5px; letter-spacing:.12em; text-transform:uppercase;
+             position:sticky; top:0}
+#bomtable .st-ok{color:var(--live)} #bomtable .st-bad{color:var(--err)}
+#bomtable .st-warn{color:var(--warn)} #bomtable .st-mute{color:var(--faint)}
+#bomfoot{display:flex; gap:10px; align-items:center; margin-top:12px}
+#bomfoot .hintline{font-size:10.5px; color:var(--faint); flex:1}
+#toast{position:fixed; bottom:26px; left:50%; transform:translateX(-50%);
+       background:var(--panel); color:var(--text); border:1px solid var(--brand);
+       border-radius:8px; padding:7px 18px; font-size:12.5px; box-shadow:var(--shadow);
+       z-index:60; opacity:0; pointer-events:none; transition:opacity .18s}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a id="mark" href="/" title="hub (h)">⌂ akcli</a>
+    <nav class="tabs" aria-label="pages">
+      <a href="/" title="hub (h)">⌂</a>
+      <a href="/calc" title="calculator bench">= calc</a>
+      <a href="/live" class="on" title="live schematic timeline">◎ live</a>
+    </nav>
+    <span class="dot" id="dot" title="watcher connection"></span>
+    <span class="chip">watching <b id="file">…</b></span>
+    <span class="chip">step <b id="stepno">–</b></span>
+    <span class="chip" id="counts" hidden><b id="parts">0</b> parts · <b id="nets">0</b> nets</span>
+    <span class="chip" id="ercchip" hidden>ERC <b id="erctot">–</b></span>
+    <span class="chip errchip" id="werr" hidden role="alert">⚠ watcher <b id="werrmsg"></b></span>
+    <span class="spacer"></span>
+    <button id="follow" class="ui primary" hidden>▶ back to live</button>
+    <button id="themebtn" class="ui" title="toggle dark / light">◐</button>
+    <button id="helpbtn" class="ui" title="keyboard shortcuts (?)">?</button>
+  </header>
+
+  <div class="stage">
+    <div class="toolbar">
+      <button class="ui" id="zout" title="zoom out">−</button>
+      <span class="zoomlvl" id="zlvl">fit</span>
+      <button class="ui" id="zin" title="zoom in">+</button>
+      <button class="ui" id="zfit" title="fit to window (F)">⤢ fit</button>
+      <span class="sep"></span>
+      <button class="ui on" id="crop" title="crop to drawn content (C)">crop</button>
+      <button class="ui" id="diff" title="ghost the previous step under this one (D)">diff</button>
+      <button class="ui" id="ercmk" title="overlay ERC violation markers (E)">erc</button>
+      <button class="ui" id="ink" title="dark drafting paper (I)">ink</button>
+      <span class="sep"></span>
+      <button class="ui" id="prev" title="previous step (←)">←</button>
+      <button class="ui" id="next" title="next step (→)">→</button>
+      <button class="ui" id="play" title="replay the timeline (space)">▶ replay</button>
+      <span class="spacer"></span>
+      <button class="ui" id="bombtn" title="bill of materials (b)">bom</button>
+      <button class="ui" id="opensvg" title="open the raw SVG">svg</button>
+      <button class="ui" id="dlpng" title="rasterize the current view to PNG">⤓ png</button>
+    </div>
+    <div id="sheettabs" hidden></div>
+    <div class="canvas" id="canvas">
+      <div class="frame" id="frame" hidden>
+        <div id="ghost" hidden></div>
+        <div id="art"></div>
+        <svg id="ovl" hidden></svg>
+      </div>
+      <div class="empty" id="empty">
+        <div><b>Waiting for the first draw…</b></div>
+        <div>every save of the watched schematic becomes a timeline step</div>
+        <div>drive it with <code>akcli draw --apply</code> · annotate the next step via <code>note.txt</code></div>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <h2>Timeline <button id="clearbtn" title="clear the whole timeline">✕ clear</button>
+        <svg id="spark" width="96" height="22" aria-label="parts trend"></svg></h2>
+    <div class="steps" id="list" aria-label="timeline steps"></div>
+    <div id="ercpanel" hidden>
+      <h2 id="erchead">ERC <span class="cnt" id="erccnt"></span></h2>
+      <div id="erclist"></div>
+    </div>
+    <div id="notebar" hidden>
+      <input id="noteinp" placeholder="annotate the next step… (⏎ to send)" maxlength="200">
+      <button class="ui" id="notebtn" title="the note appears on the next timeline step">✎</button>
+    </div>
+    <div class="hint">
+      newest step follows automatically · <span class="kbd">←</span><span class="kbd">→</span> browse ·
+      <span class="kbd">L</span> live · <span class="kbd">?</span> keys ·
+      KiCad: <code>File → Revert</code> reloads the sheet
+    </div>
+  </aside>
+</div>
+
+<div class="overlay" id="bomov" hidden>
+  <div id="bombox" role="dialog" aria-modal="true" aria-label="bill of materials" tabindex="-1">
+    <h3>BOM <span class="sum" id="bomsum"></span></h3>
+    <div id="bomtable">loading…</div>
+    <div id="bomfoot">
+      <button class="ui primary" id="bomcheck"
+              title="queries the JLCPCB catalog — the only networked action">
+        ⇅ check purchasability</button>
+      <span class="hintline">offline by default — the stock/price check is the
+        one action that touches the network (jlcsearch), and only when clicked.
+        Part ids come from LCSC / MPN component parameters.</span>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="helpov" hidden>
+  <div id="helpbox" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" tabindex="-1">
+    <h3>Keyboard</h3>
+    <table>
+      <tr><td><span class="kbd">←</span> <span class="kbd">→</span></td><td>previous / next step</td></tr>
+      <tr><td><span class="kbd">L</span></td><td>back to live (follow newest)</td></tr>
+      <tr><td><span class="kbd">H</span></td><td>back to the hub</td></tr>
+      <tr><td><span class="kbd">space</span></td><td>replay the timeline</td></tr>
+      <tr><td><span class="kbd">F</span></td><td>fit to window</td></tr>
+      <tr><td><span class="kbd">C</span></td><td>crop to drawn content</td></tr>
+      <tr><td><span class="kbd">D</span></td><td>diff — previous step ghosted in red</td></tr>
+      <tr><td><span class="kbd">E</span></td><td>ERC markers on the schematic</td></tr>
+      <tr><td><span class="kbd">I</span></td><td>ink — dark drafting paper</td></tr>
+      <tr><td><span class="kbd">B</span></td><td>BOM panel (purchasability check on demand)</td></tr>
+      <tr><td><span class="kbd">+</span> <span class="kbd">−</span> <span class="kbd">0</span></td><td>zoom in / out / fit</td></tr>
+      <tr><td><span class="kbd">?</span></td><td>this help</td></tr>
+    </table>
+    <p style="margin-top:12px; font-size:11px; color:var(--faint)">
+      Scroll to zoom at the pointer · drag to pan · double-click toggles zoom ·
+      click an ERC finding to jump to it on the sheet.</p>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const BASE_W = 900, PAD = 10;      // frame layout width at scale 1, frame padding
+let steps = [], version = -1, viewing = -1, following = true, lastOk = 0;
+let cropped = true, diffOn = false, ercOn = false, sheetIdx = 0;
+let pageVB = null, cropVB = null, svgEl = null;
+let playT = null;
+const svgCache = new Map();        // svg url -> text (for sheets + diff ghosts)
+const sheetsOf = st => (st && (st.sheets || [st.svg]).filter(Boolean)) || [];
+
+/* ---------------- theme / prefs ---------------- */
+function store(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch(e){ return d; } }
+function save(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+function applyTheme(t){ document.documentElement.dataset.theme = t; save("akcli-theme", t); }
+applyTheme(store("akcli-theme", null) ||
+  (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+$("themebtn").onclick = () =>
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+let inkOn = store("akcli-live-ink", null);
+if (inkOn === null) inkOn = document.documentElement.dataset.theme === "dark";
+let toastT = null;
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1600);
+}
+
+/* ---------------- state sync: SSE push + slow-poll safety net -------- */
+async function tick(){
+  try {
+    const s = await (await fetch("/live/state.json?ts=" + Date.now(), {cache:"no-store"})).json();
+    lastOk = Date.now();
+    $("file").textContent = s.file;
+    $("notebar").hidden = !s.watching;
+    $("werr").hidden = !s.watcher_error;            // watcher crash banner
+    if (s.watcher_error) $("werrmsg").textContent = s.watcher_error;
+    if (s.version !== version){
+      version = s.version; steps = s.steps;
+      renderList(); renderSpark();
+      if (!steps.length){          // timeline cleared
+        viewing = -1; $("frame").hidden = true; $("empty").hidden = false;
+        $("counts").hidden = true; $("ercchip").hidden = true;
+        $("sheettabs").hidden = true; renderErc();
+      } else if (following) view(steps.length - 1);
+      else {
+        if (viewing >= steps.length) viewing = steps.length - 1;
+        highlight(); renderErc();
+      }
+    }
+  } catch (e) { /* transient — dot goes stale below */ }
+  $("dot").classList.toggle("stale", Date.now() - lastOk > 20000);
+}
+try {                              // pushed {"version": N} on every change
+  const es = new EventSource("/live/events");
+  es.onmessage = () => tick();
+} catch (e) { /* fall back to polling alone */ }
+setInterval(tick, 8000); tick();
+
+/* ---------------- timeline ---------------- */
+function badge(st){
+  if (!st.parts) return '<span class="badge mute">empty</span>';
+  if (st.erc_pending) return '<span class="badge mute">ERC…</span>';
+  if (st.erc_err == null) return "";
+  if (st.erc_err === 0 && (st.erc_warn|0) === 0) return '<span class="badge ok">ERC ✓</span>';
+  if (st.erc_err > 0) return `<span class="badge err">${st.erc_err}E ${st.erc_warn||0}W</span>`;
+  return `<span class="badge warn">${st.erc_warn}W</span>`;
+}
+function relTime(ts){
+  if (!ts) return "";
+  const d = Math.max(0, (Date.now()/1000) - ts);
+  if (d < 50) return "· just now";
+  if (d < 3600) return "· " + Math.round(d/60) + "m ago";
+  return "· " + Math.floor(d/3600) + "h" + Math.round(d%3600/60) + "m ago";
+}
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function renderList(){
+  const list = $("list");
+  list.innerHTML = steps.length ? "" : '<div class="step">no steps yet</div>';
+  // index-based (not st.n): the server trims old steps but keeps n monotonic
+  for (let i = steps.length - 1; i >= 0; i--){
+    const st = steps[i], isLast = i === steps.length - 1;
+    const prev = steps[i - 1];
+    const dp = prev && st.parts != null && prev.parts != null ? st.parts - prev.parts : 0;
+    const dn = prev && st.nets != null && prev.nets != null ? st.nets - prev.nets : 0;
+    let delta = (dp ? ` <span class="d">${dp > 0 ? "+" : ""}${dp}p</span>` : "") +
+                (dn ? ` <span class="d">${dn > 0 ? "+" : ""}${dn}n</span>` : "");
+    if (prev && st.erc_err != null && prev.erc_err != null && st.erc_err > prev.erc_err)
+      delta += ` <span class="d" style="color:var(--err)">+${st.erc_err - prev.erc_err}E new</span>`;
+    const d = document.createElement("button");   // keyboard/AT reachable
+    d.type = "button";
+    d.className = "step"; d.dataset.i = i;
+    d.innerHTML =
+      `<div class="row"><span class="n">#${st.n}</span><span class="t">${esc(st.time)} ${relTime(st.ts)}</span>` +
+      (isLast ? '<span class="live-tag">LIVE</span>' : "") + badge(st) + "</div>" +
+      (st.note ? `<div class="note">${esc(st.note)}</div>` : "") +
+      (st.parts != null ? `<div class="meta">${st.parts} parts · ${st.nets} nets${delta}</div>` : "");
+    d.onclick = () => { stopPlay(); following = isLast; view(i); };
+    list.appendChild(d);
+  }
+  highlight();
+}
+function highlight(){
+  document.querySelectorAll(".step").forEach(e => {
+    const on = +e.dataset.i === viewing;
+    e.classList.toggle("active", on);
+    if (e.dataset.i != null) e.setAttribute("aria-current", on ? "step" : "false");
+  });
+  $("follow").hidden = following;
+  $("prev").disabled = viewing <= 0;
+  $("next").disabled = viewing >= steps.length - 1;
+  $("diff").disabled = viewing <= 0;
+  $("stepno").textContent = steps.length && viewing >= 0
+    ? `${viewing + 1} / ${steps.length}` : "–";
+}
+function renderSpark(){
+  const svg = $("spark");
+  const pts = steps.filter(s => s.parts != null);
+  if (pts.length < 2){ svg.innerHTML = ""; return; }
+  const w = 96, h = 22, max = Math.max(...pts.map(s => s.parts), 1);
+  const xy = pts.map((s, i) => [i / (pts.length - 1) * (w - 4) + 2,
+                                h - 3 - (s.parts / max) * (h - 7)]);
+  let inner = `<polyline points="${xy.map(p => p.map(v => v.toFixed(1)).join(",")).join(" ")}"
+    fill="none" stroke="var(--data)" stroke-width="1.4"/>`;
+  pts.forEach((s, i) => {
+    if (s.erc_err) inner += `<circle cx="${xy[i][0].toFixed(1)}" cy="${xy[i][1].toFixed(1)}" r="2" fill="var(--err)"/>`;
+  });
+  svg.innerHTML = inner;
+  svg.setAttribute("title", "parts per step · red = ERC errors");
+}
+
+/* ---------------- SVG loading (inline for getBBox crop) ---------------- */
+async function fetchSvg(st, idx = 0){
+  const files = sheetsOf(st);
+  const file = files[Math.min(idx, files.length - 1)];
+  if (!file) throw new Error("no svg");
+  const url = "/live/" + file + "?v=" + (st.ts || st.n);   // unique -> cacheable
+  if (svgCache.has(url)) return svgCache.get(url);
+  const text = await (await fetch(url)).text();
+  const body = text.slice(Math.max(0, text.indexOf("<svg")));   // strip XML prolog
+  svgCache.set(url, body);
+  if (svgCache.size > 24) svgCache.delete(svgCache.keys().next().value);
+  return body;
+}
+function renderSheetTabs(st){
+  const files = sheetsOf(st), tabs = $("sheettabs");
+  tabs.hidden = files.length < 2;
+  if (tabs.hidden){ tabs.innerHTML = ""; return; }
+  tabs.innerHTML = "";
+  files.forEach((f, k) => {
+    const b = document.createElement("button");
+    b.className = "ui" + (k === sheetIdx ? " on" : "");
+    b.textContent = (st.sheet_names || [])[k] || `sheet ${k + 1}`;
+    b.onclick = () => { sheetIdx = k; view(viewing); };
+    tabs.appendChild(b);
+  });
+}
+async function view(i){
+  if (i < 0 || i >= steps.length) return;
+  const st = steps[i]; viewing = i;
+  sheetIdx = Math.min(sheetIdx, sheetsOf(st).length - 1);
+  if (st.parts != null){
+    $("counts").hidden = false;
+    $("parts").textContent = st.parts; $("nets").textContent = st.nets;
+  }
+  if (st.erc_pending){
+    $("ercchip").hidden = false;
+    $("erctot").textContent = "…"; $("ercchip").className = "chip";
+  } else if (st.erc_err != null){
+    $("ercchip").hidden = false;
+    $("erctot").textContent = `${st.erc_err}E ${st.erc_warn || 0}W`;
+    $("ercchip").className = "chip " + (st.erc_err ? "erc-bad" : "erc-ok");
+  }
+  highlight(); renderSheetTabs(st);
+  try {
+    const body = await fetchSvg(st, sheetIdx);
+    if (viewing !== i) return;                    // superseded while fetching
+    const art = $("art");
+    art.innerHTML = body;
+    svgEl = art.querySelector("svg");
+    if (!svgEl) return;
+    $("frame").hidden = false; $("empty").hidden = true;
+    pageVB = svgEl.getAttribute("viewBox");
+    /* KiCad exports the whole page; crop to the drawn content via getBBox */
+    try {
+      const b = svgEl.getBBox();
+      if (b.width > 0 && b.height > 0){
+        const m = Math.max(b.width, b.height) * 0.04 + 1;
+        cropVB = `${b.x - m} ${b.y - m} ${b.width + 2*m} ${b.height + 2*m}`;
+      } else cropVB = null;
+    } catch (e){ cropVB = null; }
+    await refreshGhost();
+    applyVB();
+    renderErc();
+  } catch (e) { /* keep the previous frame */ }
+}
+function vbParts(){
+  const vb = ((cropped && cropVB) ? cropVB : pageVB) || "0 0 1 1";
+  return vb.split(/\s+/).map(Number);
+}
+function artSize(){
+  const [,, w, h] = vbParts();
+  return {w: BASE_W, h: Math.round(BASE_W * (h / w || 1))};
+}
+function applyVB(){
+  if (!svgEl) return;
+  const vb = (cropped && cropVB) ? cropVB : pageVB;
+  const {w, h} = artSize();
+  for (const el of [svgEl, $("ghost").querySelector("svg")].filter(Boolean)){
+    if (vb) el.setAttribute("viewBox", vb);
+    el.removeAttribute("width"); el.removeAttribute("height");
+    el.style.width = w + "px"; el.style.height = h + "px";
+  }
+  const ovl = $("ovl");
+  if (vb) ovl.setAttribute("viewBox", vb);
+  ovl.style.width = w + "px"; ovl.style.height = h + "px";
+  $("crop").classList.toggle("on", cropped);
+  applyT();
+}
+
+/* ---------------- diff ghost (previous step, red) ---------------- */
+async function refreshGhost(){
+  const g = $("ghost");
+  if (!diffOn || viewing <= 0){ g.hidden = true; g.innerHTML = ""; return; }
+  try {
+    g.innerHTML = await fetchSvg(steps[viewing - 1], sheetIdx);
+    g.hidden = false;
+  } catch (e){ g.hidden = true; }
+}
+
+/* ---------------- ERC markers + panel ---------------- */
+/* kicad-cli erc --format json reports positions in mm/100 (observed v8/v9);
+   pick the scale that lands the most markers inside the page. */
+function ercScale(items){
+  if (!pageVB) return null;
+  const [x, y, w, h] = pageVB.split(/\s+/).map(Number);
+  for (const s of [100, 1]){
+    const inside = items.filter(v => v.x != null &&
+      v.x*s >= x && v.x*s <= x + w && v.y*s >= y && v.y*s <= y + h).length;
+    if (items.length && inside >= Math.max(1, items.length / 2)) return s;
+  }
+  return null;
+}
+const violKey = v => v.type + "|" + (v.item || "");
+function renderErc(){
+  const st = steps[viewing] || {};
+  const items = st.erc || [];
+  $("ercpanel").hidden = !items.length && !st.erc_pending;
+  const list = $("erclist");
+  list.innerHTML = st.erc_pending
+    ? '<div class="viol"><span class="tx">ERC running…</span></div>' : "";
+  /* diff vs the previous step: what is NEW here, what got resolved */
+  const prevErc = viewing > 0 ? (steps[viewing - 1].erc || null) : null;
+  const prevSet = new Set((prevErc || []).map(violKey));
+  const curSet = new Set(items.map(violKey));
+  const fresh = prevErc ? items.filter(v => !prevSet.has(violKey(v))) : [];
+  const resolved = prevErc ? [...prevSet].filter(k => !curSet.has(k)).length : 0;
+  $("erccnt").innerHTML = st.erc_pending ? "…" : !items.length ? "" :
+    `${st.erc_err || 0}E ${st.erc_warn || 0}W` +
+    (fresh.length ? ` <span style="color:var(--err)">+${fresh.length} new</span>` : "") +
+    (resolved ? ` <span class="erc-resolved">−${resolved} resolved</span>` : "");
+  const freshSet = new Set(fresh.map(violKey));
+  const ordered = [...items].sort((a, b) =>
+    (freshSet.has(violKey(b)) ? 1 : 0) - (freshSet.has(violKey(a)) ? 1 : 0));
+  ordered.forEach(v => {
+    const k = items.indexOf(v);
+    const b = document.createElement("button");
+    b.className = "viol";
+    b.innerHTML = `<span class="sv ${v.severity === "error" ? "e" : "w"}">` +
+      (v.severity === "error" ? "✕" : "▲") + "</span>" +
+      (freshSet.has(violKey(v)) ? '<span class="newtag">NEW</span>' : "") +
+      `<span class="tx" title="${esc(v.description)}">${esc(v.description)}</span>` +
+      `<span class="it" title="${esc(v.item || "")}">${esc(v.item || "")}</span>`;
+    b.onclick = () => jumpToViolation(k);
+    list.appendChild(b);
+  });
+  /* markers — positions are only trustworthy on single-sheet designs */
+  const ovl = $("ovl");
+  const scale = sheetsOf(st).length > 1 ? null : ercScale(items);
+  if (!ercOn || !scale || !items.length){ ovl.hidden = true; ovl.innerHTML = ""; return; }
+  ovl.hidden = false;
+  ovl.innerHTML = items.map((v, k) => {
+    if (v.x == null) return "";
+    const col = v.severity === "error" ? "var(--err)" : "var(--warn)";
+    return `<g class="mk" id="mk-${k}">
+      <circle class="ring" cx="${v.x*scale}" cy="${v.y*scale}" r="3.2" stroke="${col}"/>
+      <circle cx="${v.x*scale}" cy="${v.y*scale}" r="1.1" fill="${col}"/>
+      <title>${esc(v.severity)}: ${esc(v.description)}\n${esc(v.item || "")}</title></g>`;
+  }).join("");
+  applyVB();
+}
+function jumpToViolation(k){
+  const st = steps[viewing] || {};
+  const v = (st.erc || [])[k];
+  const scale = sheetsOf(st).length > 1 ? null : ercScale(st.erc || []);
+  if (!v || v.x == null || !scale){ toast("no locatable position for this finding"); return; }
+  if (!ercOn){ ercOn = true; $("ercmk").classList.add("on"); renderErc(); }
+  centerOn(v.x * scale, v.y * scale);
+  const mk = document.getElementById("mk-" + k);
+  if (mk){ mk.classList.remove("flash"); void mk.getBBox; mk.classList.add("flash");
+           setTimeout(() => mk.classList.remove("flash"), 1800); }
+}
+function centerOn(mx, my){
+  const [x, y, w, h] = vbParts();
+  const {w: aw, h: ah} = artSize();
+  const px = (mx - x) / w * aw + PAD, py = (my - y) / h * ah + PAD;
+  leaveFit();
+  scale = Math.max(scale, 1.2);
+  tx = canvas.clientWidth / 2 - scale * px;
+  ty = canvas.clientHeight / 2 - scale * py;
+  applyT();
+}
+
+/* ---------------- toolbar ---------------- */
+$("crop").onclick = () => { cropped = !cropped; scale = null; applyVB(); };
+$("diff").onclick = async () => {
+  diffOn = !diffOn; $("diff").classList.toggle("on", diffOn);
+  await refreshGhost(); applyVB();
+  if (diffOn) toast("previous step ghosted in red");
+};
+$("ercmk").onclick = () => { ercOn = !ercOn; $("ercmk").classList.toggle("on", ercOn); renderErc(); };
+function applyInk(){ $("frame").classList.toggle("ink", inkOn); $("ink").classList.toggle("on", inkOn); }
+$("ink").onclick = () => { inkOn = !inkOn; save("akcli-live-ink", inkOn); applyInk(); };
+applyInk();
+$("follow").onclick = () => { stopPlay(); following = true; view(steps.length - 1); };
+$("prev").onclick = () => { stopPlay(); following = false; view(viewing - 1); };
+$("next").onclick = () => { stopPlay(); view(viewing + 1); following = (viewing === steps.length - 1); };
+$("opensvg").onclick = () => {
+  const st = steps[viewing];
+  if (!st) return;
+  const f = sheetsOf(st)[Math.min(sheetIdx, sheetsOf(st).length - 1)];
+  // ?v= fingerprint: the server only marks fingerprinted URLs immutable
+  window.open("/live/" + f + "?v=" + (st.ts || st.n), "_blank");
+};
+
+/* overlays: remember the opener, move focus into the dialog, restore on close */
+let lastFocus = null;
+function openOv(id){
+  lastFocus = document.activeElement;
+  const o = $(id); o.hidden = false;
+  const box = o.querySelector('[role="dialog"]');
+  if (box) box.focus();
+}
+function closeOv(id){
+  const o = $(id);
+  if (o.hidden) return;
+  o.hidden = true;
+  if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
+  lastFocus = null;
+}
+$("helpbtn").onclick = () => openOv("helpov");
+
+/* note the next step (server writes note.txt next to the watched file) */
+async function sendNote(){
+  const v = $("noteinp").value.trim();
+  if (!v) return;
+  try {
+    const r = await fetch("/live/note", {method: "POST", body: v});
+    if (r.ok){ $("noteinp").value = ""; toast("noted — appears on the next step"); }
+    else toast("note failed: " + (await r.json()).error);
+  } catch (e){ toast("note failed"); }
+}
+$("notebtn").onclick = sendNote;
+$("noteinp").addEventListener("keydown", e => { if (e.key === "Enter") sendNote(); });
+
+$("clearbtn").onclick = async () => {
+  if (!steps.length) return;
+  if (!confirm("Clear the whole timeline? Exported step SVGs are deleted.")) return;
+  try { await fetch("/live/clear", {method: "POST"}); svgCache.clear(); following = true; }
+  catch (e){ toast("clear failed"); }
+};
+$("helpov").addEventListener("mousedown", e => { if (e.target === $("helpov")) closeOv("helpov"); });
+
+/* ---------------- BOM overlay (offline; network only on demand) -------- */
+function bomError(msg){
+  $("bomtable").innerHTML =
+    `<div style="color:var(--err); padding:6px 2px">${esc(msg)}</div>` +
+    `<div style="color:var(--faint); font-size:11px; margin-top:6px">` +
+    `retry: press <span class="kbd">B</span> or click “⇅ check purchasability” again</div>`;
+}
+async function openBom(check){
+  if ($("bomov").hidden) openOv("bomov");
+  $("bomtable").textContent = check ? "querying the catalog…" : "loading…";
+  $("bomsum").textContent = "";
+  let doc;
+  try {
+    doc = await (await fetch("/live/bom" + (check ? "?check=1" : ""))).json();
+  } catch (e){ bomError("server unavailable"); return; }
+  if (doc.error){ bomError(doc.error); return; }
+  const stCls = s => s === "ok" ? "st-ok" : s === "no-part-id" ? "st-mute"
+               : s === "low-stock" ? "st-warn" : "st-bad";
+  const cols = doc.checked
+    ? ["refs", "qty", "value", "part", "status", "stock", "unit", "ext", "note"]
+    : ["refs", "qty", "value", "footprint", "part id"];
+  let h = "<table><tr>" + cols.map(c => `<th>${c}</th>`).join("") + "</tr>";
+  for (const ln of doc.lines){
+    const part = ln.lcsc || ln.mpn || "—";
+    h += "<tr>" +
+      `<td>${esc(ln.refs.join(","))}</td><td>${ln.qty}</td>` +
+      `<td>${esc(ln.value || "—")}</td>`;
+    if (doc.checked){
+      const p = ln.part || {};
+      h += `<td>${esc(part)}</td>` +
+        `<td class="${stCls(ln.status)}">${esc(ln.status)}</td>` +
+        `<td>${p.stock ?? "—"}</td>` +
+        `<td>${ln.unit_price != null ? "$" + ln.unit_price.toFixed(4) : "—"}</td>` +
+        `<td>${ln.ext_price != null ? "$" + ln.ext_price.toFixed(2) : "—"}</td>` +
+        `<td class="st-mute">${esc(ln.note || "")}</td>`;
+    } else {
+      h += `<td>${esc(ln.footprint || "—")}</td>` +
+           `<td class="${part === "—" ? "st-mute" : ""}">${esc(part)}</td>`;
+    }
+    h += "</tr>";
+  }
+  $("bomtable").innerHTML = h + "</table>";
+  if (doc.checked && doc.totals){
+    const t = doc.totals;
+    $("bomsum").textContent =
+      `${t.lines} lines · ${t.ok} ok · ${t.problems} problems · ` +
+      `${t.no_part_id} without id · est. $${t.est_cost.toFixed(2)}/board`;
+  } else {
+    $("bomsum").textContent = doc.lines.length + " lines (offline view)";
+  }
+}
+$("bombtn").onclick = () => openBom(false);
+$("bomcheck").onclick = () => openBom(true);
+$("bomov").addEventListener("mousedown", e => { if (e.target === $("bomov")) closeOv("bomov"); });
+
+/* replay: walk the whole timeline, then resume following */
+function stopPlay(){ if (playT){ clearInterval(playT); playT = null; $("play").textContent = "▶ replay"; } }
+$("play").onclick = () => {
+  if (playT){ stopPlay(); return; }
+  if (steps.length < 2) return;
+  following = false;
+  let i = viewing >= steps.length - 1 ? 0 : viewing;
+  view(i);
+  $("play").textContent = "⏸";
+  playT = setInterval(() => {
+    i++;
+    if (i >= steps.length){ stopPlay(); following = true; highlight(); return; }
+    view(i);
+  }, 900);
+};
+
+/* PNG export of the current (possibly cropped) view */
+$("dlpng").onclick = () => {
+  if (!svgEl || !steps[viewing]) return;
+  const [, , w, h] = vbParts();
+  const outW = Math.min(2600, Math.max(1200, Math.round(BASE_W * 2)));
+  const outH = Math.round(outW * h / w);
+  const clone = svgEl.cloneNode(true);
+  clone.removeAttribute("style");   // drop the on-screen px sizing
+  clone.setAttribute("width", outW); clone.setAttribute("height", outH);
+  const blob = new Blob([new XMLSerializer().serializeToString(clone)],
+                        {type: "image/svg+xml;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const cv = document.createElement("canvas");
+    cv.width = outW; cv.height = outH;
+    const cx = cv.getContext("2d");
+    cx.fillStyle = "#fff"; cx.fillRect(0, 0, outW, outH);
+    cx.drawImage(img, 0, 0, outW, outH);
+    URL.revokeObjectURL(url);
+    cv.toBlob(b => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b);
+      a.download = ($("file").textContent || "sheet").replace(/\.kicad_sch$/, "") +
+                   "-step" + (viewing + 1) + ".png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }, "image/png");
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast("PNG export failed"); };
+  img.src = url;
+};
+
+/* ---------------- keyboard ---------------- */
+document.addEventListener("keydown", e => {
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if (e.key === "Escape"){ closeOv("helpov"); closeOv("bomov"); return; }
+  if (e.key === "b" || e.key === "B"){ openBom(false); return; }
+  if (e.key === "ArrowLeft") $("prev").click();
+  else if (e.key === "ArrowRight") $("next").click();
+  else if (e.key === "l" || e.key === "L") $("follow").click();
+  else if (e.key === "h" || e.key === "H") location.href = "/";
+  else if (e.key === "f" || e.key === "F" || e.key === "0") $("zfit").click();
+  else if (e.key === "c" || e.key === "C") $("crop").click();
+  else if (e.key === "d" || e.key === "D") $("diff").click();
+  else if (e.key === "e" || e.key === "E") $("ercmk").click();
+  else if (e.key === "i" || e.key === "I") $("ink").click();
+  else if (e.key === " "){ e.preventDefault(); $("play").click(); }
+  else if (e.key === "+" || e.key === "=") $("zin").click();
+  else if (e.key === "-") $("zout").click();
+  else if (e.key === "?") $("helpov").hidden ? openOv("helpov") : closeOv("helpov");
+});
+
+/* ---------------- zoom / pan ---------------- */
+let scale = null, tx = 0, ty = 0;      // scale = null -> fit mode
+const canvas = $("canvas"), frame = $("frame");
+function contentSize(){
+  const {w, h} = svgEl ? artSize() : {w: BASE_W, h: BASE_W};
+  return {w: w + 2*PAD, h: h + 2*PAD};
+}
+function applyT(){
+  const {w, h} = contentSize();
+  if (scale === null){
+    const s = Math.min((canvas.clientWidth - 32) / w, (canvas.clientHeight - 32) / h, 4) || 1;
+    frame.style.transform = `translate(${(canvas.clientWidth - w*s)/2}px,` +
+                            `${(canvas.clientHeight - h*s)/2}px) scale(${s})`;
+    $("zlvl").textContent = "fit";
+  } else {
+    frame.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+    $("zlvl").textContent = Math.round(scale * 100) + "%";
+  }
+}
+new ResizeObserver(applyT).observe(canvas);
+function leaveFit(){
+  if (scale !== null) return;
+  const m = new DOMMatrix(getComputedStyle(frame).transform);
+  scale = m.a; tx = m.e; ty = m.f;
+}
+function setScale(s, cx, cy){
+  const r = canvas.getBoundingClientRect();
+  cx = cx ?? r.width / 2; cy = cy ?? r.height / 2;
+  leaveFit();
+  const k = s / scale;
+  tx = cx - k * (cx - tx); ty = cy - k * (cy - ty); scale = s;
+  applyT();
+}
+$("zin").onclick = () => { leaveFit(); setScale(Math.min(10, scale * 1.25)); };
+$("zout").onclick = () => { leaveFit(); setScale(Math.max(.05, scale / 1.25)); };
+$("zfit").onclick = () => { scale = null; applyT(); };
+canvas.addEventListener("wheel", e => {
+  e.preventDefault(); leaveFit();
+  const r = canvas.getBoundingClientRect();
+  setScale(Math.min(10, Math.max(.05, scale * (e.deltaY < 0 ? 1.12 : 1/1.12))),
+           e.clientX - r.left, e.clientY - r.top);
+}, {passive: false});
+let drag = null;
+canvas.addEventListener("pointerdown", e => {
+  leaveFit(); drag = {x: e.clientX - tx, y: e.clientY - ty};
+  canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", e => {
+  if (!drag) return; tx = e.clientX - drag.x; ty = e.clientY - drag.y; applyT();
+});
+canvas.addEventListener("pointerup", () => { drag = null; canvas.classList.remove("dragging"); });
+canvas.addEventListener("dblclick", () => { scale === null ? setScale(1.5) : (scale = null, applyT()); });
+</script>
+</body>
+</html>

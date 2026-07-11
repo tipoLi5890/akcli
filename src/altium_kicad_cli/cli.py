@@ -1,10 +1,12 @@
 """argparse dispatch + exit codes for the ``akcli`` CLI (SPEC §3.1).
 
-Subcommands ``read net component check diff pinmap export plan draw`` are live.
-``plan``/``draw`` drive the KiCad op-list executor (``draw`` writes only on
-``--apply``). Every handler does its heavy imports LAZILY
-(inside the handler) so ``akcli --help`` / ``--version`` run from a clean checkout
-with only the Foundation modules present.
+Subcommands ``read net nets component check diff pinmap export plan draw
+relink-symbols`` (and more) are live. ``plan``/``draw`` drive the KiCad op-list
+executor (``draw`` writes only on ``--apply``) and report a before/after net
+connectivity diff (``--no-net-diff`` opts out; ``draw --apply --strict-nets``
+refuses splits/merges of named nets). Every handler does its heavy imports
+LAZILY (inside the handler) so ``akcli --help`` / ``--version`` run from a
+clean checkout with only the Foundation modules present.
 
 Conventions
 -----------
@@ -104,16 +106,22 @@ def _load_schematic(path: Path):
     KiCad schematics and non-schematic Altium docs are not yet schematics here,
     so they surface as exit ``5`` (unsupported format) with a clear notice.
     """
+    def _warned(sch):
+        # reader warnings (e.g. duplicate designators) are logs, not data
+        for w in getattr(sch, "warnings", None) or []:
+            sys.stderr.write(f"warning: {w}\n")
+        return sch
+
     fmt = _detect_format(path)
     if fmt == "altium_sch":
         from .readers import altium_sch  # lazy
-        return altium_sch.read(str(path))
+        return _warned(altium_sch.read(str(path)))
     if fmt == "altium_prj":
         from .readers import altium_prj  # lazy
-        return altium_prj.read(str(path))
+        return _warned(altium_prj.read(str(path)))
     if fmt == "kicad_sch":
         from .readers import kicad  # lazy
-        return kicad.read_sch(str(path))
+        return _warned(kicad.read_sch(str(path)))
     if fmt == "kicad_pcb":
         raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"],
                         "ERROR: .kicad_pcb is a PCB, not a schematic (use `read`)")
@@ -179,6 +187,13 @@ def _findings_exit(findings: list, args: argparse.Namespace) -> int:
 
 def _dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=False)
+
+
+def _did_you_mean(name: str, candidates) -> str:
+    """`" (did you mean: x, y?)"` for a typo'd name, or `""` when nothing is close."""
+    import difflib
+    close = difflib.get_close_matches(str(name), sorted(candidates), n=2)
+    return f" (did you mean: {', '.join(close)}?)" if close else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -360,6 +375,46 @@ def _cmd_net(args: argparse.Namespace) -> int:
     return EXIT["OK"]
 
 
+def _cmd_nets(args: argparse.Namespace) -> int:
+    """`nets <sch>` — one line per net: name -> sorted members.
+
+    ``--intent-snapshot OUT.json`` also writes the current netlist as a
+    ``checks.intent`` document (``protocol_version``/``mode``/``nets``), the
+    input to ``akcli check --intent`` — the snapshot -> edit -> assert loop.
+    """
+    path = _require_path(args.path)
+    sch = _load_schematic(path)
+
+    snap_out = getattr(args, "intent_snapshot", None)
+    if snap_out:
+        from .checks import intent as intent_mod
+        doc = intent_mod.snapshot(
+            sch, include_unnamed=getattr(args, "include_unnamed", False))
+        rendered = _dumps(doc) + "\n"
+        if snap_out == "-":
+            sys.stdout.write(rendered)
+            return EXIT["OK"]
+        Path(snap_out).write_text(rendered, encoding="utf-8")
+        sys.stderr.write(f"wrote intent snapshot: {snap_out} "
+                         f"({len(doc['nets'])} net(s) — assert with "
+                         f"`akcli check <sch> --intent {snap_out}`)\n")
+
+    ordered = sorted(sch.nets, key=lambda n: (n.name is None, _net_display(n)))
+    if args.json:
+        _emit(_dumps({
+            "source": str(path),
+            "nets": [{"name": n.name, "stable_id": n.stable_id,
+                      "members": sorted(f"{d}.{p}" for d, p in n.members)}
+                     for n in ordered],
+        }))
+    else:
+        out = [f"{_net_display(n)}: "
+               + ", ".join(sorted(f"{d}.{p}" for d, p in n.members))
+               for n in ordered]
+        _emit("\n".join(out) if out else "(no nets)")
+    return EXIT["OK"]
+
+
 def _cmd_component(args: argparse.Namespace) -> int:
     path = _require_path(args.path)
     sch = _load_schematic(path)
@@ -415,6 +470,21 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
     if name == "bom":
         from .checks import bom
         return bom.run(sch)
+    if name == "layout":
+        from .checks import layout
+        return layout.run(args.path)
+    if name == "nets":
+        from .checks import nets
+        out = nets.run(sch, cfg)
+        # geom near-miss lint reads the raw s-expression primitives, so it is
+        # KiCad-only; the suffix gate keeps default Altium runs quiet.
+        if str(args.path).lower().endswith(".kicad_sch"):
+            from .checks import geom
+            out.extend(geom.run(args.path))
+        return out
+    if name == "libsync":
+        from .checks import libsync
+        return libsync.run(args.path, lib_dirs=getattr(args, "symbols", None))
     return []
 
 
@@ -430,12 +500,26 @@ def _cmd_check(args: argparse.Namespace) -> int:
         which.append("power")
     if args.bom:
         which.append("bom")
-    if not which:
-        which = ["erc", "power", "bom"]
+    if getattr(args, "layout", False):
+        which.append("layout")
+    if getattr(args, "nets", False):
+        which.append("nets")
+    if getattr(args, "libsync", False):
+        which.append("libsync")
+    intent_file = getattr(args, "intent", None)
+    if not which and not intent_file:
+        # --intent alone is a pure intent assertion, like any other selector.
+        which = ["erc", "power", "bom", "nets"]
+        if str(path).lower().endswith(".kicad_sch"):
+            which.append("layout")
 
     findings: list = []
     for name in which:
         findings.extend(_run_check(name, sch, cfg, args))
+    if intent_file:
+        from .checks import intent as intent_mod
+        spec = intent_mod.load(intent_file)   # BAD_CONFIG/PROTOCOL_MISMATCH via main
+        findings.extend(intent_mod.run(sch, spec))
 
     meta = _schematic_meta(sch)
     fmt = getattr(args, "format", None) or ("json" if args.json else "text")
@@ -454,6 +538,237 @@ def _cmd_diff(args: argparse.Namespace) -> int:
     else:
         _emit(_report.render(findings, "text", {}))
     return _findings_exit(findings, args)
+
+
+def _cmd_arrange(args: argparse.Namespace) -> int:
+    """`arrange <sch>` — nudge FREE components until nothing overlaps.
+
+    Dry-run by default (prints the planned moves); --apply executes them
+    through the standard draw pipeline (.bak + connectivity re-verify), so
+    `akcli undo` reverts an arrange like any other write.
+    """
+    target = _require_path(args.path)
+    if not str(target).lower().endswith(".kicad_sch"):
+        raise _ExitWith(EXIT["USAGE"], "ERROR: arrange works on .kicad_sch")
+    from . import arrange as arrmod
+    result = arrmod.plan(target,
+                         grid=getattr(args, "grid", None) or arrmod.GRID_MIL,
+                         margin=getattr(args, "margin", None) or arrmod.MARGIN_MIL)
+    moves, stuck = result["moves"], result["anchored_overlaps"]
+    do_apply = bool(getattr(args, "apply", False))
+    base = {
+        "symbols": result["symbols"], "clean": result["clean"],
+        "moves": [{"designator": m.ref, "from": list(m.frm),
+                   "to": list(m.to)} for m in moves],
+        "anchored_overlaps": stuck,
+    }
+    if not args.json:
+        if result["clean"]:
+            _emit(f"arrange: {result['symbols']} symbols, no overlaps — clean")
+        for m in moves:
+            _emit(f"  move {m.ref}: ({m.frm[0]:g},{m.frm[1]:g}) -> "
+                  f"({m.to[0]:g},{m.to[1]:g})")
+        if stuck:
+            _emit("  cannot auto-fix (wired/labeled or no free slot): "
+                  + ", ".join(stuck))
+    if not moves or not do_apply:
+        if args.json:
+            _emit(_dumps({**base, "applied": False}))
+        elif moves:
+            _emit(f"dry-run: {len(moves)} move(s) planned — re-run with --apply")
+        return EXIT["FINDINGS"] if stuck else EXIT["OK"]
+    from .writers import kicad as kwriter
+    oplist = {"protocol_version": 1, "target_format": "kicad",
+              "target_file": target.name,
+              "ops": [m.to_op() for m in moves]}
+    cfg = _load_cfg(args, target)
+    findings: list = []
+    results = kwriter.apply(oplist, str(target), apply=True,
+                            sources=_draw_symbol_sources(args, cfg),
+                            verify_out=findings, backup_dir=target.parent)
+    code = _draw_exit(results, findings)
+    if args.json:
+        _emit(_dumps({
+            **base, "applied": code == EXIT["OK"],
+            "connectivity": [
+                {"code": f.code, "severity": f.severity.value, "message": f.message}
+                for f in findings
+            ],
+        }))
+        return (EXIT["FINDINGS"] if stuck else EXIT["OK"]) \
+            if code == EXIT["OK"] else code
+    if code == EXIT["OK"]:
+        _emit(f"arrange: applied {len(moves)} move(s) to {target.name}"
+              + (f" — {len(stuck)} overlap(s) left for manual fixing"
+                 if stuck else ""))
+        return EXIT["FINDINGS"] if stuck else EXIT["OK"]
+    return code
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    """`verify <a> <b>` — net-equivalence proof between two schematics.
+
+    PASS means: same component set, and every net's pin membership is
+    identical (net *names* may differ — conversions rename unnamed nets).
+    With --strict, changed component values/footprints also fail.
+    """
+    a = _load_schematic(_require_path(args.path, "first schematic"))
+    b = _load_schematic(_require_path(args.other, "second schematic"))
+    from .checks import diff as diffmod
+    rep = diffmod.run(a, b)
+
+    comp_ok = not rep.added_components and not rep.removed_components
+    nets_ok = (not rep.added_nets and not rep.removed_nets
+               and not rep.member_changed_nets)
+    strict_ok = not (getattr(args, "strict", False) and rep.changed_components)
+    equivalent = comp_ok and nets_ok and strict_ok
+
+    if args.json:
+        _emit(_dumps({
+            "equivalent": equivalent,
+            "strict": bool(getattr(args, "strict", False)),
+            "components": {"a": len(a.components), "b": len(b.components)},
+            "nets": {"a": len(a.nets), "b": len(b.nets)},
+            "renamed_nets": [[n.name_a, n.name_b] for n in rep.renamed_nets],
+            "summary": rep.summary(),
+            "detail": rep.export(),
+        }))
+    else:
+        lines = [f"CONVERSION PROOF: {'PASS' if equivalent else 'FAIL'}",
+                 f"  components: {len(a.components)} vs {len(b.components)}"
+                 f"  (+{len(rep.added_components)} −{len(rep.removed_components)}"
+                 f" ~{len(rep.changed_components)})",
+                 f"  nets:       {len(a.nets)} vs {len(b.nets)}"
+                 f"  (+{len(rep.added_nets)} −{len(rep.removed_nets)}"
+                 f" membership-changed {len(rep.member_changed_nets)})"]
+        if rep.renamed_nets:
+            names = ", ".join(f"{n.name_a}→{n.name_b}"
+                              for n in rep.renamed_nets[:8])
+            lines.append(f"  renamed (connectivity identical): "
+                         f"{len(rep.renamed_nets)}  [{names}]")
+        if not equivalent:
+            for c in rep.added_components[:10]:
+                lines.append(f"  + component only in B: {c.designator_b}")
+            for c in rep.removed_components[:10]:
+                lines.append(f"  − component only in A: {c.designator_a}")
+            for n in rep.added_nets[:10]:
+                lines.append(f"  + net only in B: {n.name_b}")
+            for n in rep.removed_nets[:10]:
+                lines.append(f"  − net only in A: {n.name_a}")
+            for n in rep.member_changed_nets[:10]:
+                lines.append(
+                    f"  ~ net {n.name_a or n.name_b}: "
+                    f"+{[f'{d}.{p}' for d, p in n.added_members]} "
+                    f"−{[f'{d}.{p}' for d, p in n.removed_members]}")
+        if rep.changed_components and not getattr(args, "strict", False):
+            lines.append(f"  note: {len(rep.changed_components)} component(s) "
+                         "differ in value/footprint (connectivity unaffected; "
+                         "--strict makes this fail)")
+        if rep.low_confidence:
+            lines.append("  note: low-confidence net matching — inspect "
+                         "`akcli diff` output")
+        _emit("\n".join(lines))
+    if equivalent or getattr(args, "exit_zero", False):
+        return EXIT["OK"]
+    return EXIT["FINDINGS"]
+
+
+def _cmd_undo(args: argparse.Namespace) -> int:
+    """`undo <target>` — swap the target with its draw backup (<name>.bak).
+
+    `akcli draw --apply` leaves `<target>.bak` beside the file; undo swaps the
+    two, so running undo twice is a redo. Dry-run by default (like draw).
+    """
+    target = _require_path(args.path, "target .kicad_sch")
+    bak = target.parent / (target.name + ".bak")
+    if not bak.exists():
+        raise _ExitWith(EXIT["NOT_FOUND"],
+                        f"ERROR: no backup at {bak} (created by `akcli draw --apply`)")
+    from .readers import kicad as kreader
+    cur = kreader.read_sch(str(target))
+    old = kreader.read_sch(str(bak))
+    from .checks import diff as diffmod
+    rep = diffmod.run(cur, old)
+    summary = (f"{len(cur.components)} parts/{len(cur.nets)} nets -> "
+               f"{len(old.components)} parts/{len(old.nets)} nets "
+               f"(+{len(rep.added_components)} −{len(rep.removed_components)} "
+               f"components, {len(rep.member_changed_nets)} nets change membership)")
+    if not getattr(args, "apply", False):
+        if args.json:
+            _emit(_dumps({"applied": False, "target": str(target),
+                          "backup": str(bak), "summary": summary}))
+        else:
+            _emit(f"undo (dry-run): would restore {bak.name}\n  {summary}\n"
+                  "re-run with --apply to swap (undo again = redo)")
+        return EXIT["OK"]
+    import shutil as _shutil
+    tmp = target.parent / (target.name + ".undo-tmp")
+    _shutil.copy2(bak, tmp)
+    _shutil.copy2(target, bak)
+    tmp.replace(target)
+    if args.json:
+        _emit(_dumps({"applied": True, "target": str(target),
+                      "backup": str(bak), "summary": summary}))
+    else:
+        _emit(f"undo: restored {target.name} from backup — {summary}\n"
+              f"previous content kept at {bak.name} (undo again = redo)")
+    return EXIT["OK"]
+
+
+def _cmd_relink(args: argparse.Namespace) -> int:
+    """`relink-symbols <sch>` — re-embed stale lib_symbols cache entries.
+
+    Dry-run by default; ``--apply`` splices the fresh blocks in behind the
+    net-membership equivalence gate (``VERIFY_FAILED`` -> exit 6, file
+    untouched) and leaves ``<name>.bak``. ``missing-lib`` entries exit 6 like
+    a failed op — scope with ``--only`` to silence intentionally-unavailable
+    nicknames.
+    """
+    target = _require_path(args.target, "target .kicad_sch")
+    if not str(target).lower().endswith(".kicad_sch"):
+        raise _ExitWith(EXIT["USAGE"], "ERROR: relink-symbols works on a .kicad_sch")
+    from . import relink
+    actions = relink.plan(target, lib_dirs=getattr(args, "libs", None),
+                          only=getattr(args, "only", None))
+    do_apply = bool(getattr(args, "apply", False))
+    res = None
+    if do_apply:
+        # VERIFY_FAILED (gate refusal) / SYMBOL_NOT_FOUND -> exit 6 via main
+        res = relink.apply(str(target), actions)
+
+    replaces = [a for a in actions if a["status"] == "replace"]
+    missing = [a for a in actions if a["status"] == "missing-lib"]
+    if args.json:
+        # new_sexpr is a full symbol block; strip it for readability
+        slim = [{k: v for k, v in a.items() if k != "new_sexpr"} for a in actions]
+        _emit(_dumps({
+            "actions": slim,
+            "applied": bool(res and res["written"]),
+            "replaced": (res or {}).get("replaced", []),
+            "backup": (res or {}).get("backup"),
+        }))
+    else:
+        lines = []
+        for a in actions:
+            detail = f" — {a['detail']}" if a.get("detail") else ""
+            lines.append(f"  {a['status']:<11} {a['lib_id']}  "
+                         f"[{a['source'] or 'no source'}]{detail}")
+        if not lines:
+            lines.append("  (no embedded lib_symbols entries matched)")
+        if res is not None and res["written"]:
+            bak = Path(res["backup"]).name if res.get("backup") else None
+            lines.append(f"status: APPLIED — re-embedded {len(res['replaced'])} "
+                         f"symbol(s) into {target.name}"
+                         + (f" (backup {bak}; `akcli undo` reverts)" if bak else ""))
+        elif do_apply:
+            lines.append("status: nothing to replace — file untouched")
+        elif replaces:
+            lines.append(f"status: dry-run — {len(replaces)} replacement(s) "
+                         "pending; re-run with --apply")
+        else:
+            lines.append("status: dry-run — nothing to replace")
+        _emit("\n".join(lines))
+    return EXIT["OPLIST"] if missing else EXIT["OK"]
 
 
 def _load_expected(path_str: str) -> dict:
@@ -579,19 +894,121 @@ def _jlc_detail(p) -> str:
     return "\n".join(lines)
 
 
+def _cmd_pins(args: argparse.Namespace) -> int:
+    """Print a symbol's pin world coordinates for a (hypothetical) placement.
+
+    Op-list authoring helper: resolves ``lib_id`` from the same symbol sources
+    the writer uses (``--symbols`` / config ``[paths]`` ``.kicad_sym`` entries)
+    and reports every pin's number / name / electrical type and its **world**
+    ``(x_mil, y_mil)`` for the given ``--at`` / ``--rotation`` / ``--mirror`` —
+    the exact points wires, labels and power ports must target. Mirrors the
+    writer's ``geometry.pin_world``, so a coordinate printed here is byte-for-byte
+    where ``draw`` will place that pin.
+    """
+    lib_id = getattr(args, "lib_id", None)
+    if not lib_id:
+        raise _ExitWith(EXIT["USAGE"], "ERROR: missing lib_id (e.g. Device:R)")
+
+    from . import model as _model
+    from . import units as _units
+    from .readers import kicad_lib
+    from .writers import geometry
+    from .writers.lib_cache import _coerce_sources
+
+    cfg = _load_cfg(args, None)
+    libs = _coerce_sources(_draw_symbol_sources(args, cfg))
+    sym = kicad_lib.resolve(lib_id, libs)          # raises SYMBOL_NOT_FOUND
+
+    at = getattr(args, "at", None) or [0.0, 0.0]
+    rot = int(getattr(args, "rotation", 0) or 0)
+    mirror = getattr(args, "mirror", None) or "none"
+    inst = _model.Component(
+        designator="?", library_ref=lib_id,
+        x_mil=at[0], y_mil=at[1], rotation=rot, mirror=mirror,
+    )
+
+    def _r(v: float):
+        iv = round(v)
+        return iv if abs(v - iv) < 1e-6 else round(v, 3)
+
+    part_count = max(1, sym.part_count or 1)
+    rows: list[dict] = []
+    for unit in range(1, part_count + 1):
+        for p in kicad_lib.unit_pins(sym, unit):
+            wx, wy = geometry.pin_world(sym, inst, p)   # nm
+            etype = getattr(p.electrical_type, "value", str(p.electrical_type))
+            rows.append({
+                "number": p.number, "name": p.name, "type": etype, "unit": unit,
+                "x_mil": _r(_units.nm_to_mil(wx)), "y_mil": _r(_units.nm_to_mil(wy)),
+            })
+
+    if args.json:
+        _emit(_dumps({
+            "lib_id": lib_id, "at": [at[0], at[1]], "rotation": rot,
+            "mirror": mirror, "unit_count": part_count, "pins": rows,
+        }))
+    else:
+        head = f"{lib_id}  @({_r(at[0])},{_r(at[1])}) rot={rot} mirror={mirror}"
+        if part_count > 1:
+            head += f"  [{part_count} units]"
+        out = [head, f"  {'pin':>4}  {'name':<10} {'type':<10} "
+                     f"{'unit':>4}  {'x_mil':>9} {'y_mil':>9}"]
+        for r in rows:
+            out.append(f"  {r['number']:>4}  {(r['name'] or ''):<10} {r['type']:<10} "
+                       f"{r['unit']:>4}  {str(r['x_mil']):>9} {str(r['y_mil']):>9}")
+        _emit("\n".join(out))
+    return EXIT["OK"]
+
+
+def _cmd_view(args: argparse.Namespace) -> int:
+    """`view calc` / `view live <sch>` / `view <sch>` — the unified dashboard.
+
+    One server hosts both pages: /calc always, /live when a schematic is
+    watched. `view <sch.kicad_sch>` is shorthand for `view live <sch>`.
+    """
+    from .webui import server
+
+    what, path = args.what, args.path
+    if what.lower().endswith(".kicad_sch") and not path:
+        what, path = "live", what
+    if what not in ("calc", "live"):
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: view expects `calc`, `live <sch>`, or a .kicad_sch path")
+    port = args.port if args.port is not None else server.DEFAULT_PORT
+    if what == "calc":
+        return server.serve(port=port, open_browser=not args.no_browser,
+                            max_steps=args.max_steps)
+    path = _require_path(path, "schematic to watch")
+    if not str(path).lower().endswith(".kicad_sch"):
+        raise _ExitWith(EXIT["USAGE"], "ERROR: view live watches a .kicad_sch")
+    return server.serve(port=port, open_browser=not args.no_browser,
+                        target=path, state_dir=args.state_dir,
+                        max_steps=args.max_steps)
+
+
 def _cmd_ops(args: argparse.Namespace) -> int:
     """`ops list` / `ops template <op>` — the op-list authoring kit."""
     from . import ops as opsmod
 
     action = getattr(args, "action", None)
     if action == "list":
-        import json as _json
-        caps = {}
         try:
-            caps_path = Path(__file__).resolve().parents[2] / "schemas" / "ops.capabilities.json"
-            caps = {k: v for k, v in _json.loads(caps_path.read_text())["ops"].items()}
+            caps = opsmod.load_capabilities()["ops"]  # packaged mirror + repo fallback
         except Exception:
             caps = {}
+        if args.json:
+            _emit(_dumps({
+                "protocol_version": opsmod.PROTOCOL_VERSION,
+                "ops": [{"name": name,
+                         "required": list(opsmod._OP_REQUIRED.get(name, [])),
+                         "kicad": (caps.get(name) or {}).get("kicad"),
+                         "altium_live": (caps.get(name) or {}).get("altium")}
+                        for name in sorted(opsmod.OP_NAMES)],
+                "macros": [{"name": name,
+                            "required": list(opsmod.MACRO_REQUIRED.get(name, []))}
+                           for name in sorted(opsmod.MACRO_OPS)],
+            }))
+            return EXIT["OK"]
         lines = []
         for name in sorted(opsmod.OP_NAMES):
             required = ", ".join(opsmod._OP_REQUIRED.get(name, []))
@@ -600,6 +1017,11 @@ def _cmd_ops(args: argparse.Namespace) -> int:
             if entry:
                 support = "  [kicad:" + ("yes" if entry.get("kicad") else "no")                           + " altium-live:" + ("yes" if entry.get("altium") else "no") + "]"
             lines.append(f"{name:26} required: {required or '-'}{support}")
+        lines.append("-- macros (expanded to core ops before plan/draw; "
+                     "label-on-pin connectivity) --")
+        for name in sorted(opsmod.MACRO_OPS):
+            required = ", ".join(opsmod.MACRO_REQUIRED.get(name, []))
+            lines.append(f"{name:26} required: {required or '-'}")
         _emit("\n".join(lines))
         return EXIT["OK"]
     if action == "template":
@@ -611,7 +1033,9 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         except KeyError:
             raise _ExitWith(
                 EXIT["USAGE"],
-                f"ERROR: unknown op {name!r} (see `akcli ops list`)",
+                f"ERROR: unknown op {name!r}"
+                f"{_did_you_mean(name, opsmod.OP_NAMES | opsmod.MACRO_OPS)} "
+                "(see `akcli ops list`)",
             )
         doc = {
             "protocol_version": opsmod.PROTOCOL_VERSION,
@@ -728,7 +1152,9 @@ def _cmd_calc(args: argparse.Namespace) -> int:
         c = CALCS.get(target or "")
         if c is None:
             raise _ExitWith(EXIT["USAGE"],
-                            f"ERROR: unknown calculator {target!r} (see `akcli calc list`)")
+                            f"ERROR: unknown calculator {target!r}"
+                            f"{_did_you_mean(target or '', CALCS)} "
+                            "(see `akcli calc list`)")
         lines = [f"{c.name} — {c.title}", ""]
         for p in c.params:
             d = "required" if p.default is None else f"default {p.default}"
@@ -743,7 +1169,9 @@ def _cmd_calc(args: argparse.Namespace) -> int:
         return _calc_batch(args, params)
     if name not in CALCS:
         raise _ExitWith(EXIT["USAGE"],
-                        f"ERROR: unknown calculator {name!r} (see `akcli calc list`)")
+                        f"ERROR: unknown calculator {name!r}"
+                        f"{_did_you_mean(name, CALCS)} "
+                        "(see `akcli calc list`)")
     raw: dict[str, str] = {}
     for tok in params:
         if "=" not in tok:
@@ -847,7 +1275,8 @@ def _cmd_jlc(args: argparse.Namespace) -> int:
     """No subcommand given: print usage."""
     raise _ExitWith(
         EXIT["USAGE"],
-        "ERROR: use `akcli jlc search <query>` or `akcli jlc show <C-number>`",
+        "ERROR: use `akcli jlc search <query>`, `akcli jlc show <C-number>`, "
+        "`akcli jlc bom <sch>`, or `akcli jlc add <C-number>`",
     )
 
 
@@ -857,7 +1286,8 @@ def _cmd_jlc_search(args: argparse.Namespace) -> int:
         raise _ExitWith(EXIT["USAGE"], "ERROR: missing search query")
     from .parts import search as parts_search  # lazy: keeps network out of offline paths
     try:
-        results = parts_search.search(query, limit=getattr(args, "limit", None) or 20)
+        results = parts_search.search(query, limit=getattr(args, "limit", None) or 20,
+                                      cache_dir=parts_search.default_cache_dir())
     except parts_search.JlcNetworkError as exc:
         sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
         return EXIT["TOOL_MISSING"]
@@ -898,13 +1328,129 @@ def _easyeda_lines(info) -> list[str]:
     ]
 
 
+def _cmd_jlc_bom(args: argparse.Namespace) -> int:
+    """`jlc bom <sch>` — BOM lines vs the JLCPCB catalog (stock/price/cost)."""
+    path = _require_path(args.path)
+    sch = _load_schematic(path)
+    from .parts import bom_jlc, search as parts_search  # lazy: networked
+    qty = max(1, getattr(args, "qty", 1) or 1)
+    fix_all = getattr(args, "fix_all", False)
+    do_fix = getattr(args, "fix", False) or fix_all
+    do_suggest = do_fix or getattr(args, "suggest", False)
+    if do_fix and not str(path).lower().endswith(".kicad_sch"):
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: --fix writes the schematic; it needs a .kicad_sch")
+    cache = parts_search.default_cache_dir()
+    try:
+        lines = bom_jlc.check(
+            sch, min_stock=getattr(args, "min_stock", 1) or 1, qty=qty,
+            cache_dir=cache)
+        if do_suggest:
+            bom_jlc.suggest_parts(lines, cache_dir=cache)
+    except parts_search.JlcNetworkError as exc:
+        sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
+        return EXIT["TOOL_MISSING"]
+    if do_fix:
+        # plain --fix writes high-confidence suggestions only; --fix-all also
+        # writes low-confidence ones (package matched, value unverified)
+        ops = bom_jlc.fix_ops(
+            lines, min_confidence=("low" if fix_all else "high"))
+        if not fix_all:
+            low = sum(1 for ln in lines
+                      if ln.suggestion
+                      and (ln.suggestion_confidence or "low") == "low")
+            if low:
+                sys.stderr.write(f"{low} low-confidence suggestion(s) not "
+                                 "written (use --fix-all)\n")
+        if not ops:
+            sys.stderr.write("--fix: nothing to fix (no suggestions)\n")
+        else:
+            from .writers import kicad as kwriter
+            oplist = {"protocol_version": 1, "target_format": "kicad",
+                      "target_file": path.name, "ops": ops}
+            findings: list = []
+            results = kwriter.apply(oplist, str(path), apply=True,
+                                    sources=[], verify_out=findings,
+                                    backup_dir=path.parent)
+            code = _draw_exit(results, findings)
+            if code != EXIT["OK"]:
+                return code
+            fixed = [ln for ln in lines if ln.suggestion]
+            for ln in fixed:
+                sys.stderr.write(
+                    f"fixed {','.join(ln.refs)}: "
+                    f"{ln.lcsc_key or 'LCSC'} = {ln.suggestion.lcsc} "
+                    f"({ln.suggestion.mpn}) — verify against the datasheet\n")
+            # re-check so the report reflects the written ids
+            sch = _load_schematic(path)
+            try:
+                lines = bom_jlc.check(
+                    sch, min_stock=getattr(args, "min_stock", 1) or 1,
+                    qty=qty, cache_dir=cache)
+            except parts_search.JlcNetworkError as exc:
+                sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
+                return EXIT["TOOL_MISSING"]
+    csv_out = getattr(args, "csv", None)
+    if csv_out:
+        text = bom_jlc.to_jlc_csv(lines)
+        if csv_out == "-":
+            sys.stdout.write(text)          # CSV replaces the table: stdout = data
+        else:
+            Path(csv_out).write_text(text, encoding="utf-8")
+            sys.stderr.write(f"wrote JLCPCB BOM CSV: {csv_out}\n")
+    agg = bom_jlc.totals(lines)
+    if csv_out == "-":
+        pass
+    elif args.json:
+        _emit(_dumps({"qty": qty, "lines": [ln.to_dict() for ln in lines],
+                      "totals": agg}))
+    else:
+        rows = [("REFS", "QTY", "NEED", "VALUE", "PART", "STATUS",
+                 "STOCK", "UNIT", "EXT", "B", "NOTE")]
+        for ln in sorted(lines, key=lambda x: x.refs[0]):
+            p = ln.part
+            rows.append((
+                ",".join(ln.refs[:4]) + ("…" if len(ln.refs) > 4 else ""),
+                str(ln.qty),
+                str(ln.need),
+                (ln.value or "-")[:16],
+                ln.lcsc or ln.mpn or "-",
+                ln.status,
+                str(p.stock) if p else "-",
+                f"${ln.unit_price:.4f}" if ln.unit_price is not None else "-",
+                f"${ln.ext_price:.2f}" if ln.ext_price is not None else "-",
+                ("B" if p.basic else "P" if p.preferred else "-") if p else "-",
+                (f"→ {ln.suggestion.lcsc} {ln.suggestion.mpn} "
+                 f"(stock {ln.suggestion.stock}"
+                 f"{', Basic' if ln.suggestion.basic else ''}) — "
+                 "--fix writes it" if ln.suggestion else ln.note),
+            ))
+        widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]) - 1)]
+        _emit("\n".join(
+            "  ".join(c.ljust(w) for c, w in zip(r[:-1], widths)) + "  " + r[-1]
+            for r in rows).rstrip())
+        summary = (f"{agg['lines']} line(s): {agg['ok']} ok, "
+                   f"{agg['problems']} problem(s), "
+                   f"{agg['no_part_id']} without a part id")
+        if agg["priced_lines"]:
+            summary += (f" · est. parts cost ${agg['est_cost']:.2f} "
+                        f"for {qty} board(s)"
+                        + (f" ({agg['priced_lines']}/{agg['lines']} lines priced)"
+                           if agg["priced_lines"] < agg["lines"] else ""))
+        sys.stdout.flush()          # keep the table above the stderr summary
+        sys.stderr.write(summary + "\n")
+    if agg["problems"] and not getattr(args, "exit_zero", False):
+        return EXIT["FINDINGS"]
+    return EXIT["OK"]
+
+
 def _cmd_jlc_show(args: argparse.Namespace) -> int:
     lcsc = getattr(args, "lcsc", None)
     if not lcsc:
         raise _ExitWith(EXIT["USAGE"], "ERROR: missing LCSC C-number")
     from .parts import search as parts_search  # lazy
     try:
-        part = parts_search.get(lcsc)
+        part = parts_search.get(lcsc, cache_dir=parts_search.default_cache_dir())
     except parts_search.JlcNetworkError as exc:
         sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
         return EXIT["TOOL_MISSING"]
@@ -1129,10 +1675,11 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
     if not getattr(args, "ops", None):
         raise _ExitWith(EXIT["USAGE"], "ERROR: missing --ops <oplist.json>")
 
-    from .ops import load_oplist, validate_oplist
+    from .ops import expand_macros, load_oplist, validate_oplist
     from .writers import kicad as kwriter
 
     oplist = load_oplist(args.ops)               # FileNotFound -> exit 4 via main
+    oplist = expand_macros(oplist)               # macro ops -> core ops (exit 6 on bad args)
     errs = validate_oplist(oplist)
     if errs:
         for e in errs:
@@ -1141,6 +1688,64 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
 
     cfg = _load_cfg(args, target)
     sources = _draw_symbol_sources(args, cfg)
+
+    strict = do_apply and getattr(args, "strict_nets", False)
+    # Connectivity diff (advisory unless --strict-nets): dry-apply the op-list
+    # to a temp copy and compare netlists, so both dry-run and apply report the
+    # net effect BEFORE the target is touched. When the diff cannot be computed
+    # at all, --strict-nets fails CLOSED (a silently skipped gate is no gate).
+    net_lines = None
+    net_risk = False
+    net_equiv = True
+    net_diff_err = None
+    if not getattr(args, "no_net_diff", False) or strict:
+        from .netdiff import diff as net_diff
+        from .netdiff import format_summary as net_summary
+        from .netdiff import has_risk as net_has_risk
+        from .readers import kicad as kreader
+        import os
+        import shutil
+        # the copy lives NEXT TO the target (never a TemporaryDirectory): a
+        # hierarchical root must still resolve its child sheets on read-back
+        tmp = target.parent / f".{target.name}.netdiff.{os.getpid()}.tmp"
+        try:
+            before_nets = kreader.read_sch(str(target)).nets
+            shutil.copy2(target, tmp)
+            tmp_findings: list = []
+            tmp_results = kwriter.apply(oplist, str(tmp), apply=True,
+                                        sources=sources,
+                                        verify_out=tmp_findings,
+                                        backup_dir=None)
+            if _draw_exit(tmp_results, tmp_findings) == EXIT["OK"]:
+                after_nets = kreader.read_sch(str(tmp)).nets
+                nd = net_diff(before_nets, after_nets)
+                net_lines = net_summary(nd)      # [] iff nd.equivalent
+                net_risk = net_has_risk(nd)
+                net_equiv = nd.equivalent
+            # else: the op-list itself fails — the per-op results below explain
+            # it, and the real apply refuses on its own (nothing is written),
+            # so a "(none)" net diff here would be misleading
+        except Exception as e:                   # noqa: BLE001
+            net_diff_err = f"{type(e).__name__}: {e}"
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+    if net_diff_err is not None:
+        if strict:
+            raise _ExitWith(EXIT["OPLIST"],
+                            "REFUSED: --strict-nets: net diff unavailable "
+                            f"({net_diff_err}); nothing written")
+        sys.stderr.write(f"WARNING: net diff unavailable: {net_diff_err}\n")
+
+    if strict and net_risk:
+        for ln in net_lines or []:
+            sys.stderr.write(f"  {ln}\n")
+        raise _ExitWith(EXIT["OPLIST"],
+                        "REFUSED: --strict-nets: net split/merge touches a "
+                        "named net; nothing written")
 
     findings: list = []
     results = kwriter.apply(
@@ -1162,20 +1767,45 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         except Exception:  # pragma: no cover - advisory only
             pass
 
+    code = _draw_exit(results, findings)
+    show_diff = not getattr(args, "no_net_diff", False)
+    if not do_apply:
+        hint = " (re-run with --apply)" if getattr(args, "command", "") == "draw" else ""
+        status = "dry-run"
+        status_line = f"status: dry-run — nothing written{hint}"
+    elif code == EXIT["OK"]:
+        status = "applied"
+        status_line = (f"status: APPLIED — wrote {target.name} "
+                       f"(backup {target.name}.bak; `akcli undo` reverts)")
+    else:
+        status = "refused"
+        status_line = "status: REFUSED — nothing written (fix the errors above)"
+
     if args.json:
         payload = {
-            "applied": bool(do_apply and _draw_exit(results, findings) == EXIT["OK"]),
+            "applied": bool(do_apply and code == EXIT["OK"]),
+            "status": status,
             "ops": [r.to_dict() for r in results],
             "connectivity": [
                 {"code": f.code, "severity": f.severity.value, "message": f.message}
                 for f in findings
             ],
+            "net_diff": None if (net_lines is None or not show_diff) else {
+                "equivalent": net_equiv, "risk": net_risk, "lines": net_lines,
+            },
         }
         _emit(_dumps(payload))
     else:
         _emit(_draw_results_text(results, findings))
+        if show_diff and net_lines is not None:
+            _emit("Net changes:")
+            if not net_lines:
+                _emit("  (none)")
+            for ln in net_lines:
+                _emit(f"  {ln}")
+        _emit(status_line)
 
-    return _draw_exit(results, findings)
+    return code
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
@@ -1223,7 +1853,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="akcli",
         description="Read Altium .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch, "
-                    "run ERC/design checks, and draw KiCad schematics.",
+                    "run ERC/design/intent checks, query nets and parts, and "
+                    "draw KiCad schematics from JSON op-lists (with net-diff "
+                    "safety rails and one-command undo).",
+        epilog=(
+            "typical workflow:\n"
+            "  akcli read board.kicad_sch            # inspect components + nets\n"
+            "  akcli nets board.kicad_sch --intent-snapshot intent.json\n"
+            "  akcli ops list && akcli ops template add_wire   # author an op-list\n"
+            "  akcli plan board.kicad_sch --ops edit.json      # dry-run + net diff\n"
+            "  akcli draw board.kicad_sch --ops edit.json --apply\n"
+            "  akcli check board.kicad_sch --intent intent.json  # assert intent held\n"
+            "  akcli undo board.kicad_sch --apply    # revert the last write\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[common],   # accept global flags before the subcommand too
     )
     parser.add_argument("--version", action="store_true",
@@ -1241,16 +1884,75 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name", nargs="?", help="net name to query (omit to list all)")
     p.set_defaults(handler=_cmd_net)
 
+    p = sub.add_parser("nets", parents=[common],
+                       help="print every net -> sorted members "
+                            "(+ --intent-snapshot for `check --intent`)")
+    p.add_argument("path", nargs="?", help="input schematic")
+    p.add_argument("--intent-snapshot", metavar="OUT.json",
+                   help="also write the netlist as a design-intent JSON file "
+                        "('-' = stdout) for `akcli check --intent`")
+    p.add_argument("--include-unnamed", action="store_true",
+                   help="intent snapshot: include unnamed nets "
+                        "(keyed by stable id)")
+    p.set_defaults(handler=_cmd_nets)
+
     p = sub.add_parser("component", parents=[common], help="query one component's pin->net")
     p.add_argument("path", nargs="?", help="input schematic")
     p.add_argument("ref", nargs="?", help="component designator (e.g. U3)")
     p.set_defaults(handler=_cmd_component)
 
-    p = sub.add_parser("check", parents=[common], help="run ERC/power/BOM checks")
+    p = sub.add_parser("pins", parents=[common],
+                       help="print a symbol's pin world coords for a placement (op-list authoring)")
+    p.add_argument("lib_id", nargs="?", help="symbol lib_id, e.g. Device:R or Timer:NE555P")
+    p.add_argument("--at", nargs=2, type=float, metavar=("X", "Y"),
+                   help="placement origin in mils (default: 0 0)")
+    p.add_argument("--rotation", type=int, choices=[0, 90, 180, 270], default=0,
+                   help="placement rotation (default: 0)")
+    p.add_argument("--mirror", choices=["none", "x", "y"], default="none",
+                   help="placement mirror (default: none)")
+    p.add_argument("--symbols", metavar="PATH", action="append",
+                   help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
+    p.set_defaults(handler=_cmd_pins)
+
+    p = sub.add_parser("view", parents=[common],
+                       help="local web dashboard: /calc (calculators) + /live (watch a .kicad_sch)")
+    p.add_argument("what",
+                   help="`calc`, `live`, or directly a .kicad_sch to watch")
+    p.add_argument("path", nargs="?",
+                   help="the .kicad_sch to watch (view live only)")
+    p.add_argument("--port", type=int,
+                   help="listen port (default 8765; auto-increments if busy; "
+                        "localhost only)")
+    p.add_argument("--no-browser", action="store_true",
+                   help="do not open the browser automatically")
+    p.add_argument("--state-dir", metavar="DIR",
+                   help="view live: persist the step timeline here "
+                            "(default: fresh temp dir per run)")
+    p.add_argument("--max-steps", type=int, default=500, metavar="N",
+                   help="keep at most N timeline steps, deleting the oldest "
+                        "SVGs (default 500; 0 = unlimited)")
+    p.set_defaults(handler=_cmd_view)
+
+    p = sub.add_parser("check", parents=[common], help="run ERC/power/BOM/layout checks")
     p.add_argument("path", nargs="?", help="input schematic")
     p.add_argument("--erc", action="store_true", help="run ERC checks")
     p.add_argument("--power", action="store_true", help="run power-rail checks")
     p.add_argument("--bom", action="store_true", help="run BOM-hygiene checks")
+    p.add_argument("--layout", action="store_true",
+                   help="run geometric-overlap lint (.kicad_sch only)")
+    p.add_argument("--nets", action="store_true",
+                   help="run connectivity-hygiene checks (single-pin nets, "
+                        "off-grid pins, wire/pin/label attachment near-misses)")
+    p.add_argument("--intent", metavar="FILE",
+                   help="assert a JSON design-intent file (see `akcli nets "
+                        "--intent-snapshot`) against the built netlist")
+    p.add_argument("--libsync", action="store_true",
+                   help="check embedded lib_symbols freshness (pin-signature "
+                        "drift vs --symbols sources; old-format heuristic "
+                        "without them)")
+    p.add_argument("--symbols", metavar="PATH", action="append",
+                   help="symbol source dir or .kicad_sym for --libsync "
+                        "(repeatable)")
     p.add_argument("--exit-zero", action="store_true",
                    help="always exit 0 (report mode)")
     p.add_argument("--format", choices=["text", "json", "sarif", "junit"],
@@ -1262,6 +1964,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("other", nargs="?", help="schematic B")
     p.add_argument("--exit-zero", action="store_true", help="always exit 0")
     p.set_defaults(handler=_cmd_diff)
+
+    p = sub.add_parser("arrange", parents=[common],
+                       help="nudge free (unwired/unlabeled) components until "
+                            "no symbols overlap (dry-run unless --apply)")
+    p.add_argument("path", nargs="?", help="the .kicad_sch to arrange")
+    p.add_argument("--apply", action="store_true",
+                   help="write the moves (default: preview only)")
+    p.add_argument("--grid", type=float, metavar="MIL",
+                   help="nudge step in mils (default 100)")
+    p.add_argument("--margin", type=float, metavar="MIL",
+                   help="required clearance between symbols (default 50)")
+    p.add_argument("--symbols", metavar="PATH", action="append",
+                   help="extra symbol source for the write pipeline")
+    p.set_defaults(handler=_cmd_arrange)
+
+    p = sub.add_parser("verify", parents=[common],
+                       help="net-equivalence proof between two schematics "
+                            "(e.g. Altium original vs converted KiCad)")
+    p.add_argument("path", nargs="?", help="schematic A (the reference)")
+    p.add_argument("other", nargs="?", help="schematic B (the candidate)")
+    p.add_argument("--strict", action="store_true",
+                   help="also fail on component value/footprint differences")
+    p.add_argument("--exit-zero", action="store_true", help="always exit 0")
+    p.set_defaults(handler=_cmd_verify)
+
+    p = sub.add_parser("undo", parents=[common],
+                       help="swap a .kicad_sch with its draw backup "
+                            "(<name>.bak; undo twice = redo)")
+    p.add_argument("path", nargs="?", help="the .kicad_sch to restore")
+    p.add_argument("--apply", action="store_true",
+                   help="actually swap (default is a dry-run preview)")
+    p.set_defaults(handler=_cmd_undo)
 
     p = sub.add_parser("pinmap", parents=[common], help="MCU pin->net map + cross-check")
     p.add_argument("path", nargs="?", help="input schematic")
@@ -1324,6 +2058,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ops", metavar="FILE", help="op-list JSON file")
     p.add_argument("--symbols", metavar="PATH", action="append",
                    help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
+    p.add_argument("--no-net-diff", action="store_true",
+                   help="skip the before/after net connectivity diff")
     p.set_defaults(handler=_cmd_plan)
 
     p = sub.add_parser("draw", parents=[common],
@@ -1336,7 +2072,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify only, do not write (default)")
     p.add_argument("--symbols", metavar="PATH", action="append",
                    help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
+    p.add_argument("--no-net-diff", action="store_true",
+                   help="skip the before/after net connectivity diff")
+    p.add_argument("--strict-nets", action="store_true",
+                   help="with --apply: refuse to write when the net diff shows "
+                        "a split/merge touching a named net")
     p.set_defaults(handler=_cmd_draw)
+
+    p = sub.add_parser("relink-symbols", parents=[common],
+                       help="re-embed stale lib_symbols cache entries from "
+                            "fresh .kicad_sym libraries (dry-run unless --apply)")
+    p.add_argument("target", nargs="?", help="the .kicad_sch to relink")
+    p.add_argument("--libs", metavar="DIR", action="append",
+                   help="symbol library dir or .kicad_sym file (repeatable); "
+                        "default: the KiCad.app SharedSupport symbols dir "
+                        "if it exists")
+    p.add_argument("--only", metavar="NICKS",
+                   help="comma-separated library nicknames (or full lib_ids) "
+                        "to consider")
+    p.add_argument("--apply", action="store_true",
+                   help="write the replacements (default: preview only; "
+                        "net-membership equivalence gated, leaves <name>.bak)")
+    p.set_defaults(handler=_cmd_relink)
 
     # jlc — JLCPCB/LCSC part search (needs network; powered by jlcsearch)
     p = sub.add_parser("jlc", parents=[common],
@@ -1350,6 +2107,37 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--limit", type=int, default=20, metavar="N",
                     help="max results (default: 20)")
     ps.set_defaults(handler=_cmd_jlc_search)
+
+    pb = jlc_sub.add_parser(
+        "bom", parents=[common],
+        help="check a schematic's BOM against the JLCPCB catalog "
+             "(stock/price via LCSC/MPN parameters; networked)")
+    pb.add_argument("path", nargs="?", help="input schematic (.kicad_sch/.SchDoc)")
+    pb.add_argument("--qty", type=int, default=1, metavar="N",
+                    help="number of boards: stock and tier pricing are "
+                         "evaluated at N x per-line quantity (default: 1)")
+    pb.add_argument("--min-stock", type=int, default=1, metavar="N",
+                    help="flag lines with stock below N (default: 1)")
+    pb.add_argument("--suggest", action="store_true",
+                    help="search the catalog for not-found / no-part-id "
+                         "lines (match by value + package) and print the "
+                         "best candidate")
+    pb.add_argument("--fix", action="store_true",
+                    help="write suggested C-numbers into the schematic's "
+                         "LCSC parameters (implies --suggest; .kicad_sch "
+                         "only; leaves a .bak — `akcli undo` reverts; "
+                         "high-confidence suggestions only)")
+    pb.add_argument("--fix-all", dest="fix_all", action="store_true",
+                    help="like --fix but also writes LOW-confidence "
+                         "suggestions (package matched, value not verified "
+                         "in the candidate description/MPN)")
+    pb.add_argument("--csv", metavar="OUT.csv",
+                    help="also write a JLCPCB upload BOM CSV (Comment,"
+                         "Designator,Footprint,LCSC Part #); '-' writes "
+                         "to stdout")
+    pb.add_argument("--exit-zero", action="store_true",
+                    help="always exit 0 (report mode)")
+    pb.set_defaults(handler=_cmd_jlc_bom)
 
     psh = jlc_sub.add_parser("show", parents=[common],
                              help="show one part by LCSC C-number (e.g. C7593)")

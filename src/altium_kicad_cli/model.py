@@ -75,6 +75,8 @@ class Pin:
     electrical_type: PinType = PinType.UNSPECIFIED
     owner_part_id: int = 1      # multi-unit part (Altium OwnerPartId)
     unique_id: str | None = None
+    orientation: int = 0        # lib-frame degrees {0,90,180,270}: the pin points
+                                # from its electrical tip TOWARD the symbol body
 
 
 @dataclass

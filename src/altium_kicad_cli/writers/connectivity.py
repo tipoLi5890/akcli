@@ -9,9 +9,15 @@ the whole gate works **with no KiCad installed** (SPEC risk #6). Two entry point
 
   - **Dangling wire endpoints.** Every terminal endpoint of every ``(wire)`` must
     be *exactly coincident* (integer-nm) with a pin, a label/global/hierarchical
-    label, a junction, a ``(no_connect)``, or another wire (another wire's
-    endpoint, or its mid-span — a T). An endpoint touching none of those is the
-    failure mode "the wire we just drew didn't connect to anything".
+    label, a junction, a ``(no_connect)``, a ``(bus_entry)`` end, or another wire
+    (another wire's endpoint, or its mid-span — a T). An endpoint touching none
+    of those is the failure mode "the wire we just drew didn't connect to
+    anything". A wire ending on a ``(bus)`` segment does **not** count as
+    attached — in KiCad buses join wires only through bus entries.
+  - **Dangling bus entries.** Each ``(bus_entry)`` has two ends — ``(at)`` and
+    ``(at) + (size)`` — and each must land on a ``(bus)`` segment (endpoint or
+    mid-span) or on a wire (endpoint or mid-span); a free end is the failure
+    mode "the rip we just drew touches neither the bus nor a wire".
   - **Duplicate UUIDs** anywhere in the document.
   - **Unresolved ``lib_id``** — a placed symbol whose ``lib_id`` is not in the
     inline ``(lib_symbols ...)`` cache (KiCad would draw a "missing symbol" box).
@@ -52,6 +58,7 @@ __all__ = ["verify", "auto_junctions"]
 # Finding codes emitted by :func:`verify` (free-form; distinct from the frozen
 # ``errors.ERROR_CODES`` exception registry).
 DANGLING_ENDPOINT = "DANGLING_ENDPOINT"
+DANGLING_BUS_ENTRY = "DANGLING_BUS_ENTRY"
 DUPLICATE_UUID = "DUPLICATE_UUID"
 UNRESOLVED_LIB_ID = "UNRESOLVED_LIB_ID"
 INVALID_INSTANCES_PATH = "INVALID_INSTANCES_PATH"
@@ -136,16 +143,16 @@ def _hit(p: Point, pts: set[Point], tol: int) -> bool:
 # --------------------------------------------------------------------------- #
 # extraction
 # --------------------------------------------------------------------------- #
-def _wires(doc: SNode) -> tuple[list[tuple[Point, Point]], list[Point]]:
-    """Return ``(segments, terminals)``.
+def _wires(doc: SNode, tag: str = "wire") -> tuple[list[tuple[Point, Point]], list[Point]]:
+    """Return ``(segments, terminals)`` for every ``(wire)`` (or ``(bus)``) node.
 
-    ``segments`` is every consecutive vertex pair of every ``(wire)`` (zero-length
-    pairs dropped); ``terminals`` is each wire's two end vertices (the points the
-    dangling check applies to).
+    ``segments`` is every consecutive vertex pair of every ``(<tag>)`` (zero-length
+    pairs dropped); ``terminals`` is each polyline's two end vertices (the points
+    the dangling check applies to).
     """
     segs: list[tuple[Point, Point]] = []
     terminals: list[Point] = []
-    for w in doc.find_all("wire"):
+    for w in doc.find_all(tag):
         pts = w.find("pts")
         if pts is None:
             continue
@@ -162,6 +169,22 @@ def _wires(doc: SNode) -> tuple[list[tuple[Point, Point]], list[Point]]:
         terminals.append(verts[0])
         terminals.append(verts[-1])
     return segs, terminals
+
+
+def _bus_entry_ends(doc: SNode) -> list[tuple[Point, Point]]:
+    """Both ends of every ``(bus_entry)``: ``(at)`` and ``(at) + (size)``.
+
+    A missing ``(size)`` degenerates to a zero vector (both ends coincide), so
+    the entry is still checked rather than silently skipped.
+    """
+    out: list[tuple[Point, Point]] = []
+    for be in doc.find_all("bus_entry"):
+        a = _pt_nm(be.find("at"), 1)
+        if a is None:
+            continue
+        s = _pt_nm(be.find("size"), 1) or (0, 0)
+        out.append((a, (a[0] + s[0], a[1] + s[1])))
+    return out
 
 
 def _label_points(doc: SNode) -> set[Point]:
@@ -357,6 +380,11 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
 
     # --- connectivity sets -------------------------------------------------- #
     segs, terminals = _wires(doc)
+    # (bus) segments are deliberately NOT merged into ``segs``: a wire touching
+    # a bus directly is not attached in KiCad — only a bus_entry joins the two.
+    bus_segs, _bus_terminals = _wires(doc, tag="bus")
+    entry_pairs = _bus_entry_ends(doc)
+    entry_points = {p for pair in entry_pairs for p in pair}
     label_points = _label_points(doc)
     junction_points = _junction_points(doc)
     nc_points = _no_connect_points(doc)
@@ -365,6 +393,7 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
     for a, b in segs:
         end_counts[a] += 1
         end_counts[b] += 1
+    bus_end_points = {p for seg in bus_segs for p in seg}
 
     def _on_other_wire(p: Point) -> bool:
         """``p`` connects to a wire other than (just) terminating itself."""
@@ -385,6 +414,7 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
             or _hit(p, label_points, tol_nm)
             or _hit(p, junction_points, tol_nm)
             or _hit(p, nc_points, tol_nm)
+            or _hit(p, entry_points, tol_nm)
             or _on_other_wire(p)
         )
         if not connected:
@@ -394,7 +424,34 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
                     DANGLING_ENDPOINT,
                     Severity.ERROR,
                     f"wire endpoint at {_fmt(p)} is not connected to any pin, "
-                    f"label, junction or other wire",
+                    f"label, junction, bus entry or other wire",
+                    refs=[_fmt(p)],
+                )
+            )
+
+    # --- dangling bus entries (reciprocal of the anchor above) -------------- #
+    def _touches(p: Point, seg_list: list[tuple[Point, Point]], ends: set[Point]) -> bool:
+        """``p`` lands on a segment of ``seg_list`` (endpoint or mid-span)."""
+        if _hit(p, ends, tol_nm):
+            return True
+        return any(_on_segment_interior(p, a, b) for a, b in seg_list)
+
+    wire_end_points = set(end_counts)
+    entry_reported: set[Point] = set()
+    for pair in entry_pairs:
+        for p in pair:
+            if p in entry_reported:
+                continue
+            if _touches(p, bus_segs, bus_end_points) or _touches(
+                p, segs, wire_end_points
+            ):
+                continue
+            entry_reported.add(p)
+            findings.append(
+                Finding(
+                    DANGLING_BUS_ENTRY,
+                    Severity.ERROR,
+                    f"bus_entry end at {_fmt(p)} does not land on a bus or a wire",
                     refs=[_fmt(p)],
                 )
             )

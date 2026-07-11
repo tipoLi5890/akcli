@@ -29,9 +29,13 @@ giving you a scriptable, install-free workflow that an automation pipeline or an
   T-junctions, and No-ERC markers — fixing the classic "same-named nets split into single-pin nets" bug.
 - **Read-only on Altium, safe writes on KiCad.** Altium files are never modified offline; KiCad writes
   go through an atomic snapshot → temp → verify → replace pipeline with a pure-Python connectivity gate.
+- **Net-diff safety rails.** Every `plan`/`draw` prints a before/after **net connectivity diff**
+  (splits, merges, renames — matched by pin membership, never by name); `draw --apply --strict-nets`
+  refuses a write that splits or merges a named net, and `akcli check --intent` asserts a
+  design-intent netlist snapshot after any edit.
 - **AI-agent native.** Ships as a Claude Code plugin with skills/commands, emits structured JSON with
   `schema_version`, and accepts a versioned op-list for deterministic, idempotent edits.
-- **Standards-cited calculators.** `akcli calc` answers 56 design questions (E-series, IPC-2221,
+- **Standards-cited calculators.** `akcli calc` answers 60 design questions (E-series, IPC-2221,
   via parasitics, I²C pull-ups, buck/boost, ...) and prints the formal reference with every result.
 
 ## Read Altium files
@@ -47,8 +51,9 @@ akcli component main.SchDoc U10    # one component's pins -> nets (needs a desig
 
 Supported Altium inputs: `.SchDoc` (schematic), `.SchLib` (symbol library — text-record symbols;
 libraries containing binary symbol records are refused with exit 5, *unsupported*), `.PcbDoc` (board —
-ASCII `Nets6`/`Components6`/`Classes6`/`Rules6` sections for now; binary pad/track sections are
-refused loudly rather than mis-parsed). All Altium access is **read-only**.
+ASCII `Nets6`/`Components6`/`Classes6`/`Rules6` sections **plus the binary copper sections**
+`Tracks6`/`Vias6`/`Arcs6`/`Pads6`; `Fills6`/`Regions6`/`Texts6`/`Polygons6` are skipped, not
+mis-parsed). All Altium access is **read-only**.
 
 ## Read KiCad files
 
@@ -69,7 +74,8 @@ fixture-tested and newer formats (9/10) read through the same path.
 Run an electrical rule check and other design checks without opening any EDA tool:
 
 ```bash
-akcli check  main.SchDoc                          # ERC-lite + power + BOM hygiene
+akcli check  main.SchDoc                          # ERC-lite + power + BOM + connectivity hygiene
+akcli check  board.kicad_sch --intent intent.json # assert a design-intent netlist snapshot
 akcli pinmap main.SchDoc -C altium-kicad-cli.toml # MCU pin -> net (+ optional expected table)
 akcli diff   v1.SchDoc v2.SchDoc                   # net-membership diff, not name-based
 ```
@@ -82,17 +88,21 @@ fractional-coordinate presence) so a clean result is never mistaken for an empty
 ## Write KiCad schematics from an op-list
 
 `akcli` writes KiCad schematics from a versioned JSON **op-list** (place components, wires, junctions,
-labels, power ports, text...). Writes are surgical and idempotent (deterministic UUIDv5), guarded by a
-pure-Python connectivity verifier, and require an explicit `--apply` (default is a dry run).
+labels, power ports, text, rename/delete...; connectivity macros like `connect_and_label` and
+`place_pwr_flag` expand to core ops). Writes are surgical and idempotent (deterministic UUIDv5),
+guarded by a pure-Python connectivity verifier **and a before/after net diff**, and require an
+explicit `--apply` (default is a dry run). `akcli undo` reverts the last write.
 
 ```bash
-akcli plan  ops.json --target board.kicad_sch     # validate op-list, show what would change
-akcli draw  ops.json --target board.kicad_sch     # dry-run by default (no file written)
-akcli draw  ops.json --target board.kicad_sch --apply   # atomic write + verify + backup
+akcli plan board.kicad_sch --ops ops.json         # validate op-list, show changes + net diff
+akcli draw board.kicad_sch --ops ops.json         # dry-run by default (no file written)
+akcli draw board.kicad_sch --ops ops.json --apply --strict-nets  # atomic write + verify + backup;
+                                                  # refuses named-net splits/merges
 ```
 
-Altium *write/draw* is available only through the optional Windows live driver (Altium 22+ running);
-offline, Altium is analysis-only.
+`akcli relink-symbols board.kicad_sch` refreshes stale embedded `lib_symbols` from fresh
+`.kicad_sym` libraries behind a net-equivalence safety gate. Altium *write/draw* is available only
+through the optional Windows live driver (Altium 22+ running); offline, Altium is analysis-only.
 
 ## Find JLCPCB / LCSC parts
 
@@ -105,15 +115,16 @@ see [Acknowledgments](#acknowledgments)).
 akcli jlc search "0.1uF 0402 X7R"     # keyword / MPN / category search (needs network)
 akcli jlc show   C7593                 # one part by LCSC C-number (--easyeda adds 3D/MPN metadata)
 akcli jlc add    C2040 --3d            # LCSC part -> KiCad symbol + footprint + STEP
+akcli jlc bom board.kicad_sch --qty 10 --csv order.csv   # stock/price check + JLCPCB upload CSV
 ```
 
 ## Engineering calculators
 
-`akcli calc` bundles **56 offline calculators** — E-series snapping and resistor combinations
+`akcli calc` bundles **60 offline calculators** — E-series snapping and resistor combinations
 (IEC 60063), voltage dividers, LM317/FB regulator worst-case, IPC-2221 track width and clearance,
 via parasitics, fusing current, AWG, microstrip/stripline impedance, RF attenuators, buck/boost
-stages, NE555, op-amp pairs, I²C pull-ups, crystal load caps, thermal, battery, resistor markings,
-and galvanic compatibility. **Every result prints its formal reference** (the standard, datasheet,
+stages, LDO headroom, NE555, op-amp pairs, comparator hysteresis, envelope detectors, I²C pull-ups,
+crystal load caps, thermal, battery life, resistor markings, and galvanic compatibility. **Every result prints its formal reference** (the standard, datasheet,
 or textbook the formula comes from), and numerics are cross-checked in the test suite against
 KiCad's pcb_calculator readings and published handbook values.
 
@@ -127,8 +138,11 @@ akcli calc i2c-pullup vdd=3.3 cb=100p mode=fast  # NXP UM10204 pull-up window
 Inputs accept engineering notation (`4k7`, `100n`, `2M2`); `--json` returns
 `{calc, inputs, results, reference}`, `--md` a paste-ready table, `calc batch`
 runs a JSON job list, and `--ops` turns design results (dividers, regulator
-feedback, filters, ...) into a ready `place_component` op-list. A local web UI
-with physical-style SVG diagrams and shareable URLs ships in `tools/calc-view/`.
+feedback, filters, ...) into a ready `place_component` op-list. `akcli view`
+serves ONE local dashboard for both worlds: `/calc` (auto-compute forms,
+physical-style SVG diagrams, shareable URLs, op-list export) and `/live` (a
+draw-timeline for a watched `.kicad_sch` with per-step ERC findings, diff
+ghosting, and SSE push) — localhost-only, zero deps.
 
 ## Use with AI coding agents
 
@@ -144,7 +158,7 @@ use `set -o pipefail` if you branch on it.
   (severity-ranked design review), `schematic-authoring` (new circuits from an op-list),
   `altium-interop` (working with Altium Designer), `parts-sourcing` (JLC/LCSC parts),
   `jlcpcb-capabilities` (manufacturer limits to design against), and `design-calc`
-  (56 standards-cited engineering calculators via `akcli calc`).
+  (60 standards-cited engineering calculators via `akcli calc`).
 - **Codex** — install the bundled plugin (below): it packages all eight skills plus the session hook.
   Or drop the loose skill folders into `.agents/skills/` for auto-discovery. See
   [docs/codex-plugin.md](docs/codex-plugin.md).
@@ -188,12 +202,14 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 ## Roadmap
 
 Shipped today: Altium `.SchDoc`/`.SchLib` and KiCad `.kicad_sch` read (version-tolerant, KiCad
-**hierarchical sheets included**), net inference, ERC/power/BOM/diff/pinmap checks, KiCad write/draw
-(16-op vocabulary incl. delete/move and multi-unit placement, output verified against KiCad's own
-ERC), and JLCPCB/LCSC part search. The full milestone plan (v0.2 → v1.0, with exit criteria per
-milestone) lives in **[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
+**hierarchical sheets included**), net inference, ERC/power/BOM/diff/pinmap/intent checks, KiCad
+write/draw (17-op vocabulary + 9 macros incl. delete/move/rename and multi-unit placement, net-diff
+safety rails, output verified against KiCad's own netlister), embedded-library relink, and
+JLCPCB/LCSC part search with order-CSV export. The full milestone plan (v0.2 → v1.0, with exit
+criteria per milestone) lives in **[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
 
-- Altium `.PcbDoc` **binary** sections (pads/tracks/vias/arcs/fills/regions) — ASCII sections read today.
+- Altium `.PcbDoc` remaining **binary** sections (fills/regions/texts/polygons) — ASCII sections
+  and binary copper (pads/tracks/vias/arcs) read today.
 - **Offline Altium writing** and Altium-authoritative ERC/netlist (today these need the live driver).
 - **Hierarchical / multi-sheet** KiCad *writing* (the writer is flat-only; the reader follows hierarchy).
 - Altium **live driver** for Windows + Altium 22+ (the DelphiScript half is a scaffold pending validation).

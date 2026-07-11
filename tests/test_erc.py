@@ -60,10 +60,11 @@ def _sch(
     nets: list[Net],
     *,
     no_erc_points=None,
+    source_format: str = "altium",
 ) -> Schematic:
     return Schematic(
         source_path="<test>",
-        source_format="altium",
+        source_format=source_format,
         components=components,
         nets=nets,
         no_erc_points=list(no_erc_points or []),
@@ -371,6 +372,92 @@ def test_net_alias_waiver_suppresses():
     sch = _sch([_comp("U1", [_pin("1")]), _comp("U2", [_pin("1")])], [net])
     cfg = _cfg(waivers=[{"net": "STAT", "rule": "net_alias", "reason": "ok"}])
     assert _by_code(erc.run(sch, cfg), erc.ERC_NET_ALIAS) == []
+
+
+# ---------------------------------------------------------------------------
+# unplaced units of multi-unit parts (KiCad-sourced only)
+# ---------------------------------------------------------------------------
+def _multi_unit_comp(
+    designator: str,
+    part_count: int,
+    placed_units: list[int],
+    *,
+    common_pins: int = 0,
+    undesignated: bool = False,
+) -> Component:
+    # Mirror the KiCad reader's merge: only placed units contribute pins,
+    # each pin tagged with its owning unit (0 = common to all units).
+    pins = [
+        Pin(number=f"{u}{i}", name=None, x_mil=0.0, y_mil=0.0, owner_part_id=u)
+        for u in placed_units
+        for i in (1, 2)
+    ]
+    pins += [
+        Pin(number=f"c{i}", name=None, x_mil=0.0, y_mil=0.0, owner_part_id=0)
+        for i in range(common_pins)
+    ]
+    return Component(
+        designator=designator,
+        library_ref="Amplifier:LM324",
+        x_mil=0.0,
+        y_mil=0.0,
+        part_count=part_count,
+        pins=pins,
+        undesignated=undesignated,
+    )
+
+
+def test_unplaced_unit_flagged_with_macro_hint():
+    sch = _sch([_multi_unit_comp("U1", 4, [1, 3])], [], source_format="kicad")
+    out = _by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT)
+    assert len(out) == 1
+    assert out[0].severity is Severity.WARNING
+    assert out[0].refs == ["U1"]
+    # names the missing units by KiCad letter and points at the macro
+    assert "B, D" in out[0].message
+    assert "terminate_unused_unit" in out[0].message
+
+
+def test_all_units_placed_is_clean():
+    sch = _sch([_multi_unit_comp("U1", 2, [1, 2])], [], source_format="kicad")
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT) == []
+
+
+def test_common_unit0_pins_do_not_count_as_placed():
+    # A part whose only extra pins are _0_* common ones still misses unit B.
+    sch = _sch(
+        [_multi_unit_comp("U1", 2, [1], common_pins=2)], [], source_format="kicad"
+    )
+    out = _by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT)
+    assert len(out) == 1 and "B" in out[0].message
+
+
+def test_single_unit_part_never_flagged():
+    sch = _sch([_multi_unit_comp("U1", 1, [1])], [], source_format="kicad")
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT) == []
+
+
+def test_unplaced_unit_silent_for_altium_sources():
+    # Altium attaches every unit's pins regardless of placement and PARTCOUNT
+    # is unreliable -> the rule must stay silent for altium-format schematics.
+    sch = _sch([_multi_unit_comp("U1", 4, [1])], [], source_format="altium")
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT) == []
+
+
+def test_unplaced_unit_skips_undesignated():
+    sch = _sch(
+        [_multi_unit_comp("$U0", 2, [1], undesignated=True)], [],
+        source_format="kicad",
+    )
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT) == []
+
+
+def test_unplaced_unit_waiver_suppresses():
+    sch = _sch([_multi_unit_comp("U1", 2, [1])], [], source_format="kicad")
+    cfg = _cfg(waivers=[{"net": "U1", "rule": "unplaced_unit",
+                         "reason": "spare gate intentionally unplaced"}])
+    assert _by_code(erc.run(sch, cfg), erc.ERC_UNPLACED_UNIT) == []
+    assert len(_by_code(erc.run(sch, _cfg()), erc.ERC_UNPLACED_UNIT)) == 1
 
 
 # ---------------------------------------------------------------------------

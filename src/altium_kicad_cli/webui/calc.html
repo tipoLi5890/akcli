@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>akcli calc — engineering bench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23d08a3d'/%3E%3Ctext x='8' y='12' font-family='monospace' font-size='11' font-weight='bold' text-anchor='middle' fill='%231a1408'%3E%3D%3C/text%3E%3C/svg%3E">
+<style>
+/* ============================ theme ================================== */
+:root{
+  --mono: ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code","Fira Code",Menlo,Consolas,monospace;
+  --disp: "Avenir Next Condensed","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#14161a; --bg2:#181b20; --panel:#1d2127; --panel2:#171a1f; --inset:#101317;
+  --border:#2b3038; --border2:#3a414c;
+  --text:#ced3da; --muted:#8b929d; --faint:#5f6671;
+  --brand:#d08a3d; --brand2:#e8ab61; --oncopper:#1a1408;
+  --data:#66c8de; --data2:#8adcee;
+  --ok:#58c48e; --err:#e5665f; --warn:#d9a13c;
+  --sel:rgba(208,138,61,.13); --focus:rgba(102,200,222,.45);
+  --grid:rgba(102,200,222,.045); --grid2:rgba(102,200,222,.028);
+  --shadow:0 6px 24px rgba(0,0,0,.35);
+  --dg-cu:#d9903f; --dg-cu-dark:#a86a24; --dg-board:#2f6b3f; --dg-board-dark:#245233;
+  --dg-dim:#7fd4e8; --dg-wire:#8fd8ea; --dg-plane:#878d94; --dg-body:#3a3f44;
+  --dg-hot:#ff5544; --dg-flame:#ffb14e; --dg-gold:#ffd75e; --dg-ink:#1c2024;
+}
+:root[data-theme="light"]{
+  --bg:#e9e5db; --bg2:#efece3; --panel:#faf8f2; --panel2:#f0ede4; --inset:#fdfcf9;
+  --border:#d3ccbb; --border2:#bcb4a0;
+  --text:#2b2e33; --muted:#6c7076; --faint:#9a9c9e;
+  --brand:#a96617; --brand2:#8a5310; --oncopper:#fff8ec;
+  --data:#0f6f88; --data2:#0a5568;
+  --ok:#1e8a57; --err:#bf3934; --warn:#8f6408;
+  --sel:rgba(169,102,23,.10); --focus:rgba(15,111,136,.35);
+  --grid:rgba(15,111,136,.055); --grid2:rgba(15,111,136,.03);
+  --shadow:0 4px 18px rgba(60,50,30,.12);
+  --dg-cu:#c47c28; --dg-cu-dark:#965c1a; --dg-board:#3c7a4c; --dg-board-dark:#2c5c39;
+  --dg-dim:#0e6e86; --dg-wire:#0d6a82; --dg-plane:#8f959c; --dg-body:#d9d4c6;
+  --dg-hot:#d43c2c; --dg-flame:#c07b18; --dg-gold:#a8861c; --dg-ink:#1c2024;
+}
+
+/* ============================ base =================================== */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; font:13.5px/1.5 var(--mono); background:var(--bg); color:var(--text);
+  display:grid; grid-template-columns:280px 1fr; grid-template-rows:auto 1fr auto;
+  grid-template-areas:"appbar appbar" "side main" "status status";
+  height:100vh; overflow:hidden;
+}
+/* ---- shared bench chrome (identical on hub/calc/live) ---- */
+#appbar{grid-area:appbar; display:flex; align-items:center; gap:12px;
+        padding:7px 14px; background:var(--panel2); border-bottom:1px solid var(--border)}
+#mark{font-family:var(--disp); font-size:15px; font-weight:600; letter-spacing:.1em;
+      text-transform:uppercase; color:var(--brand2); text-decoration:none; white-space:nowrap}
+#mark:hover{color:var(--brand)}
+.tabs{display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden;
+      background:var(--panel)}
+.tabs a{display:flex; align-items:center; padding:3px 13px; color:var(--muted);
+        text-decoration:none; font-family:var(--disp); font-size:11.5px; font-weight:600;
+        letter-spacing:.12em; text-transform:uppercase; border-right:1px solid var(--border)}
+.tabs a:last-child{border-right:none}
+.tabs a.on{background:var(--sel); color:var(--brand2)}
+.tabs a:hover:not(.on){color:var(--text)}
+#pagename{font-size:11px; color:var(--faint); letter-spacing:.04em}
+.spacer{flex:1}
+::selection{background:var(--sel)}
+button{font:inherit; color:inherit; cursor:pointer}
+:focus-visible{outline:2px solid var(--focus); outline-offset:1px; border-radius:4px}
+@media (prefers-reduced-motion:reduce){ *,*::before,*::after{animation:none !important; transition:none !important} }
+
+/* ============================ sidebar ================================ */
+#side{grid-area:side; background:var(--panel2); border-right:1px solid var(--border);
+      display:flex; flex-direction:column; min-height:0}
+#searchwrap{padding:12px 12px 10px; position:relative}
+#filter{width:100%; padding:7px 30px 7px 10px; background:var(--inset);
+        border:1px solid var(--border); color:var(--text); border-radius:6px; font:inherit}
+#filter::placeholder{color:var(--faint)}
+#searchwrap .kbd{position:absolute; right:20px; top:19px; pointer-events:none}
+#calclist{flex:1; overflow-y:auto; padding:0 8px 10px; min-height:0; scrollbar-width:thin}
+.group-h{display:flex; align-items:center; gap:6px; width:100%; margin:10px 0 2px;
+         padding:2px 8px; background:none; border:none; text-align:left;
+         font-family:var(--disp); font-size:11px; font-weight:600; letter-spacing:.14em;
+         text-transform:uppercase; color:var(--brand); border-radius:5px}
+.group-h:hover{background:var(--sel)}
+.group-h .n{margin-left:auto; color:var(--faint); font-family:var(--mono); font-size:10px}
+.group-h .tw{transition:transform .15s; font-size:9px; color:var(--faint)}
+.group-h.closed .tw{transform:rotate(-90deg)}
+.calc-btn{display:flex; align-items:baseline; gap:7px; width:100%; text-align:left;
+          background:none; border:none; color:var(--text); padding:4px 8px 4px 16px;
+          border-left:2px solid transparent; border-radius:0 5px 5px 0; font:inherit; font-size:13px}
+.calc-btn:hover{background:var(--sel)}
+.calc-btn.active{background:var(--sel); border-left-color:var(--brand); color:var(--brand2)}
+.calc-btn.kbd-focus{outline:2px solid var(--focus); outline-offset:-2px}
+.calc-btn .pin{color:var(--brand); font-size:10px}
+.calc-btn mark{background:none; color:var(--data); font-weight:700}
+#sidefoot{border-top:1px solid var(--border); padding:8px 16px; font-size:10.5px; color:var(--faint)}
+
+/* ============================ main =================================== */
+#main{grid-area:main; overflow-y:auto; min-height:0; position:relative;
+      background:
+        linear-gradient(var(--grid2) 1px, transparent 1px) 0 0/100% 96px,
+        linear-gradient(90deg, var(--grid2) 1px, transparent 1px) 0 0/96px 100%,
+        linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 24px,
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/24px 100%,
+        var(--bg2)}
+#page,#home{padding:18px 26px 30px; max-width:1480px}
+#topbar{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px}
+#title{margin:0; font-family:var(--disp); font-size:24px; font-weight:600;
+       letter-spacing:.03em; color:var(--text)}
+#title .cname{color:var(--brand2)}
+.iconbtn{background:var(--panel); border:1px solid var(--border); color:var(--muted);
+         border-radius:7px; padding:4px 10px; font-size:12px; text-decoration:none}
+.iconbtn:hover{border-color:var(--border2); color:var(--text)}
+.iconbtn.on{color:var(--brand2); border-color:var(--brand)}
+#ref{font-size:11.5px; color:var(--muted); margin:2px 0 4px; max-width:980px}
+#ref b{color:var(--data); font-weight:normal}
+#notes{font-size:11.5px; color:var(--warn); margin:0 0 12px; max-width:980px}
+#content{display:grid; grid-template-columns:minmax(380px,470px) minmax(380px,1fr);
+         gap:20px; align-items:start}
+@media (max-width:1020px){ #content{grid-template-columns:1fr} body{grid-template-columns:240px 1fr} }
+.card{background:var(--panel); border:1px solid var(--border); border-radius:10px;
+      padding:16px; box-shadow:var(--shadow); animation:rise .25s ease-out both}
+@keyframes rise{from{opacity:0; transform:translateY(6px)}}
+.card h3{margin:0 0 10px; font-family:var(--disp); font-size:12px; font-weight:600;
+         letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
+#rightcol{display:flex; flex-direction:column; gap:20px; position:sticky; top:18px}
+#diagcard{display:flex; flex-direction:column; align-items:center}
+#diagram svg{max-width:100%; height:auto}
+#diagram svg text{font-family:var(--mono)}
+.svgcap{font-size:10.5px; color:var(--faint); margin-top:6px; text-align:center}
+
+/* ---- form ---- */
+.prow{display:flex; align-items:center; gap:8px; margin-bottom:2px}
+.prow label{width:128px; color:var(--data); text-align:right; font-size:12.5px;
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:none}
+.prow input,.prow select{flex:1; min-width:0; padding:6px 9px; background:var(--inset);
+      border:1px solid var(--border); color:var(--text); border-radius:6px; font:inherit}
+.prow input::placeholder{color:var(--faint); opacity:.8}
+.prow input.bad{border-color:var(--err)}
+.prow input.flash-req{animation:reqflash .8s}
+@keyframes reqflash{0%,60%{border-color:var(--err); box-shadow:0 0 0 2px rgba(229,102,95,.25)}}
+.prow .unit{width:48px; color:var(--muted); font-size:12px; flex:none}
+.prow .req{color:var(--err)}
+.pmeta{display:flex; margin:0 56px 7px 136px; gap:8px; font-size:10.5px; min-height:15px}
+.pmeta .help{color:var(--faint); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pmeta .parsed{color:var(--data); white-space:nowrap}
+.pmeta .parsed.bad{color:var(--err)}
+#formfoot{display:flex; align-items:center; gap:10px; margin-top:10px}
+#runbtn{padding:7px 22px; background:var(--brand); border:1px solid var(--brand);
+        color:var(--oncopper); border-radius:6px; font-weight:700; letter-spacing:.03em;
+        white-space:nowrap}
+#runbtn:hover{background:var(--brand2); border-color:var(--brand2)}
+#resetbtn{padding:7px 12px}
+.hint{font-size:10.5px; color:var(--faint)}
+#error{color:var(--err); margin-top:10px; white-space:pre-wrap; font-size:12.5px}
+
+/* ---- results ---- */
+#rescard{margin-top:20px}
+.reshead{display:flex; align-items:center; gap:6px; margin-bottom:10px}
+.reshead h3{margin:0; flex:1}
+#restime{font-size:10.5px; color:var(--faint)}
+#results table{border-collapse:collapse; width:100%}
+#results td,#results th{border:1px solid var(--border); padding:5px 10px; text-align:left; font:inherit}
+#results th{background:var(--panel2); color:var(--muted); font-weight:normal; font-size:11px;
+            font-family:var(--disp); letter-spacing:.12em; text-transform:uppercase}
+#results .rk{color:var(--data)}
+#results .val{white-space:nowrap; color:var(--text)}
+#results .val .num{cursor:copy; border-bottom:1px dotted var(--border2)}
+#results .val .num:hover{color:var(--data2); border-bottom-color:var(--data)}
+#results .note{color:var(--muted); font-size:11.5px}
+#results tr{animation:rowin .2s ease-out both}
+@keyframes rowin{from{opacity:0}}
+.delta{font-size:10px; margin-left:6px; color:var(--warn)}
+.chip{display:inline-block; border-radius:5px; padding:0 7px; font-size:11.5px; font-weight:700}
+.chip.ok{color:var(--ok); background:color-mix(in srgb, var(--ok) 14%, transparent)}
+.chip.err{color:var(--err); background:color-mix(in srgb, var(--err) 14%, transparent)}
+.lchip{display:inline-block; border:1px solid var(--border2); border-radius:4px;
+       padding:0 6px; margin:1px 3px 1px 0; font-size:11.5px}
+.lchip .sw{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px;
+           vertical-align:baseline; border:1px solid rgba(0,0,0,.35)}
+.subtable{margin:4px 0}
+.subtable td,.subtable th{font-size:11.5px !important; padding:3px 8px !important}
+.subtable th{cursor:pointer; user-select:none}
+.subtable th:hover{color:var(--data) !important}
+.subtable th .arr{font-size:9px; color:var(--brand2)}
+
+/* ---- home launcher ---- */
+#home h2{font-family:var(--disp); font-size:30px; font-weight:600; letter-spacing:.06em;
+         text-transform:uppercase; margin:6px 0 2px; color:var(--text)}
+#home h2 em{font-style:normal; color:var(--brand2)}
+#home .lead{color:var(--muted); font-size:12.5px; margin:0 0 20px}
+.hgroup{margin-bottom:18px}
+.hgroup h4{font-family:var(--disp); font-size:12px; font-weight:600; letter-spacing:.16em;
+           text-transform:uppercase; color:var(--brand); margin:0 0 8px}
+.hgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:8px}
+.tile{background:var(--panel); border:1px solid var(--border); border-radius:8px;
+      padding:8px 12px; text-align:left; display:block}
+.tile:hover{border-color:var(--brand); box-shadow:var(--shadow)}
+.tile .n{color:var(--brand2); font-weight:700; font-size:12.5px}
+.tile .d{color:var(--muted); font-size:11px; margin-top:1px; display:block;
+         overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+/* ---- history ---- */
+#histcard{margin-top:20px}
+#histlist{display:flex; flex-direction:column; gap:2px; max-height:300px; overflow-y:auto}
+.hrow{display:flex; gap:10px; align-items:baseline; padding:4px 8px; border-radius:6px;
+      background:none; border:none; text-align:left; font-size:12px; width:100%}
+.hrow:hover{background:var(--sel)}
+.hrow .ht{color:var(--faint); font-size:10.5px; flex:none; width:52px}
+.hrow .hc{color:var(--brand2); flex:none}
+.hrow .hp{color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.hrow .hr{color:var(--data); margin-left:auto; white-space:nowrap; font-size:11.5px}
+
+/* ============================ status bar ============================= */
+#status{grid-area:status; display:flex; align-items:center; gap:14px; padding:5px 14px;
+        background:var(--panel2); border-top:1px solid var(--border);
+        font-size:11px; color:var(--muted); min-height:28px}
+#stdot{width:8px; height:8px; border-radius:50%; background:var(--ok); animation:pulse 2.4s infinite}
+#stdot.off{background:var(--err); animation:none}
+@keyframes pulse{50%{opacity:.35}}
+#clicmd{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:copy;
+        color:var(--faint)}
+#clicmd:hover{color:var(--text)}
+#clicmd b{color:var(--data); font-weight:normal}
+.kbd{display:inline-block; border:1px solid var(--border2); border-bottom-width:2px;
+     border-radius:4px; padding:0 5px; font-size:10px; color:var(--muted); background:var(--panel)}
+
+/* ============================ overlays =============================== */
+.overlay{position:fixed; inset:0; background:rgba(8,10,12,.55); display:flex;
+         justify-content:center; align-items:flex-start; padding-top:12vh; z-index:50;
+         backdrop-filter:blur(2px)}
+.overlay[hidden]{display:none}
+#palette{width:min(600px,90vw); background:var(--panel); border:1px solid var(--border2);
+         border-radius:12px; box-shadow:var(--shadow); overflow:hidden;
+         animation:pop .14s ease-out}
+@keyframes pop{from{opacity:0; transform:scale(.98) translateY(-6px)}}
+#palinput{width:100%; padding:13px 16px; background:none; border:none; color:var(--text);
+          font:15px var(--mono); border-bottom:1px solid var(--border)}
+#palinput:focus{outline:none}
+#pallist{max-height:46vh; overflow-y:auto; padding:6px}
+.palrow{display:flex; gap:10px; align-items:baseline; padding:7px 12px; border-radius:7px;
+        cursor:pointer}
+.palrow.sel{background:var(--sel)}
+.palrow .pn{color:var(--brand2); font-weight:700; flex:none}
+.palrow .pt{color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis;
+            white-space:nowrap}
+.palrow .pg{margin-left:auto; color:var(--faint); font-size:10.5px; flex:none;
+            font-family:var(--disp); letter-spacing:.12em; text-transform:uppercase}
+.palrow mark{background:none; color:var(--data); font-weight:700}
+#helpbox{width:min(560px,90vw); background:var(--panel); border:1px solid var(--border2);
+         border-radius:12px; box-shadow:var(--shadow); padding:20px 24px;
+         animation:pop .14s ease-out}
+#helpbox h3{margin:0 0 12px; font-family:var(--disp); letter-spacing:.14em;
+            text-transform:uppercase; color:var(--brand2); font-size:14px}
+#helpbox table{width:100%; border-collapse:collapse; font-size:12.5px}
+#helpbox td{padding:4px 6px; border-bottom:1px solid var(--border)}
+#helpbox td:first-child{width:130px; color:var(--muted)}
+
+/* ============================ toast ================================== */
+#toast{position:fixed; bottom:42px; left:50%; transform:translateX(-50%);
+       background:var(--panel); color:var(--text); border:1px solid var(--brand);
+       border-radius:8px; padding:7px 18px; font-size:12.5px; box-shadow:var(--shadow);
+       z-index:60; opacity:0; pointer-events:none; transition:opacity .18s}
+#toast.show{opacity:1}
+
+/* ============================ print ================================== */
+@media print{
+  body{display:block; height:auto; overflow:visible; background:#fff; color:#000}
+  #side,#status,.overlay,#toast,#formfoot,#reshead .iconbtn,#histcard,.iconbtn{display:none !important}
+  #main{overflow:visible; background:#fff}
+  .card{box-shadow:none; border-color:#999; break-inside:avoid}
+  #content{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header id="appbar">
+  <a id="mark" href="/" title="hub (h)">⌂ akcli</a>
+  <nav class="tabs" aria-label="pages">
+    <a href="/" title="hub (h)">⌂</a>
+    <a href="/calc" class="on" id="tabcalc" title="calculator bench">= calc</a>
+    <a href="/live" title="live schematic timeline">◎ live</a>
+  </nav>
+  <span id="pagename">standards-cited calculators — every result carries its reference</span>
+  <span class="spacer"></span>
+  <a class="iconbtn" id="livelink" href="/live" hidden
+     title="open the live schematic timeline">▶ live</a>
+  <button class="iconbtn" id="themebtn" title="toggle dark / light">◐</button>
+  <button class="iconbtn" id="helpbtn" title="keyboard shortcuts (?)">?</button>
+</header>
+<nav id="side" aria-label="calculators">
+  <div id="searchwrap">
+    <input id="filter" placeholder="filter calculators…" aria-label="filter calculators"
+           autocomplete="off" spellcheck="false">
+    <span class="kbd">/</span>
+  </div>
+  <div id="calclist" role="list"></div>
+  <div id="sidefoot" style="white-space:nowrap; overflow:hidden"><span id="sfcount">…</span> · <span class="kbd">⌘K</span> · <span class="kbd">/</span> · <span class="kbd">?</span></div>
+</nav>
+
+<main id="main">
+  <div id="home"></div>
+  <div id="page" hidden>
+    <div id="topbar">
+      <h2 id="title"></h2>
+      <button class="iconbtn" id="pinbtn" title="pin to top of sidebar">☆ pin</button>
+      <button class="iconbtn" id="linkbtn" title="copy a URL that reproduces this computation">⧉ copy link</button>
+      <button class="iconbtn" id="printbtn" title="print / save PDF">⎙ print</button>
+    </div>
+    <div id="ref"></div>
+    <div id="notes"></div>
+    <div id="content">
+      <div>
+        <div class="card" id="formcard">
+          <h3>Parameters</h3>
+          <div id="form"></div>
+          <div id="formfoot">
+            <button id="runbtn">Calculate ⏎</button>
+            <button id="resetbtn" class="iconbtn" title="reset all fields to defaults">reset</button>
+            <span class="hint">notation: 4k7 · 100n · 35u · 2M2 · 1e-7 · 4R7</span>
+          </div>
+          <div id="error" role="alert"></div>
+        </div>
+        <div class="card" id="rescard" hidden>
+          <div class="reshead">
+            <h3>Results</h3>
+            <span id="restime"></span>
+            <button class="iconbtn" id="cpmd" title="copy as a markdown table">md</button>
+            <button class="iconbtn" id="cpjson" title="copy the raw JSON envelope">json</button>
+            <button class="iconbtn" id="cpcli" title="copy the equivalent akcli command">cli</button>
+            <button class="iconbtn" id="opsbtn" title="download a place_component op-list for akcli plan/draw" hidden>⤓ op-list</button>
+          </div>
+          <div id="results"></div>
+        </div>
+        <div class="card" id="histcard" hidden>
+          <div class="reshead">
+            <h3 style="flex:1">Session log</h3>
+            <button class="iconbtn" id="histclear" title="clear log">clear</button>
+          </div>
+          <div id="histlist"></div>
+        </div>
+      </div>
+      <div id="rightcol">
+        <div class="card" id="diagcard">
+          <div id="diagram"></div>
+          <div class="svgcap" id="diagcap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer id="status">
+  <span id="stdot" title="server connection"></span>
+  <span id="stinfo">connecting…</span>
+  <span id="clicmd" title="click to copy the CLI equivalent"></span>
+  <span><span class="kbd">⌘K</span> <span class="kbd">/</span> <span class="kbd">h</span> <span class="kbd">l</span> <span class="kbd">?</span></span>
+</footer>
+
+<div class="overlay" id="palov" hidden>
+  <div id="palette" role="dialog" aria-label="command palette">
+    <input id="palinput" placeholder="jump to calculator…" autocomplete="off" spellcheck="false">
+    <div id="pallist"></div>
+  </div>
+</div>
+<div class="overlay" id="helpov" hidden>
+  <div id="helpbox" role="dialog" aria-modal="true" aria-label="keyboard shortcuts" tabindex="-1">
+    <h3>Keyboard</h3>
+    <table>
+      <tr><td><span class="kbd">⌘K</span> / <span class="kbd">^K</span></td><td>command palette</td></tr>
+      <tr><td><span class="kbd">/</span></td><td>focus the sidebar filter</td></tr>
+      <tr><td><span class="kbd">↑</span> <span class="kbd">↓</span> <span class="kbd">⏎</span></td><td>navigate the filtered list / palette</td></tr>
+      <tr><td><span class="kbd">⏎</span> in a field</td><td>calculate now (auto-compute runs as you type)</td></tr>
+      <tr><td><span class="kbd">h</span></td><td>back to the hub</td></tr>
+      <tr><td><span class="kbd">l</span></td><td>live schematic timeline</td></tr>
+      <tr><td><span class="kbd">Esc</span></td><td>close overlays</td></tr>
+      <tr><td><span class="kbd">?</span></td><td>this help</td></tr>
+    </table>
+    <p class="hint" style="margin-top:12px">Engineering notation is accepted everywhere: 4k7, 100n, 35u, 2M2, 1e-7, 4R7.
+       Click any result value to copy the exact number. Share the URL to reproduce a computation.</p>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* @pure-begin — mirrors of calc/si.py + helpers, kept DOM-free for tests */
+const PREFIXABLE = new Set(["Ω","V","A","W","F","H","Hz","s","m"]);
+const STEPS = [[1e9,"G"],[1e6,"M"],[1e3,"k"],[1,""],[1e-3,"m"],[1e-6,"µ"],[1e-9,"n"],[1e-12,"p"]];
+const MULT = {p:1e-12,n:1e-9,u:1e-6,"µ":1e-6,m:1e-3,k:1e3,K:1e3,M:1e6,G:1e9,R:1,r:1};
+const ENG_RX = /^([0-9]*\.?[0-9]+)\s*([pnuµmkKMGRr])([0-9]*)$/;
+
+/* parse "4k7" | "100n" | "1e-7" -> number; "" -> null; junk -> NaN */
+function parseEng(s){
+  s = String(s).trim();
+  if (s === "") return null;
+  const f = Number(s);
+  if (Number.isFinite(f)) return f;
+  const m = ENG_RX.exec(s);
+  if (!m) return NaN;
+  return parseFloat(m[1] + (m[3] ? "." + m[3] : "")) * MULT[m[2]];
+}
+
+/* CLI-parity formatting: SI prefix only for bare base units (si.fmt_eng),
+   %.6g for everything else (cli._cmd_calc). */
+function fmtEng(v, unit){
+  if (typeof v !== "number" || !Number.isFinite(v))
+    return String(v) + (unit ? " " + unit : "");
+  if (!unit) return Number(v.toPrecision(6)).toString();
+  if (!PREFIXABLE.has(unit)) return Number(v.toPrecision(6)) + " " + unit;
+  if (v === 0) return "0 " + unit;
+  const a = Math.abs(v);
+  for (const [s,p] of STEPS)
+    if (a >= s) return Number((v/s).toPrecision(4)) + " " + p + unit;
+  return Number(v.toPrecision(4)) + " " + unit;
+}
+
+/* the typed-back engineering form of a number: 3.5e-5 -> "35u" (parses again) */
+function engInput(v){
+  if (typeof v !== "number" || !Number.isFinite(v) || v === 0) return String(v);
+  const a = Math.abs(v);
+  for (const [s,p] of STEPS)
+    if (a >= s) return Number((v/s).toPrecision(6)) + (p === "µ" ? "u" : p);
+  return String(v);
+}
+
+/* secondary representations for the hover tooltip */
+function altForms(v, unit){
+  const out = [];
+  if (unit === "m")  out.push(Number((v*1e3).toPrecision(6)) + " mm",
+                              Number((v/25.4e-6).toPrecision(6)) + " mil");
+  if (unit === "m²") out.push(Number((v*1e6).toPrecision(6)) + " mm²");
+  if (Number.isFinite(v) && v !== 0 && (Math.abs(v) >= 1e5 || Math.abs(v) < 1e-3))
+    out.push(v.toExponential(4) + (unit ? " " + unit : ""));
+  return out;
+}
+
+/* subsequence fuzzy match: returns {score, idx:[positions]} or null */
+function fuzzy(q, s){
+  q = q.toLowerCase(); s = s.toLowerCase();
+  let score = 0, i = 0, last = -2; const idx = [];
+  for (const ch of q){
+    const j = s.indexOf(ch, i);
+    if (j < 0) return null;
+    score += (j === last + 1 ? 3 : 1) + (j === 0 ? 2 : 0);
+    idx.push(j); last = j; i = j + 1;
+  }
+  return {score: score - s.length * 0.01, idx};
+}
+
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+                  .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+/* highlight matched character positions in already-escape-safe plain text */
+function hilite(text, idx){
+  let out = "", set = new Set(idx);
+  for (let i = 0; i < text.length; i++)
+    out += set.has(i) ? "<mark>" + esc(text[i]) + "</mark>" : esc(text[i]);
+  return out;
+}
+
+/* the CLI line that reproduces a computation */
+function cliLine(name, inputs){
+  const parts = ["akcli calc " + name];
+  for (const [k,v] of Object.entries(inputs)) if (v !== "") parts.push(k + "=" + v);
+  return parts.join(" ");
+}
+
+/* markdown export — mirrors cli._calc_md */
+function toMarkdown(doc){
+  const lines = ["### " + doc.title, "", "| result | value | note |", "|---|---|---|"];
+  for (const [k, cell] of Object.entries(doc.results)){
+    let shown;
+    const v = cell.value, unit = cell.unit || "";
+    if (typeof v === "number") shown = fmtEng(v, unit);
+    else if (Array.isArray(v))
+      shown = v.length && typeof v[0] === "object"
+        ? v.length + " entries (use --json)" : v.join("; ");
+    else shown = (String(v) + " " + unit).trim();
+    lines.push("| " + k + " | " + shown + " | " + (cell.note || "") + " |");
+  }
+  lines.push("", "*Reference: " + doc.reference + "*");
+  return lines.join("\n");
+}
+/* @pure-end */
+
+/* ============================ state ================================== */
+const $ = id => document.getElementById(id);
+let REG = null, META = {count: 0, version: ""}, current = null;
+let runSeq = 0, runCtrl = null, debTimer = null, lastDoc = null;
+const prevNums = {};            // calc -> {resultKey: number} for delta chips
+let kbdIdx = -1;                // sidebar keyboard cursor
+function store(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch(e){ return d; } }
+function save(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+function allCalcs(){ return Object.values(REG.groups).flat(); }
+function byName(n){ return allCalcs().find(c => c.name === n); }
+
+/* ============================ theme ================================== */
+function applyTheme(t){
+  document.documentElement.dataset.theme = t;
+  save("akcli-theme", t);
+}
+applyTheme(store("akcli-theme", null) ||
+  (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+$("themebtn").onclick = () =>
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+
+/* ============================ toast ================================== */
+let toastT = null;
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1400);
+}
+function copyText(text, msg){
+  navigator.clipboard.writeText(text).then(() => toast(msg || "copied"),
+                                           () => toast("copy failed"));
+}
+
+/* ============================ boot =================================== */
+async function boot(){
+  try {
+    const r = await fetch("/api/list");
+    REG = await r.json();
+    META = REG.meta || META;
+    setStatus(true);
+  } catch (e) { setStatus(false); setTimeout(boot, 3000); return; }
+  $("sfcount").textContent = allCalcs().length + " calculators";
+  $("stinfo").textContent = allCalcs().length + " calculators · akcli " + (META.version || "");
+  $("livelink").hidden = !META.watching;
+  if (META.watching) $("livelink").textContent = "▶ live: " + META.watching;
+  renderSide(); renderHome();
+  routeFromHash(true);
+  addEventListener("hashchange", () => routeFromHash(false));
+}
+function setStatus(ok){
+  $("stdot").classList.toggle("off", !ok);
+  if (!ok) $("stinfo").textContent = "server unreachable — restart `akcli view calc`";
+}
+
+/* hash routing: #calc=<name>&k=v… selects, fills, runs (when valid).
+   Own updates go through replaceState (below), which never fires
+   hashchange — so this only reacts to user/browser navigation. */
+function routeFromHash(isBoot){
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const c = byName(h.get("calc"));
+  if (!c) { showHome(); return; }
+  select(c, {noHash: true});
+  document.querySelectorAll("#form [data-param]").forEach(el => {
+    const v = h.get(el.dataset.param);
+    if (v !== null) { el.value = v; refreshParse(el); }
+  });
+  updateCliMirror();
+  if (formValid()) run();
+}
+function setHash(qs){
+  history.replaceState(null, "", "#" + qs);
+}
+
+/* ============================ sidebar ================================ */
+function pins(){ return store("akcli-pins", []); }
+function pinToggle(name){
+  const p = pins(), i = p.indexOf(name);
+  if (i >= 0) p.splice(i, 1); else p.push(name);
+  save("akcli-pins", p);
+  renderSide(); updatePinBtn();
+}
+function noteRecent(name){
+  const r = store("akcli-recent", []).filter(n => n !== name);
+  r.unshift(name); save("akcli-recent", r.slice(0, 8));
+}
+function collapsed(){ return store("akcli-collapsed", []); }
+function groupToggle(g){
+  const c = collapsed(), i = c.indexOf(g);
+  if (i >= 0) c.splice(i, 1); else c.push(g);
+  save("akcli-collapsed", c); renderSide();
+}
+function calcBtn(c, matchIdx){
+  const b = document.createElement("button");
+  b.className = "calc-btn" + (current && current.name === c.name ? " active" : "");
+  b.dataset.name = c.name;
+  b.setAttribute("role", "listitem");
+  b.innerHTML = (pins().includes(c.name) ? '<span class="pin">★</span>' : "") +
+                (matchIdx ? hilite(c.name, matchIdx) : esc(c.name));
+  b.title = c.title;
+  b.onclick = () => select(c);
+  return b;
+}
+function renderSide(){
+  const q = $("filter").value.trim();
+  const box = $("calclist");
+  box.innerHTML = ""; kbdIdx = -1;
+  if (!q){
+    const pinned = pins().map(byName).filter(Boolean);
+    const recent = store("akcli-recent", []).map(byName)
+                   .filter(c => c && !pins().includes(c.name)).slice(0, 5);
+    for (const [label, list] of [["★ pinned", pinned], ["recent", recent]]){
+      if (!list.length) continue;
+      const h = document.createElement("div");
+      h.className = "group-h"; h.textContent = label;
+      box.appendChild(h);
+      list.forEach(c => box.appendChild(calcBtn(c)));
+    }
+  }
+  for (const [group, calcs] of Object.entries(REG.groups)){
+    let hits = calcs.map(c => {
+      if (!q) return {c, idx: null};
+      const m = fuzzy(q, c.name) || fuzzy(q, c.title);
+      return m ? {c, idx: fuzzy(q, c.name) ? m.idx : null, score: m.score} : null;
+    }).filter(Boolean);
+    if (!hits.length) continue;
+    if (q) hits.sort((a,b) => (b.score||0) - (a.score||0));
+    const isClosed = !q && collapsed().includes(group);
+    const h = document.createElement("button");
+    h.className = "group-h" + (isClosed ? " closed" : "");
+    h.innerHTML = '<span class="tw">▼</span>' + esc(group) +
+                  '<span class="n">' + hits.length + "</span>";
+    h.onclick = () => groupToggle(group);
+    box.appendChild(h);
+    if (!isClosed) hits.forEach(({c, idx}) => box.appendChild(calcBtn(c, idx)));
+  }
+}
+/* keyboard cursor over the visible calc buttons */
+function sideButtons(){ return [...document.querySelectorAll("#calclist .calc-btn")]; }
+function moveKbd(delta){
+  const btns = sideButtons();
+  if (!btns.length) return;
+  kbdIdx = Math.max(0, Math.min(btns.length - 1, kbdIdx + delta));
+  btns.forEach((b,i) => b.classList.toggle("kbd-focus", i === kbdIdx));
+  btns[kbdIdx].scrollIntoView({block: "nearest"});
+}
+$("filter").addEventListener("input", renderSide);
+$("filter").addEventListener("keydown", e => {
+  if (e.key === "ArrowDown"){ e.preventDefault(); moveKbd(1); }
+  else if (e.key === "ArrowUp"){ e.preventDefault(); moveKbd(-1); }
+  else if (e.key === "Enter"){
+    const btns = sideButtons();
+    (btns[kbdIdx] || btns[0])?.click();
+  } else if (e.key === "Escape"){ $("filter").value = ""; renderSide(); $("filter").blur(); }
+});
+
+/* ============================ home =================================== */
+function renderHome(){
+  const el = $("home");
+  let html = '<h2>akcli <em>calc bench</em></h2>' +
+    '<p class="lead">' + allCalcs().length + ' standards-cited calculators — every result carries its ' +
+    'formal reference. Pick one, or hit <span class="kbd">⌘K</span>.</p>';
+  for (const [group, calcs] of Object.entries(REG.groups)){
+    html += '<div class="hgroup"><h4>' + esc(group) + '</h4><div class="hgrid">';
+    for (const c of calcs)
+      html += '<button class="tile" data-name="' + esc(c.name) + '">' +
+              '<span class="n">' + esc(c.name) + '</span>' +
+              '<span class="d">' + esc(c.title) + '</span></button>';
+    html += "</div></div>";
+  }
+  el.innerHTML = html;
+  el.querySelectorAll(".tile").forEach(t => t.onclick = () => select(byName(t.dataset.name)));
+}
+function showHome(){
+  current = null;
+  $("home").hidden = false; $("page").hidden = true;
+  setHash(""); renderSide(); updateCliMirror();
+}
+/* clicking the CALC tab while already here returns to the launcher */
+$("tabcalc").onclick = e => { e.preventDefault(); showHome(); };
+
+/* overlay focus management: remember the opener, restore focus on close */
+let lastFocus = null;
+function openHelp(){ lastFocus = document.activeElement; $("helpov").hidden = false; $("helpbox").focus(); }
+function closeHelp(){
+  if ($("helpov").hidden) return;
+  $("helpov").hidden = true;
+  if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
+  lastFocus = null;
+}
+$("helpbtn").onclick = () => $("helpov").hidden ? openHelp() : closeHelp();
+
+/* ============================ form =================================== */
+function select(c, opts = {}){
+  if (!c) return;
+  current = c; lastDoc = null;
+  $("home").hidden = true; $("page").hidden = false;
+  $("title").innerHTML = '<span class="cname">' + esc(c.name) + "</span> — " + esc(c.title);
+  $("ref").innerHTML = "Reference: <b>" + esc(c.reference) + "</b>";
+  $("notes").textContent = c.notes || "";
+  $("error").textContent = "";
+  $("rescard").hidden = true;
+  $("results").innerHTML = "";
+  $("opsbtn").hidden = !c.mappable;
+  const f = $("form");
+  f.innerHTML = "";
+  for (const p of c.params){
+    const row = document.createElement("div"); row.className = "prow";
+    const lab = document.createElement("label");
+    lab.innerHTML = esc(p.name) + (p.required ? ' <span class="req">*</span>' : "");
+    lab.title = p.help;
+    row.appendChild(lab);
+    let inp;
+    if (p.choices.length){
+      inp = document.createElement("select");
+      if (p.required && !p.choices.includes(p.default)){
+        const o = document.createElement("option");
+        o.value = ""; o.textContent = "—"; inp.appendChild(o);
+      }
+      for (const ch of p.choices){
+        const o = document.createElement("option");
+        o.value = ch; o.textContent = ch;
+        if (ch === p.default) o.selected = true;
+        inp.appendChild(o);
+      }
+      inp.onchange = () => { updateCliMirror(); if (formValid()) run(); };
+    } else {
+      inp = document.createElement("input");
+      inp.autocomplete = "off"; inp.spellcheck = false;
+      inp.placeholder = p.default !== null && p.default !== ""
+        ? (typeof p.default === "number" && !p.text
+           ? engInput(p.default) : String(p.default))
+        : (p.required ? "required" : "");
+      inp.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); run(); } };
+      inp.oninput = () => {
+        refreshParse(inp); updateCliMirror();
+        clearTimeout(debTimer);
+        debTimer = setTimeout(() => { if (formValid()) run(); }, 320);
+      };
+    }
+    inp.dataset.param = p.name;
+    inp.dataset.text = p.text ? "1" : "";
+    inp.setAttribute("aria-label", p.name);
+    row.appendChild(inp);
+    const u = document.createElement("span");
+    u.className = "unit"; u.textContent = p.unit || "";
+    row.appendChild(u);
+    f.appendChild(row);
+    const meta = document.createElement("div"); meta.className = "pmeta";
+    meta.innerHTML = '<span class="help" title="' + esc(p.help) + '">' + esc(p.help) +
+                     '</span><span class="parsed" data-parsed-for="' + esc(p.name) + '"></span>';
+    f.appendChild(meta);
+  }
+  drawDiagram(c.name, {});
+  renderSide(); updatePinBtn(); renderHistory(); updateCliMirror();
+  if (!opts.noHash) setHash(new URLSearchParams({calc: c.name}).toString());
+  const first = f.querySelector("input,select");
+  if (first && !opts.noFocus) first.focus();
+}
+
+/* live engineering-notation feedback under each numeric field */
+function refreshParse(inp){
+  const tag = document.querySelector('[data-parsed-for="' + CSS.escape(inp.dataset.param) + '"]');
+  if (!tag) return;
+  if (inp.dataset.text || inp.tagName === "SELECT") return;
+  const p = current.params.find(x => x.name === inp.dataset.param);
+  const v = parseEng(inp.value);
+  inp.classList.toggle("bad", Number.isNaN(v));
+  if (v === null){ tag.textContent = ""; tag.className = "parsed"; return; }
+  if (Number.isNaN(v)){ tag.textContent = "unparseable"; tag.className = "parsed bad"; return; }
+  tag.className = "parsed";
+  const pretty = fmtEng(v, p ? p.unit : "");
+  tag.textContent = String(v) === inp.value.trim() && !p?.unit ? "" : "= " + pretty;
+}
+function formValid(){
+  if (!current) return false;
+  for (const el of document.querySelectorAll("#form [data-param]")){
+    const p = current.params.find(x => x.name === el.dataset.param);
+    if (!p) continue;
+    if (el.value === ""){ if (p.required) return false; continue; }
+    if (el.tagName !== "SELECT" && !p.text && Number.isNaN(parseEng(el.value))) return false;
+  }
+  return true;
+}
+function collectInputs(){
+  const inputs = {};
+  document.querySelectorAll("#form [data-param]").forEach(el => {
+    if (el.value !== "") inputs[el.dataset.param] = el.value;
+  });
+  return inputs;
+}
+$("resetbtn").onclick = () => {
+  document.querySelectorAll("#form [data-param]").forEach(el => {
+    if (el.tagName === "SELECT"){
+      const p = current.params.find(x => x.name === el.dataset.param);
+      el.value = p && p.choices.includes(p.default) ? p.default : el.options[0].value;
+    } else { el.value = ""; refreshParse(el); el.classList.remove("bad"); }
+  });
+  $("error").textContent = ""; updateCliMirror();
+};
+$("runbtn").onclick = () => run();
+$("printbtn").onclick = () => print();
+$("pinbtn").onclick = () => current && pinToggle(current.name);
+$("linkbtn").onclick = () => {
+  if (!current) return;
+  const h = new URLSearchParams({calc: current.name, ...collectInputs()});
+  copyText(location.origin + location.pathname + "#" + h.toString(), "link copied");
+};
+function updatePinBtn(){
+  if (!current) return;
+  $("pinbtn").textContent = pins().includes(current.name) ? "★ pinned" : "☆ pin";
+  $("pinbtn").classList.toggle("on", pins().includes(current.name));
+}
+function updateCliMirror(){
+  const el = $("clicmd");
+  if (!current){ el.innerHTML = ""; el.onclick = null; return; }
+  const line = cliLine(current.name, collectInputs());
+  el.innerHTML = "$ <b>" + esc(line) + "</b>";
+  el.onclick = () => copyText(line, "CLI command copied");
+}
+
+/* ============================ run ==================================== */
+async function run(){
+  if (!current) return;
+  clearTimeout(debTimer);
+  /* client-side required check with a visible nudge */
+  for (const p of current.params){
+    if (!p.required) continue;
+    const el = document.querySelector('#form [data-param="' + CSS.escape(p.name) + '"]');
+    if (el && el.value === ""){
+      el.classList.remove("flash-req"); void el.offsetWidth; el.classList.add("flash-req");
+      el.focus();
+      $("error").textContent = "missing required parameter “" + p.name + "”";
+      return;
+    }
+  }
+  const inputs = collectInputs();
+  const params = new URLSearchParams({name: current.name, ...inputs});
+  noteRecent(current.name);
+  setHash(new URLSearchParams({calc: current.name, ...inputs}).toString());
+  const seq = ++runSeq;
+  if (runCtrl) runCtrl.abort();
+  runCtrl = new AbortController();
+  const t0 = performance.now();
+  let doc;
+  try {
+    const r = await fetch("/api/run?" + params.toString(), {signal: runCtrl.signal});
+    doc = await r.json();
+    setStatus(true);
+  } catch (e) {
+    if (e.name !== "AbortError") setStatus(false);
+    return;
+  }
+  if (seq !== runSeq) return;                    // a newer run superseded us
+  const ms = performance.now() - t0;
+  if (doc.error){
+    $("error").textContent = "ERROR: " + doc.error;
+    markErrorField(doc.error);
+    return;
+  }
+  $("error").textContent = "";
+  document.querySelectorAll("#form .bad").forEach(el => el.classList.remove("bad"));
+  lastDoc = doc;
+  renderResults(doc, ms);
+  pushHistory(current.name, inputs, doc);
+  drawDiagram(current.name, {inputs: doc.inputs, results: doc.results});
+}
+/* highlight the offending field when the server names it */
+function markErrorField(msg){
+  if (!current) return;
+  for (const p of current.params){
+    if (msg.includes("'" + p.name + "'") || msg.startsWith(p.name + ":")){
+      const el = document.querySelector('#form [data-param="' + CSS.escape(p.name) + '"]');
+      if (el){ el.classList.add("bad"); el.focus(); }
+      return;
+    }
+  }
+}
+
+/* ============================ results ================================ */
+const BAND_COLORS = {black:"#111",brown:"#6b3d1f",red:"#c0392b",orange:"#e67e22",
+  yellow:"#f1c40f",green:"#27ae60",blue:"#2980b9",violet:"#8e44ad",grey:"#95a5a6",
+  white:"#ecf0f1",gold:"#c9a227",silver:"#bdc3c7",pink:"#e8a0bf"};
+let subtables = {};              // id -> {cols, rows, sortCol, dir}
+
+function renderResults(doc, ms){
+  $("rescard").hidden = false;
+  $("restime").textContent = fmtEng(ms/1000, "s") + " · " +
+    new Date().toLocaleTimeString([], {hour12: false});
+  subtables = {};
+  const prev = prevNums[doc.calc] || {};
+  const nums = {};
+  let html = "<table><tr><th>result</th><th>value</th><th>note</th></tr>";
+  let row = 0;
+  for (const [k, cell] of Object.entries(doc.results)){
+    let val;
+    const v = cell.value;
+    if (Array.isArray(v)) val = renderList(k, v);
+    else if (typeof v === "boolean")
+      val = v ? '<span class="chip ok">✓ yes</span>' : '<span class="chip err">✗ NO</span>';
+    else if (typeof v === "number"){
+      nums[k] = v;
+      const alts = [String(v), ...altForms(v, cell.unit)];
+      val = '<span class="num" data-copy="' + esc(String(v)) + '" title="' +
+            esc(alts.join("\n") + "\nclick to copy") + '">' +
+            esc(fmtEng(v, cell.unit)) + "</span>" + deltaChip(prev[k], v);
+    } else val = esc((String(v) + " " + (cell.unit||"")).trim());
+    html += '<tr style="animation-delay:' + (row++ * 22) + 'ms">' +
+            '<td class="rk">' + esc(k) + '</td><td class="val">' + val +
+            '</td><td class="note">' + esc(cell.note || "") + "</td></tr>";
+  }
+  html += "</table>";
+  $("results").innerHTML = html;
+  prevNums[doc.calc] = nums;
+  $("results").querySelectorAll(".num").forEach(el =>
+    el.onclick = () => copyText(el.dataset.copy, "value copied"));
+  $("results").querySelectorAll(".subtable th").forEach(th =>
+    th.onclick = () => sortSub(th.dataset.tid, th.dataset.col));
+}
+function deltaChip(prev, v){
+  if (typeof prev !== "number" || prev === v || prev === 0 || !Number.isFinite(prev)) return "";
+  const pct = (v - prev) / Math.abs(prev) * 100;
+  if (Math.abs(pct) < 0.005) return "";
+  const up = pct > 0;
+  const body = Math.abs(pct) >= 1000 && v / prev > 0
+    ? "×" + (v / prev).toPrecision(3)                 // huge swings read as a ratio
+    : (up ? "+" : "−") + Math.abs(pct).toPrecision(3) + "%";
+  return '<span class="delta" title="vs previous run">' + (up ? "▲" : "▼") + body + "</span>";
+}
+function renderList(key, list){
+  if (!list.length) return "—";
+  if (typeof list[0] !== "object"){
+    return list.map(x => {
+      const sw = BAND_COLORS[x] ? '<span class="sw" style="background:' + BAND_COLORS[x] + '"></span>' : "";
+      return '<span class="lchip">' + sw + esc(x) + "</span>";
+    }).join("");
+  }
+  const tid = "st-" + key.replace(/\W/g, "_");
+  subtables[tid] = {cols: Object.keys(list[0]), rows: list, sortCol: null, dir: 1};
+  return subHtml(tid);
+}
+function subHtml(tid){
+  const t = subtables[tid];
+  let h = '<table class="subtable" id="' + tid + '"><tr>' + t.cols.map(c =>
+    '<th data-tid="' + tid + '" data-col="' + esc(c) + '" title="sort">' + esc(c) +
+    (t.sortCol === c ? ' <span class="arr">' + (t.dir > 0 ? "▲" : "▼") + "</span>" : "") +
+    "</th>").join("") + "</tr>";
+  for (const rw of t.rows)
+    h += "<tr>" + t.cols.map(c => "<td>" +
+      esc(typeof rw[c] === "number" ? Number(rw[c].toPrecision(6)) : rw[c]) +
+      "</td>").join("") + "</tr>";
+  return h + "</table>";
+}
+function sortSub(tid, col){
+  const t = subtables[tid];
+  if (!t) return;
+  t.dir = t.sortCol === col ? -t.dir : 1;
+  t.sortCol = col;
+  t.rows = [...t.rows].sort((a,b) => {
+    const x = a[col], y = b[col];
+    return (typeof x === "number" && typeof y === "number"
+      ? x - y : String(x).localeCompare(String(y))) * t.dir;
+  });
+  const node = document.getElementById(tid);
+  const tmp = document.createElement("div"); tmp.innerHTML = subHtml(tid);
+  node.replaceWith(tmp.firstChild);
+  document.getElementById(tid).querySelectorAll("th").forEach(th =>
+    th.onclick = () => sortSub(th.dataset.tid, th.dataset.col));
+}
+
+/* copy / export toolbar */
+$("cpmd").onclick   = () => lastDoc && copyText(toMarkdown(lastDoc), "markdown copied");
+$("cpjson").onclick = () => lastDoc && copyText(JSON.stringify(lastDoc, null, 1), "JSON copied");
+$("cpcli").onclick  = () => lastDoc && copyText(cliLine(lastDoc.calc,
+  Object.fromEntries(Object.entries(lastDoc.inputs).map(([k,v]) => [k, String(v)]))),
+  "CLI command copied");
+$("opsbtn").onclick = async () => {
+  if (!current) return;
+  const params = new URLSearchParams({name: current.name, ...collectInputs()});
+  try {
+    const r = await fetch("/api/ops?" + params.toString());
+    const doc = await r.json();
+    if (doc.error){ toast(doc.error); return; }
+    const blob = new Blob([JSON.stringify(doc, null, 1) + "\n"], {type: "application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = current.name + "-ops.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast("op-list downloaded — edit coordinates, then `akcli plan`");
+  } catch (e) { toast("op-list export failed"); }
+};
+
+/* ============================ history ================================ */
+function pushHistory(name, inputs, doc){
+  const h = store("akcli-history", []);
+  const headKey = Object.keys(doc.results).find(k => typeof doc.results[k].value === "number");
+  const head = headKey
+    ? headKey + " = " + fmtEng(doc.results[headKey].value, doc.results[headKey].unit) : "";
+  const entry = {c: name, p: inputs, t: Date.now(), r: head};
+  if (h.length && h[0].c === name && JSON.stringify(h[0].p) === JSON.stringify(inputs)){
+    h[0] = entry;                       // same computation re-run: refresh in place
+  } else h.unshift(entry);
+  save("akcli-history", h.slice(0, 50));
+  renderHistory();
+}
+function renderHistory(){
+  const h = store("akcli-history", []);
+  $("histcard").hidden = !h.length;
+  const box = $("histlist");
+  box.innerHTML = "";
+  for (const e of h.slice(0, 14)){
+    const b = document.createElement("button");
+    b.className = "hrow";
+    const ts = new Date(e.t).toLocaleTimeString([], {hour12: false});
+    b.innerHTML = '<span class="ht">' + ts + '</span><span class="hc">' + esc(e.c) +
+      '</span><span class="hp">' +
+      esc(Object.entries(e.p).map(([k,v]) => k + "=" + v).join(" ")) +
+      '</span><span class="hr">' + esc(e.r || "") + "</span>";
+    b.onclick = () => restoreHistory(e);
+    box.appendChild(b);
+  }
+}
+function restoreHistory(e){
+  const c = byName(e.c);
+  if (!c) return;
+  select(c, {noFocus: true});
+  document.querySelectorAll("#form [data-param]").forEach(el => {
+    const v = e.p[el.dataset.param];
+    if (el.tagName === "SELECT"){
+      const p = c.params.find(x => x.name === el.dataset.param);
+      el.value = v ?? (p && p.choices.includes(p.default) ? p.default : el.options[0].value);
+    } else { el.value = v ?? ""; refreshParse(el); }
+  });
+  updateCliMirror();
+  run();
+}
+$("histclear").onclick = () => { save("akcli-history", []); renderHistory(); };
+
+/* ============================ palette ================================ */
+let palSel = 0, palRows = [];
+function openPalette(){
+  lastFocus = document.activeElement;
+  $("palov").hidden = false;
+  $("palinput").value = ""; palSel = 0;
+  renderPalette();
+  $("palinput").focus();
+}
+function closePalette(){
+  if ($("palov").hidden) return;
+  $("palov").hidden = true;
+  if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
+  lastFocus = null;
+}
+function renderPalette(){
+  const q = $("palinput").value.trim();
+  const recent = store("akcli-recent", []);
+  let scored = allCalcs().map(c => {
+    if (!q){
+      const ri = recent.indexOf(c.name);
+      return {c, score: ri >= 0 ? 100 - ri : 0, idx: null};
+    }
+    const mn = fuzzy(q, c.name), mt = fuzzy(q, c.title + " " + c.group);
+    if (!mn && !mt) return null;
+    return {c, score: Math.max(mn ? mn.score + 4 : -1, mt ? mt.score : -1),
+            idx: mn ? mn.idx : null};
+  }).filter(Boolean);
+  scored.sort((a,b) => b.score - a.score);
+  palRows = scored.slice(0, 12);
+  palSel = Math.min(palSel, Math.max(0, palRows.length - 1));
+  $("pallist").innerHTML = palRows.map((r, i) =>
+    '<div class="palrow' + (i === palSel ? " sel" : "") + '" data-i="' + i + '">' +
+    '<span class="pn">' + (r.idx ? hilite(r.c.name, r.idx) : esc(r.c.name)) + "</span>" +
+    '<span class="pt">' + esc(r.c.title) + "</span>" +
+    '<span class="pg">' + esc(r.c.group) + "</span></div>").join("") ||
+    '<div class="palrow"><span class="pt">no match</span></div>';
+  $("pallist").querySelectorAll(".palrow[data-i]").forEach(el => {
+    el.onclick = () => { closePalette(); select(palRows[+el.dataset.i].c); };
+    el.onmousemove = () => {
+      if (palSel !== +el.dataset.i){ palSel = +el.dataset.i; paintPalSel(); }
+    };
+  });
+}
+function paintPalSel(){
+  $("pallist").querySelectorAll(".palrow[data-i]").forEach(el =>
+    el.classList.toggle("sel", +el.dataset.i === palSel));
+  const sel = $("pallist").querySelector(".palrow.sel");
+  if (sel) sel.scrollIntoView({block: "nearest"});
+}
+$("palinput").addEventListener("input", () => { palSel = 0; renderPalette(); });
+$("palinput").addEventListener("keydown", e => {
+  if (e.key === "ArrowDown"){ e.preventDefault(); palSel = Math.min(palSel+1, palRows.length-1); paintPalSel(); }
+  else if (e.key === "ArrowUp"){ e.preventDefault(); palSel = Math.max(palSel-1, 0); paintPalSel(); }
+  else if (e.key === "Enter" && palRows[palSel]){ closePalette(); select(palRows[palSel].c); }
+  else if (e.key === "Escape") closePalette();
+});
+$("palov").addEventListener("mousedown", e => { if (e.target === $("palov")) closePalette(); });
+$("helpov").addEventListener("mousedown", e => { if (e.target === $("helpov")) closeHelp(); });
+
+/* ============================ global keys ============================ */
+document.addEventListener("keydown", e => {
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"){
+    e.preventDefault(); $("palov").hidden ? openPalette() : closePalette(); return;
+  }
+  if (e.key === "Escape"){ closePalette(); closeHelp(); return; }
+  if (typing) return;
+  if (e.key === "/"){ e.preventDefault(); $("filter").focus(); $("filter").select(); }
+  else if (e.key === "?"){ $("helpov").hidden ? openHelp() : closeHelp(); }
+  else if (e.key === "h" || e.key === "H"){ location.href = "/"; }
+  else if (e.key === "l" || e.key === "L"){ location.href = "/live"; }
+});
+
+/* ============================ SVG diagrams =========================== */
+/* Physical-style illustrations; colors ride the theme via CSS variables. */
+const C = { cu:"var(--dg-cu)", cuDark:"var(--dg-cu-dark)", board:"var(--dg-board)",
+            boardDark:"var(--dg-board-dark)", dim:"var(--dg-dim)", wire:"var(--dg-wire)",
+            body:"var(--dg-body)", plane:"var(--dg-plane)", hot:"var(--dg-hot)",
+            flame:"var(--dg-flame)", gold:"var(--dg-gold)", ink:"var(--dg-ink)",
+            panel:"var(--panel)", ok:"var(--ok)" };
+const DEFS = `<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${C.dim}"/></marker></defs>`;
+function dim(x1,y1,x2,y2,label,lx,ly){
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${C.dim}" stroke-width="1.3" marker-start="url(#ar)" marker-end="url(#ar)"/>
+          <text x="${lx}" y="${ly}" fill="${C.dim}" font-size="13" text-anchor="middle">${label}</text>`;
+}
+function svg(inner, w=420, h=250){ return `<svg viewBox="0 0 ${w} ${h}" width="${w}" role="img">${DEFS}${inner}</svg>`; }
+function rbox(x,y,w,h,label){ return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${C.wire}" stroke-width="1.6"/><text x="${x+w/2}" y="${y+h/2+4}" fill="${C.wire}" font-size="12" text-anchor="middle">${label}</text>`; }
+function wire(pts){ return `<polyline points="${pts}" fill="none" stroke="${C.wire}" stroke-width="1.6"/>`; }
+function gnd(x,y){ return `<line x1="${x}" y1="${y}" x2="${x}" y2="${y+8}" stroke="${C.wire}" stroke-width="1.6"/><line x1="${x-10}" y1="${y+8}" x2="${x+10}" y2="${y+8}" stroke="${C.wire}" stroke-width="2"/><line x1="${x-6}" y1="${y+12}" x2="${x+6}" y2="${y+12}" stroke="${C.wire}" stroke-width="2"/><line x1="${x-2}" y1="${y+16}" x2="${x+2}" y2="${y+16}" stroke="${C.wire}" stroke-width="2"/>`; }
+function label(x,y,t,anchor="middle",col=C.wire,size=13){ return `<text x="${x}" y="${y}" fill="${col}" font-size="${size}" text-anchor="${anchor}">${t}</text>`; }
+/* the one annotatable caption per diagram — ANNOT rewrites it with live values */
+function alabel(x,y,t,size=12){ return `<text id="an1" x="${x}" y="${y}" fill="${C.dim}" font-size="${size}" text-anchor="middle">${t}</text>`; }
+
+const traceXsec = svg(`
+  <rect x="40" y="120" width="340" height="60" fill="${C.board}" stroke="${C.boardDark}"/>
+  <polygon points="150,120 270,120 262,96 158,96" fill="${C.cu}" stroke="${C.cuDark}"/>
+  ${dim(150,86,270,86,"width W",210,78)}
+  ${dim(292,96,292,120,"H (Cu)",332,112)}
+  ${label(210,205,"substrate (FR-4)",'middle',C.dim,12)}
+  ${alabel(210,40,"I → heat: I = k·ΔT^0.44·A^0.725 (IPC-2221)")}`);
+
+const DIAGRAMS = {
+  trackwidth: traceXsec, trackcurrent: traceXsec, tracktemp: traceXsec,
+  clearance: svg(`
+    <rect x="30" y="90" width="360" height="90" fill="${C.board}" stroke="${C.boardDark}"/>
+    <rect x="70" y="110" width="110" height="50" rx="6" fill="${C.cu}" stroke="${C.cuDark}"/>
+    <rect x="240" y="110" width="110" height="50" rx="6" fill="${C.cu}" stroke="${C.cuDark}"/>
+    ${label(125,140,"V1","middle",C.ink,14)} ${label(295,140,"V2","middle",C.ink,14)}
+    ${dim(180,135,240,135,"",0,0)} ${label(210,124,"clearance",'middle',C.dim)}
+    ${alabel(210,205,"IPC-2221B Table 6-1 · columns B1–B4, A5–A7")}`),
+  via: svg(`
+    <rect x="30" y="70" width="200" height="120" fill="${C.board}" stroke="${C.boardDark}"/>
+    <rect x="100" y="70" width="12" height="120" fill="${C.cu}"/>
+    <rect x="148" y="70" width="12" height="120" fill="${C.cu}"/>
+    <rect x="88" y="62" width="84" height="9" fill="${C.cu}"/>
+    <rect x="88" y="189" width="84" height="9" fill="${C.cu}"/>
+    ${dim(112,150,148,150,"d",130,144)}
+    ${dim(250,62,250,198,"L",262,134)}
+    <circle cx="330" cy="110" r="42" fill="${C.cu}"/>
+    <circle cx="330" cy="110" r="28" fill="${C.panel}" stroke="${C.cuDark}"/>
+    ${dim(330,66,330,82,"T",348,76)}
+    ${label(330,180,"top view",'middle',C.dim,12)}
+    ${alabel(210,230,"barrel: R=ρL/A · L≈5.08h(ln(4h/d)+1) nH",11)}`),
+  microstrip: svg(`
+    <rect x="40" y="170" width="340" height="16" fill="${C.plane}"/>
+    <rect x="40" y="110" width="340" height="60" fill="${C.board}" stroke="${C.boardDark}"/>
+    <rect x="170" y="96" width="80" height="14" fill="${C.cu}" stroke="${C.cuDark}"/>
+    ${dim(170,86,250,86,"w",210,78)}
+    ${dim(300,110,300,170,"h",315,144)}
+    ${label(90,145,"εr",'middle',C.dim)}
+    ${alabel(210,220,"ground plane · Hammerstad–Jensen 1980")}`),
+  stripline: svg(`
+    <rect x="40" y="60" width="340" height="14" fill="${C.plane}"/>
+    <rect x="40" y="186" width="340" height="14" fill="${C.plane}"/>
+    <rect x="40" y="74" width="340" height="112" fill="${C.board}" stroke="${C.boardDark}"/>
+    <rect x="175" y="123" width="70" height="12" fill="${C.cu}" stroke="${C.cuDark}"/>
+    ${dim(175,112,245,112,"w",210,105)}
+    ${dim(310,74,310,186,"b",325,134)}
+    ${label(90,135,"εr",'middle',C.dim)}
+    ${alabel(210,232,"Cohn 1954 · exact (elliptic integrals)")}`),
+  coax: svg(`
+    <circle cx="210" cy="125" r="90" fill="${C.plane}"/>
+    <circle cx="210" cy="125" r="76" fill="${C.board}"/>
+    <circle cx="210" cy="125" r="22" fill="${C.cu}" stroke="${C.cuDark}"/>
+    ${dim(210,103,210,50,"",0,0)} ${label(232,72,"D",'middle',C.dim)}
+    ${dim(188,125,232,125,"d",210,118)}
+    ${alabel(210,235,"Z0 = (η0/2π√εr)·ln(D/d)")}`),
+  twinlead: svg(`
+    <circle cx="140" cy="120" r="34" fill="${C.cu}" stroke="${C.cuDark}"/>
+    <circle cx="280" cy="120" r="34" fill="${C.cu}" stroke="${C.cuDark}"/>
+    ${dim(140,170,280,170,"spacing D",210,192)}
+    ${dim(106,90,174,90,"d",140,80)}
+    ${alabel(210,230,"Z0 = (η0/π√εr)·acosh(D/d)")}`),
+  awg: svg(`
+    <circle cx="210" cy="120" r="70" fill="${C.cu}" stroke="${C.cuDark}" stroke-width="2"/>
+    ${label(210,126,"Cu","middle",C.ink,16)}
+    ${dim(140,120,280,120,"",0,0)} ${label(210,102,"d = 0.127·92^((36−n)/39) mm",'middle',C.dim,12)}
+    ${label(210,225,"ASTM B258-18",'middle',C.dim,12)}`),
+  fusing: svg(`
+    <rect x="40" y="120" width="340" height="50" fill="${C.board}" stroke="${C.boardDark}"/>
+    <rect x="60" y="108" width="120" height="14" fill="${C.cu}"/>
+    <rect x="240" y="108" width="120" height="14" fill="${C.cu}"/>
+    <path d="M180,115 Q195,95 210,115 Q225,135 240,115" stroke="${C.hot}" stroke-width="4" fill="none"/>
+    <path d="M195,88 q4,-10 0,-18 M210,92 q4,-10 0,-18 M225,88 q4,-10 0,-18" stroke="${C.flame}" stroke-width="2" fill="none"/>
+    ${label(210,205,"adiabatic fusing: Onderdonk 1928 · steady: Preece 1884",'middle',C.dim,12)}`),
+  wavelength: svg(`
+    <path d="M40,120 C70,50 100,50 130,120 S190,190 220,120 S280,50 310,120 S355,175 380,132" stroke="${C.wire}" stroke-width="2" fill="none"/>
+    ${dim(40,190,220,190,"λ",130,212)}
+    ${label(210,50,"v = c/√εr",'middle',C.dim)}`),
+  attenuator: svg(`
+    ${wire("30,100 140,100")} ${rbox(140,84,60,32,"R series")} ${wire("200,100 390,100")}
+    ${wire("110,100 110,140")} ${rbox(92,140,36,44,"R sh")} ${gnd(110,184)}
+    ${wire("310,100 310,140")} ${rbox(292,140,36,44,"R sh")} ${gnd(310,184)}
+    ${label(30,90,"in","start")} ${label(390,90,"out","end")}
+    ${label(210,230,"PI topology (TEE/bridged-tee mirror it)",'middle',C.dim,12)}`),
+  ohm: svg(`
+    ${wire("100,70 320,70 320,110")} ${rbox(302,110,36,50,"R")} ${wire("320,160 320,190 100,190 100,145")}
+    <line x1="85" y1="130" x2="115" y2="130" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="93" y1="145" x2="107" y2="145" stroke="${C.wire}" stroke-width="2"/>
+    ${wire("100,70 100,130")}
+    ${label(70,110,"V","middle")} ${label(360,138,"I→","start",C.dim)}
+    ${label(210,230,"V = I·R · P = V·I",'middle',C.dim,12)}`),
+  vdivider: svg(`
+    ${label(210,40,"Vin","middle")} ${wire("210,48 210,70")} ${rbox(192,70,36,52,"R top")}
+    ${wire("210,122 210,150")} <circle cx="210" cy="150" r="3.5" fill="${C.wire}"/>
+    ${wire("210,150 320,150")} ${label(330,155,"Vout","start")}
+    ${wire("210,150 210,170")} ${rbox(192,170,36,52,"R bot")} ${wire("210,222 210,232")} ${gnd(210,232)}
+    ${alabel(110,150,"Vout = Vin·Rb/(Rt+Rb)",11)}`),
+  led: svg(`
+    ${label(110,40,"Vs","middle")} ${wire("110,48 110,70")} ${rbox(92,70,36,52,"R")}
+    ${wire("110,122 110,150")}
+    <polygon points="98,150 122,150 110,172" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <line x1="98" y1="172" x2="122" y2="172" stroke="${C.wire}" stroke-width="1.8"/>
+    <path d="M124,158 l14,-10 M124,168 l14,-10" stroke="${C.gold}" stroke-width="1.6"/>
+    ${wire("110,172 110,196")} ${gnd(110,196)}
+    ${alabel(260,120,"R = (Vs − n·Vf)/If")}`),
+  rc: svg(`
+    ${label(60,105,"Vin","middle")} ${wire("75,100 140,100")} ${rbox(140,84,60,32,"R")}
+    ${wire("200,100 300,100")} <circle cx="260" cy="100" r="3.5" fill="${C.wire}"/>
+    ${label(315,105,"Vout","start")}
+    ${wire("260,100 260,140")}
+    <line x1="242" y1="140" x2="278" y2="140" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="242" y1="152" x2="278" y2="152" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(292,152,"C","start")}
+    ${wire("260,152 260,176")} ${gnd(260,176)}
+    ${alabel(210,230,"τ = RC · fc = 1/(2πRC)")}`),
+  lc: svg(`
+    ${wire("120,80 300,80")} ${wire("120,180 300,180")}
+    ${wire("160,80 160,110")} <path d="M160,110 a8,8 0 0 1 0,16 a8,8 0 0 1 0,16 a8,8 0 0 1 0,16" fill="none" stroke="${C.wire}" stroke-width="1.8"/> ${wire("160,158 160,180")} ${label(138,134,"L","middle")}
+    ${wire("260,80 260,122")}
+    <line x1="242" y1="122" x2="278" y2="122" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="242" y1="136" x2="278" y2="136" stroke="${C.wire}" stroke-width="2.5"/>
+    ${wire("260,136 260,180")} ${label(292,134,"C","start")}
+    ${alabel(210,225,"f0 = 1/(2π√LC) · Z = √(L/C)")}`),
+  regulator: svg(`
+    <rect x="120" y="60" width="150" height="80" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(150,105,"Vin","middle")} ${label(243,105,"Vout","middle")} ${label(196,128,"ADJ/FB","middle")}
+    ${wire("40,90 120,90")} <circle cx="60" cy="90" r="4" fill="none" stroke="${C.wire}"/>
+    ${wire("270,90 380,90")} <circle cx="360" cy="90" r="4" fill="none" stroke="${C.wire}"/>
+    ${wire("320,90 320,110")} ${rbox(302,110,36,44,"R1")} ${wire("320,154 320,170")}
+    <circle cx="320" cy="170" r="3.5" fill="${C.wire}"/>
+    ${wire("320,170 195,170 195,140")}
+    ${wire("320,170 320,180")} ${rbox(302,180,36,44,"R2")} ${wire("320,224 320,232")} ${gnd(320,232)}
+    ${label(90,200,"Vout = Vref(1+R2/R1)+Iadj·R2","start",C.dim,11)}`),
+  buck: svg(`
+    ${label(40,95,"Vin","middle")} ${wire("55,90 110,90")} ${rbox(110,74,52,32,"SW")}
+    ${wire("162,90 210,90")} <circle cx="210" cy="90" r="3.5" fill="${C.wire}"/>
+    <path d="M210,90 h10 a9,9 0 0 1 18,0 a9,9 0 0 1 18,0 a9,9 0 0 1 18,0 h10" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(247,72,"L","middle")}
+    ${wire("284,90 370,90")} ${label(385,95,"Vout","start")}
+    <polygon points="198,128 222,128 210,148" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <line x1="198" y1="148" x2="222" y2="148" stroke="${C.wire}" stroke-width="1.8"/>
+    ${wire("210,90 210,128")} ${wire("210,148 210,166")} ${gnd(210,166)}
+    ${wire("330,90 330,120")}
+    <line x1="312" y1="120" x2="348" y2="120" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="312" y1="132" x2="348" y2="132" stroke="${C.wire}" stroke-width="2.5"/>
+    ${wire("330,132 330,156")} ${gnd(330,156)} ${label(360,130,"C","start")}
+    ${label(210,225,"TI SLVA477B power stage",'middle',C.dim,12)}`),
+  boost: svg(`
+    ${label(40,95,"Vin","middle")}
+    <path d="M55,90 h20 a9,9 0 0 1 18,0 a9,9 0 0 1 18,0 a9,9 0 0 1 18,0 h20" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(103,72,"L","middle")}
+    ${wire("149,90 200,90")} <circle cx="200" cy="90" r="3.5" fill="${C.wire}"/>
+    <polygon points="230,78 230,102 252,90" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <line x1="252" y1="78" x2="252" y2="102" stroke="${C.wire}" stroke-width="1.8"/>
+    ${wire("200,90 230,90")} ${wire("252,90 370,90")} ${label(385,95,"Vout","start")}
+    ${rbox(182,120,36,44,"SW")} ${wire("200,90 200,120")} ${wire("200,164 200,178")} ${gnd(200,178)}
+    ${wire("320,90 320,120")}
+    <line x1="302" y1="120" x2="338" y2="120" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="302" y1="132" x2="338" y2="132" stroke="${C.wire}" stroke-width="2.5"/>
+    ${wire("320,132 320,156")} ${gnd(320,156)}
+    ${label(210,225,"TI SLVA372C power stage",'middle',C.dim,12)}`),
+  battery: svg(`
+    <line x1="120" y1="90" x2="120" y2="160" stroke="${C.wire}" stroke-width="3"/>
+    <line x1="136" y1="105" x2="136" y2="145" stroke="${C.wire}" stroke-width="2"/>
+    <line x1="152" y1="90" x2="152" y2="160" stroke="${C.wire}" stroke-width="3"/>
+    <line x1="168" y1="105" x2="168" y2="145" stroke="${C.wire}" stroke-width="2"/>
+    ${wire("168,125 240,125")} ${rbox(240,100,70,50,"load")}
+    ${wire("310,125 350,125 350,200 120,200 120,160")}
+    ${label(210,60,"t ≈ capacity·derating / I_avg",'middle',C.dim,12)}`),
+  "ne555-astable": svg(`
+    <rect x="150" y="60" width="110" height="130" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(205,130,"NE555","middle")}
+    ${label(120,40,"VCC","middle")} ${wire("120,48 120,60 90,60")}
+    ${wire("120,60 120,70")} ${rbox(102,70,36,36,"RA")}
+    ${wire("120,106 120,120 150,120")} ${label(143,116,"DIS","end",C.wire,10)}
+    ${wire("120,120 120,128")} ${rbox(102,128,36,36,"RB")}
+    ${wire("120,164 120,178 150,178")} ${label(143,174,"THR","end",C.wire,10)}
+    ${wire("120,178 120,196")}
+    <line x1="102" y1="196" x2="138" y2="196" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="102" y1="208" x2="138" y2="208" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(88,206,"C","end")} ${wire("120,208 120,224")} ${gnd(120,224)}
+    ${wire("260,110 330,110")} ${label(340,114,"OUT","start")}
+    ${label(205,240,"f = 1.44/((RA+2RB)·C)",'middle',C.dim,12)}`),
+  "ne555-mono": svg(`
+    <rect x="150" y="60" width="110" height="130" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(205,130,"NE555","middle")}
+    ${label(120,40,"VCC","middle")} ${wire("120,48 120,70")} ${rbox(102,70,36,44,"R")}
+    ${wire("120,114 120,140 150,140")} ${label(143,136,"DIS/THR","end",C.wire,9)}
+    ${wire("120,140 120,158")}
+    <line x1="102" y1="158" x2="138" y2="158" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="102" y1="170" x2="138" y2="170" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(88,168,"C","end")} ${wire("120,170 120,190")} ${gnd(120,190)}
+    ${wire("260,110 330,110")} ${label(340,114,"OUT","start")}
+    ${wire("90,220 150,220")} ${label(80,224,"TRIG","end",C.wire,10)} ${wire("150,220 150,190")}
+    ${label(205,240,"t = 1.1·R·C",'middle',C.dim,12)}`),
+  "opamp-gain": svg(`
+    <polygon points="170,70 170,170 280,120" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(184,100,"−","middle",C.wire,16)} ${label(184,150,"+","middle",C.wire,16)}
+    ${wire("120,95 170,95")} ${wire("120,145 170,145")} ${label(108,150,"in","end")}
+    ${wire("280,120 360,120")} ${label(372,124,"out","start")}
+    ${wire("140,95 140,50 205,50")} ${rbox(205,34,56,32,"Rf")} ${wire("261,50 320,50 320,120")}
+    ${wire("120,95 92,95")} ${rbox(36,79,56,32,"Rg/Rin")} ${wire("36,95 20,95 20,190 64,190")} ${gnd(64,190)}
+    ${label(210,230,"G = 1 + Rf/Rg (non-inv) · −Rf/Rin (inv)",'middle',C.dim,12)}`),
+  "i2c-pullup": svg(`
+    ${label(210,36,"VDD","middle")} ${wire("120,44 300,44")} ${wire("210,36 210,44")}
+    ${wire("140,44 140,60")} ${rbox(122,60,36,44,"Rp")} ${wire("140,104 140,130")}
+    ${wire("280,44 280,60")} ${rbox(262,60,36,44,"Rp")} ${wire("280,104 280,160")}
+    ${wire("40,130 380,130")} ${label(392,134,"SDA","start")}
+    ${wire("40,160 380,160")} ${label(392,164,"SCL","start")}
+    <circle cx="140" cy="130" r="3.5" fill="${C.wire}"/><circle cx="280" cy="160" r="3.5" fill="${C.wire}"/>
+    ${rbox(60,186,84,40,"master")} ${rbox(250,186,84,40,"device")}
+    ${wire("90,186 90,130")} ${wire("120,186 120,160")} ${wire("290,186 290,130")} ${wire("312,186 312,160")}
+    ${alabel(210,246,"NXP UM10204 §7.1: Rp window from VOL and t_r",11)}`),
+  "crystal-caps": svg(`
+    ${wire("100,90 170,90")} ${wire("250,90 320,90")}
+    ${label(88,94,"OSC_IN","end",C.wire,11)} ${label(332,94,"OSC_OUT","start",C.wire,11)}
+    <line x1="170" y1="70" x2="170" y2="110" stroke="${C.wire}" stroke-width="2.5"/>
+    <rect x="182" y="66" width="56" height="48" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <line x1="250" y1="70" x2="250" y2="110" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(210,94,"XTAL","middle",C.wire,11)}
+    ${wire("140,90 140,130")}
+    <line x1="122" y1="130" x2="158" y2="130" stroke="${C.wire}" stroke-width="2.5"/><line x1="122" y1="142" x2="158" y2="142" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(108,142,"C1","end")} ${wire("140,142 140,166")} ${gnd(140,166)}
+    ${wire("290,90 290,130")}
+    <line x1="272" y1="130" x2="308" y2="130" stroke="${C.wire}" stroke-width="2.5"/><line x1="272" y1="142" x2="308" y2="142" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(322,142,"C2","start")} ${wire("290,142 290,166")} ${gnd(290,166)}
+    ${label(210,225,"C1 = C2 = 2·(CL − Cstray) — ST AN2867",'middle',C.dim,12)}`),
+  thermal: svg(`
+    <rect x="150" y="150" width="120" height="26" fill="${C.body}" stroke="${C.plane}"/>
+    <rect x="175" y="128" width="70" height="22" fill="#7a4034" stroke="#a35"/>
+    <rect x="196" y="112" width="28" height="16" fill="${C.hot}"/>
+    <rect x="120" y="176" width="180" height="14" fill="${C.plane}"/>
+    ${Array.from({length:7},(_,i)=>`<rect x="${128+i*25}" y="190" width="9" height="34" fill="${C.plane}"/>`).join("")}
+    ${label(210,104,"junction (Tj)","middle",C.dim,11)}
+    ${dim(320,120,320,150,"θJC",352,132)} ${dim(320,152,320,176,"θCS",352,166)} ${dim(320,178,320,224,"θSA",352,202)}
+    ${label(210,246,"Tj = Ta + P·Σθ — JESD51",'middle',C.dim,12)}`),
+  rescolor: svg(`
+    ${wire("40,120 110,120")} ${wire("310,120 380,120")}
+    <rect x="110" y="96" width="200" height="48" rx="22" fill="#d8c49a" stroke="#a08a5c"/>
+    <rect id="band0" x="136" y="96" width="16" height="48" fill="#666"/>
+    <rect id="band1" x="164" y="96" width="16" height="48" fill="#666"/>
+    <rect id="band2" x="192" y="96" width="16" height="48" fill="#666"/>
+    <rect id="band3" x="220" y="96" width="16" height="48" fill="#666"/>
+    <rect id="band4" x="266" y="96" width="16" height="48" fill="#666"/>
+    ${label(210,200,"IEC 60062:2016 color bands",'middle',C.dim,12)}`),
+  smdcode: svg(`
+    <rect x="120" y="90" width="180" height="80" rx="4" fill="#111" stroke="#333"/>
+    <rect x="104" y="90" width="16" height="80" fill="#c9c9c9"/>
+    <rect x="300" y="90" width="16" height="80" fill="#c9c9c9"/>
+    <text id="smdtext" x="210" y="140" fill="#eee" font-size="30" text-anchor="middle" font-family="monospace">472</text>
+    ${label(210,210,"3/4-digit · R-decimal · EIA-96 (IEC 60062)",'middle',C.dim,12)}`),
+  galvanic: svg(`
+    <rect x="90" y="90" width="110" height="90" fill="#b87333" stroke="#8a5626"/>
+    <rect x="200" y="90" width="110" height="90" fill="#c0c0c0" stroke="#909090"/>
+    <text x="145" y="140" fill="${C.ink}" font-size="13" text-anchor="middle">metal 1</text>
+    <text x="255" y="140" fill="${C.ink}" font-size="13" text-anchor="middle">metal 2</text>
+    <path d="M195,60 q10,18 0,26 q-10,-8 0,-26" fill="#6ec6ff88" stroke="${C.dim}"/>
+    ${label(200,50,"electrolyte",'middle',C.dim,11)}
+    ${dim(120,215,280,215,"ΔV anodic index",200,238)}
+    ${label(200,205,"MIL-STD-889C",'middle',C.dim,11)}`),
+  reactance: svg(`
+    <line x1="120" y1="90" x2="120" y2="130" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="134" y1="90" x2="134" y2="130" stroke="${C.wire}" stroke-width="2.5"/>
+    ${wire("90,110 120,110")} ${wire("134,110 164,110")} ${label(127,155,"Xc = 1/(2πfC)","middle",C.dim,12)}
+    <path d="M250,110 a9,9 0 0 1 18,0 a9,9 0 0 1 18,0 a9,9 0 0 1 18,0" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${wire("225,110 250,110")} ${wire("304,110 330,110")} ${label(277,155,"Xl = 2πfL","middle",C.dim,12)}`),
+  diffpair: svg(`
+    <rect x="40" y="170" width="340" height="16" fill="${C.plane}"/>
+    <rect x="40" y="110" width="340" height="60" fill="${C.board}" stroke="${C.boardDark}"/>
+    <rect x="120" y="96" width="70" height="14" fill="${C.cu}" stroke="${C.cuDark}"/>
+    <rect x="230" y="96" width="70" height="14" fill="${C.cu}" stroke="${C.cuDark}"/>
+    ${dim(120,86,190,86,"w",155,78)} ${dim(190,120,230,120,"s",210,138)}
+    ${dim(340,110,340,170,"h",356,144)}
+    ${alabel(210,220,"Zdiff = 2·Z0·(1−0.48·e^(−0.96·s/h)) — IPC-2141A",11)}`),
+  lmatch: svg(`
+    ${label(45,105,"Rs","middle")} ${wire("60,100 130,100")}
+    <path d="M130,100 h8 a8,8 0 0 1 16,0 a8,8 0 0 1 16,0 a8,8 0 0 1 16,0 h8" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(162,80,"L (series, low-R side)","middle",C.wire,10)}
+    ${wire("194,100 360,100")} ${label(378,105,"Rl","middle")}
+    ${wire("280,100 280,132")}
+    <line x1="262" y1="132" x2="298" y2="132" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="262" y1="144" x2="298" y2="144" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(312,144,"C","start")} ${wire("280,144 280,168")} ${gnd(280,168)}
+    ${label(210,225,"Q = √(Rhi/Rlo − 1) — Pozar §5.1",'middle',C.dim,12)}`),
+  pimatch: svg(`
+    ${label(40,105,"Rs","middle")} ${wire("55,100 150,100")}
+    <path d="M150,100 h8 a8,8 0 0 1 16,0 a8,8 0 0 1 16,0 a8,8 0 0 1 16,0 h8" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(182,80,"L","middle")}
+    ${wire("214,100 370,100")} ${label(385,105,"Rl","middle")}
+    ${[110,300].map(x=>`${wire(`${x},100 ${x},132`)}
+      <line x1="${x-18}" y1="132" x2="${x+18}" y2="132" stroke="${C.wire}" stroke-width="2.5"/>
+      <line x1="${x-18}" y1="144" x2="${x+18}" y2="144" stroke="${C.wire}" stroke-width="2.5"/>
+      ${wire(`${x},144 ${x},168`)} ${gnd(x,168)}`).join("")}
+    ${label(110,196,"C1","middle")} ${label(300,196,"C2","middle")}
+    ${label(210,235,"two L-sections via virtual R — Bowick ch.4",'middle',C.dim,11)}`),
+  "sallen-key": svg(`
+    ${wire("20,110 60,110")} ${rbox(60,94,44,32,"R1")} ${wire("104,110 140,110")}
+    <circle cx="140" cy="110" r="3" fill="${C.wire}"/> ${rbox(150,94,44,32,"R2")} ${wire("194,110 230,110")}
+    <polygon points="230,85 230,140 300,112" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(243,108,"+","middle",C.wire,14)} ${label(243,130,"−","middle",C.wire,14)}
+    ${wire("300,112 370,112")} ${label(382,116,"out","start")}
+    ${wire("140,110 140,60 340,60 340,112")}
+    <text x="188" y="50" fill="${C.wire}" font-size="11">C1 (to out)</text>
+    ${wire("212,110 212,146")}
+    <line x1="194" y1="146" x2="230" y2="146" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="194" y1="156" x2="230" y2="156" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(244,156,"C2","start",C.wire,11)} ${wire("212,156 212,176")} ${gnd(212,176)}
+    ${label(210,235,"fc = 1/(2πRC), Q = 1/(3−K) — SLOA024B",'middle',C.dim,11)}`),
+  shunt: svg(`
+    ${wire("30,100 150,100")} ${rbox(150,86,80,28,"R shunt")} ${wire("230,100 390,100")}
+    ${label(40,90,"I →","start",C.dim)}
+    ${wire("165,114 165,150 185,150")} ${wire("215,114 215,150 195,150")}
+    <polygon points="185,132 185,168 225,150" fill="none" stroke="${C.wire}" stroke-width="1.6" transform="rotate(90 205 150)"/>
+    ${label(205,205,"sense amp (Kelvin sense)","middle",C.dim,11)}
+    ${label(210,235,"R = Vfs/Imax · P = I²R (≥2× rating) — SBOA170",'middle',C.dim,11)}`),
+  "gate-drive": svg(`
+    ${rbox(60,84,70,52,"driver")} ${wire("130,110 170,110")} ${rbox(170,94,50,32,"Rg")}
+    ${wire("220,110 260,110")}
+    <line x1="260" y1="86" x2="260" y2="134" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="272" y1="80" x2="272" y2="140" stroke="${C.wire}" stroke-width="2.5"/>
+    ${wire("272,86 310,86 310,60")} ${wire("272,134 310,134 310,160")} ${gnd(310,160)}
+    ${label(330,60,"D","start")} ${label(240,80,"G","middle")}
+    ${label(210,225,"Ipk ≈ Qg/tsw · P = Qg·Vdrv·f — SLUA618A",'middle',C.dim,12)}`),
+  "rs485-bias": svg(`
+    ${label(60,40,"VCC","middle")} ${wire("60,48 60,66")} ${rbox(42,66,36,40,"Rup")}
+    ${wire("60,106 60,126")}
+    ${wire("30,126 390,126")} ${label(400,130,"A","start")}
+    ${wire("30,166 390,166")} ${label(400,170,"B","start")}
+    ${rbox(150,132,30,28,"120")} ${wire("165,126 165,132")} ${wire("165,160 165,166")}
+    ${rbox(330,132,30,28,"120")} ${wire("345,126 345,132")} ${wire("345,160 345,166")}
+    ${wire("60,166 60,186")} ${rbox(42,186,36,40,"Rdn")} ${wire("60,226 60,238")} ${gnd(60,238)}
+    ${label(210,225,"idle V_AB ≥ 200 mV — TIA-485-A / SLLA070D",'middle',C.dim,11)}`),
+  "can-termination": svg(`
+    ${wire("40,100 380,100")} ${label(392,104,"CANH","start",C.wire,11)}
+    ${wire("40,180 380,180")} ${label(392,184,"CANL","start",C.wire,11)}
+    ${wire("210,100 210,110")} ${rbox(192,110,36,26,"60")}
+    ${wire("210,136 210,144")} <circle cx="210" cy="140" r="3" fill="${C.wire}"/>
+    ${rbox(192,144,36,26,"60")} ${wire("210,170 210,180")}
+    ${wire("210,140 280,140 280,152")}
+    <line x1="262" y1="152" x2="298" y2="152" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="262" y1="162" x2="298" y2="162" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(312,162,"C","start")} ${wire("280,162 280,182")} ${gnd(280,182)}
+    ${label(210,235,"split termination — ISO 11898-2 §10",'middle',C.dim,12)}`),
+  ldo: svg(`
+    <rect x="140" y="70" width="140" height="70" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(210,108,"LDO","middle")} ${wire("40,90 140,90")} ${wire("280,90 380,90")}
+    ${label(55,80,"Vin","middle")} ${label(360,80,"Vout","middle")}
+    <path d="M180,60 q4,-12 0,-22 M210,62 q4,-12 0,-22 M240,60 q4,-12 0,-22" stroke="${C.flame}" stroke-width="2" fill="none"/>
+    ${label(210,175,"P = (Vin−Vout)·Iout + Vin·Iq","middle",C.dim,12)}
+    ${label(210,200,"Tj = Ta + P·θJA — JESD51",'middle',C.dim,12)}`),
+  hysteresis: svg(`
+    <polygon points="180,70 180,150 260,110" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${label(193,100,"+","middle",C.wire,14)} ${label(193,135,"−","middle",C.wire,14)}
+    ${wire("120,95 180,95")} ${wire("120,140 180,140")} ${label(105,144,"sig","end",C.wire,11)}
+    ${wire("260,110 360,110")} ${label(372,114,"out","start")}
+    ${wire("120,95 120,50 60,50")} ${rbox(24,34,36,32,"R1")} ${label(12,54,"VCC","end",C.wire,10)}
+    ${wire("120,95 120,170 92,170")} ${rbox(56,154,36,32,"R2")} ${wire("56,170 40,170 40,192 84,192")} ${gnd(84,192)}
+    ${wire("120,95 148,95 148,40 320,40 320,110")} ${rbox(220,26,44,28,"Rh")}
+    ${label(210,235,"VT± from the 3-R node — TI SLVA954",'middle',C.dim,12)}`),
+  tvs: svg(`
+    ${wire("40,90 380,90")} ${label(50,78,"line","start",C.dim,11)}
+    ${wire("210,90 210,116")}
+    <polygon points="196,116 224,116 210,142" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <path d="M196,142 h28 M192,142 l-6,8 M224,142 l6,-8" stroke="${C.wire}" stroke-width="1.8" fill="none"/>
+    ${wire("210,150 210,172")} ${gnd(210,172)}
+    ${label(258,132,"TVS","start")}
+    <path d="M60,60 l14,-22 h-8 l16,-20" stroke="${C.gold}" stroke-width="2.4" fill="none"/>
+    ${label(210,225,"VRWM ≥ Vline · Vclamp < abs-max — IEC 61000-4-5 surge",'middle',C.dim,11)}`),
+  flyback: svg(`
+    ${label(40,95,"Vin","middle")} ${wire("55,90 120,90")}
+    <path d="M120,90 v10 a8,8 0 0 1 0,14 a8,8 0 0 1 0,14 a8,8 0 0 1 0,14 v10" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <line x1="146" y1="92" x2="146" y2="160" stroke="${C.wire}" stroke-width="2"/>
+    <line x1="152" y1="92" x2="152" y2="160" stroke="${C.wire}" stroke-width="2"/>
+    <path d="M178,100 v6 a8,8 0 0 1 0,14 a8,8 0 0 1 0,14 a8,8 0 0 1 0,14 v6" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    ${wire("120,90 120,100")} ${wire("120,152 120,168")} ${rbox(102,168,36,36,"SW")} ${wire("120,204 120,216")} ${gnd(120,216)}
+    ${wire("178,100 178,88 240,88")}
+    <polygon points="240,76 240,100 262,88" fill="none" stroke="${C.wire}" stroke-width="1.6"/>
+    <line x1="262" y1="76" x2="262" y2="100" stroke="${C.wire}" stroke-width="1.6"/>
+    ${wire("262,88 370,88")} ${label(382,92,"Vout","start")}
+    ${wire("178,154 178,170 320,170")} ${wire("320,88 320,120")}
+    <line x1="302" y1="120" x2="338" y2="120" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="302" y1="132" x2="338" y2="132" stroke="${C.wire}" stroke-width="2.5"/>
+    ${wire("320,132 320,170")}
+    ${label(149,60,"Np : Ns","middle",C.dim,11)}
+    ${label(210,240,"D = VOR/(VOR+Vin) · n = VOR/(Vout+Vd) — Erickson ch.6",'middle',C.dim,10)}`),
+  adc: svg(`
+    <polyline points="50,190 90,190 90,160 130,160 130,130 170,130 170,100 210,100 210,70 250,70" fill="none" stroke="${C.wire}" stroke-width="2"/>
+    <path d="M50,188 C100,140 180,80 250,68" stroke="${C.dim}" stroke-width="1.4" fill="none" stroke-dasharray="4 3"/>
+    ${dim(268,70,268,100,"LSB",300,88)}
+    ${label(160,225,"SNR = 6.02·N + 1.76 dB",'middle',C.dim,12)}`),
+  "fuse-derating": svg(`
+    ${wire("40,110 130,110")}
+    <rect x="130" y="96" width="160" height="28" rx="14" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <path d="M130,110 C170,92 250,128 290,110" stroke="${C.wire}" stroke-width="1.6" fill="none"/>
+    ${wire("290,110 380,110")}
+    ${label(210,165,"In ≥ Iload/(0.75·k_temp)","middle",C.dim,12)}
+    ${label(210,190,"R10 ladder: 1 1.25 1.6 2 2.5 3.15 4 5 6.3 8 — IEC 60127",'middle',C.dim,11)}`),
+  "inrush-ntc": svg(`
+    ${label(45,105,"AC","middle")} ${wire("62,100 120,100")}
+    ${rbox(120,84,70,32,"NTC")}
+    <line x1="120" y1="128" x2="196" y2="80" stroke="${C.dim}" stroke-width="1.4"/>
+    ${wire("190,100 250,100")}
+    <line x1="250" y1="82" x2="250" y2="118" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="262" y1="82" x2="262" y2="118" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(256,140,"C bulk","middle",C.wire,11)}
+    ${wire("262,100 330,100")} ${rbox(330,84,44,32,"load")}
+    ${label(210,200,"R_cold ≥ Vpk/I_max · E = ½CV² — EPCOS guide",'middle',C.dim,11)}`),
+  rcombo: svg(`
+    ${wire("30,110 90,110")} ${rbox(90,94,60,32,"R1")} ${wire("150,110 190,110")}
+    <circle cx="190" cy="110" r="3.5" fill="${C.wire}"/>
+    ${wire("190,110 190,70 230,70")} ${rbox(230,54,60,32,"R2")} ${wire("290,70 330,70 330,110")}
+    ${wire("190,110 190,150 230,150")} ${rbox(230,134,60,32,"R3")} ${wire("290,150 330,150 330,110")}
+    ${wire("330,110 390,110")}
+    ${label(210,215,"R1 + (R2 ∥ R3) … up to 4 parts, IEC 60063 pool",'middle',C.dim,12)}`),
+};
+DIAGRAMS["hysteresis-design"] = DIAGRAMS.hysteresis;
+DIAGRAMS["vdivider-design"] = DIAGRAMS.vdivider;
+DIAGRAMS["regulator-design"] = DIAGRAMS.regulator;
+DIAGRAMS["rc-charge"] = DIAGRAMS.rc;
+DIAGRAMS.eseries = DIAGRAMS.rescolor;
+const FALLBACK = svg(`
+  <rect x="140" y="55" width="140" height="150" rx="10" fill="${C.body}" stroke="${C.wire}"/>
+  <rect x="155" y="70" width="110" height="34" rx="4" fill="#111" stroke="#444"/>
+  <text x="258" y="94" fill="${C.ok}" font-size="18" text-anchor="end" font-family="monospace">42</text>
+  ${[0,1,2].map(r=>[0,1,2].map(c=>`<rect x="${158+c*38}" y="${116+r*28}" width="30" height="20" rx="4" fill="#3d444a" stroke="#555"/>`).join("")).join("")}`);
+
+/* live diagram captions: computed values replace the formula line */
+const rcell = (r, k) => r[k] ? fmtEng(r[k].value, r[k].unit) : "?";
+const ANNOT = {
+  trackwidth:   (i,r) => `W ext = ${rcell(r,"external_width")} · int = ${rcell(r,"internal_width")} — IPC-2221`,
+  trackcurrent: (i,r) => `Imax = ${rcell(r,"i_max")} (${i.layer || "external"}) — IPC-2221`,
+  tracktemp:    (i,r) => `ΔT = ${rcell(r,"dtemp")} — IPC-2221`,
+  microstrip:   (i,r) => `Z0 = ${rcell(r,"z0")} · εeff = ${rcell(r,"eeff")} — Hammerstad–Jensen`,
+  stripline:    (i,r) => `Z0 = ${rcell(r,"z0")} — Cohn 1954`,
+  coax:         (i,r) => `Z0 = ${rcell(r,"z0")}`,
+  twinlead:     (i,r) => `Z0 = ${rcell(r,"z0")}`,
+  diffpair:     (i,r) => `Zdiff = ${rcell(r,"z_diff")} · Zodd = ${rcell(r,"z_odd")} — IPC-2141A`,
+  vdivider:     (i,r) => `Vout = ${rcell(r,"vout")} · Rth = ${rcell(r,"thevenin_r")}`,
+  led:          (i,r) => `R = ${rcell(r,"r_ideal")} → std ${rcell(r,"r_standard")}`,
+  rc:           (i,r) => `τ = ${rcell(r,"tau")} · fc = ${rcell(r,"fc")}`,
+  lc:           (i,r) => `f0 = ${rcell(r,"f0")} · Z = ${rcell(r,"z")}`,
+  via:          (i,r) => `R = ${rcell(r,"resistance")} · L = ${rcell(r,"inductance")} · Imax = ${rcell(r,"i_max")}`,
+  clearance:    (i,r) => `B2 external ≥ ${rcell(r,"b2")} — IPC-2221B T6-1`,
+  "i2c-pullup": (i,r) => `Rp ${rcell(r,"r_min")} … suggested ${rcell(r,"suggested")} … ${rcell(r,"r_max")}`,
+};
+
+function drawDiagram(name, ctx){
+  const box = $("diagram");
+  box.innerHTML = DIAGRAMS[name] || FALLBACK;
+  $("diagcap").textContent = DIAGRAMS[name] ? "" : "no dedicated illustration yet";
+  if (name === "rescolor" && ctx.results && ctx.results.bands_list){
+    (ctx.results.bands_list.value || []).forEach((b,i) => {
+      const el = document.getElementById("band" + i);
+      if (el) el.setAttribute("fill", BAND_COLORS[b] || "#666");
+    });
+  }
+  if (name === "smdcode" && ctx.inputs && ctx.inputs.code){
+    const t = document.getElementById("smdtext");
+    if (t) t.textContent = String(ctx.inputs.code).toUpperCase();
+  }
+  const an = ANNOT[name];
+  if (an && ctx.results){
+    const el = document.getElementById("an1");
+    if (el){
+      try { const t = an(ctx.inputs || {}, ctx.results); if (t) el.textContent = t; }
+      catch (e) { /* diagram keeps its formula caption */ }
+    }
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

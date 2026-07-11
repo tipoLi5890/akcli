@@ -27,11 +27,13 @@ BOARD_V7 = FIXTURES / "board_v7.kicad_sch"
 # transform_point: rotations
 # ---------------------------------------------------------------------------
 def test_rotation_matrices():
+    # eeschema convention (kicad-cli-verified, see tests/test_kicad_parity.py):
+    # +90 rotates counter-clockwise ON SCREEN = (x,y)->(y,-x) in +Y-down nm.
     pt = (100, 50)
     assert g.transform_point(pt, 0) == (100, 50)
-    assert g.transform_point(pt, 90) == (-50, 100)
+    assert g.transform_point(pt, 90) == (50, -100)
     assert g.transform_point(pt, 180) == (-100, -50)
-    assert g.transform_point(pt, 270) == (50, -100)
+    assert g.transform_point(pt, 270) == (-50, 100)
 
 
 def test_rotation_normalised_and_360():
@@ -79,16 +81,16 @@ def test_bad_mirror_raises():
 # ---------------------------------------------------------------------------
 def test_rotate_then_mirror_order():
     pt = (100, 50)
-    # rotate 90 -> (-50, 100); then mirror x (negate y) -> (-50, -100)
-    assert g.transform_point(pt, 90, "x") == (-50, -100)
-    # mirror-then-rotate would give: mirror x -> (100, -50); rot 90 -> (50, 100)
-    assert g.transform_point(pt, 90, "x") != (50, 100)
+    # rotate 90 -> (50, -100); then mirror x (negate y) -> (50, 100)
+    assert g.transform_point(pt, 90, "x") == (50, 100)
+    # mirror-then-rotate would give: mirror x -> (100, -50); rot 90 -> (-50, -100)
+    assert g.transform_point(pt, 90, "x") != (-50, -100)
 
 
 def test_rotate_then_mirror_y_order():
     pt = (100, 50)
-    # rotate 90 -> (-50, 100); then mirror y (negate x) -> (50, 100)
-    assert g.transform_point(pt, 90, "y") == (50, 100)
+    # rotate 90 -> (50, -100); then mirror y (negate x) -> (-50, -100)
+    assert g.transform_point(pt, 90, "y") == (-50, -100)
 
 
 # ---------------------------------------------------------------------------
@@ -221,11 +223,12 @@ def test_pin_world_mirror_y():
 
 
 def test_pin_world_matches_reader_world_coords():
-    """Cross-check: geometry.pin_world == coords the (frozen) reader computed.
+    """Cross-check: geometry.pin_world == coords the reader computed.
 
     The reader stores already-transformed world pin coords on each placed
-    component; recomputing them from the resolved symbol + instance must agree
-    (the fixtures are rotation-0, where rotate-then-mirror == mirror-then-rotate).
+    component; recomputing them from the resolved symbol + instance must agree.
+    (The reader now delegates to geometry.transform_point, so this guards the
+    delegation plumbing — mil/nm conversions and the library Y-flip.)
     """
     lib = kicad_lib.read(DEVICE_SYM)
     sch = kicad.read_sch(BOARD_V7)

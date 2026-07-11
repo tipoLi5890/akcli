@@ -64,7 +64,8 @@
       "type": "object",
       "required": ["name", "members"],
       "properties": {
-        "name": { "type": "string" },
+        "name": { "type": ["string", "null"],
+                  "description": "null for unnamed nets (is_named=false); display code falls back to stable_id" },
         "members": {
           "type": "array",
           "items": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 }

@@ -24,7 +24,13 @@ therefore:
   ``sch.no_erc_points`` within grid tolerance) and config ``erc_waivers``;
 * reports a net carrying **multiple distinct explicit names** (e.g.
   ``STAT`` ≡ ``LED1_GPIO_RD``) as a low-severity **NOTE**, never an error — the
-  ``netbuild`` same-name merge made it one net on purpose.
+  ``netbuild`` same-name merge made it one net on purpose;
+* flags **unplaced units of multi-unit parts** (KiCad-sourced schematics only:
+  the KiCad reader merges every placed unit into one ``Component`` whose pins
+  carry ``owner_part_id``, so a never-placed unit contributes no pins at all —
+  its gates float silently. Altium attaches every unit's pins regardless of
+  placement and its ``PARTCOUNT`` field is unreliable, so the rule would be
+  pure noise there).
 
 Nothing here mutates ``sch``; every finding is advisory for a human/agent.
 """
@@ -48,6 +54,7 @@ ERC_DANGLING_NET = "ERC_DANGLING_NET"          # single-pin net (likely unconnec
 ERC_NO_POWER = "ERC_NO_POWER"                  # IC shares no detected power net
 ERC_NO_GROUND = "ERC_NO_GROUND"                # IC shares no detected ground net
 ERC_NET_ALIAS = "ERC_NET_ALIAS"                # one net carries multiple names
+ERC_UNPLACED_UNIT = "ERC_UNPLACED_UNIT"        # multi-unit part with units never placed
 
 # Waiver ``rule`` token -> finding code (config ``[[erc_waiver]].rule``).
 _RULE_TO_CODE: dict[str, str] = {
@@ -57,6 +64,7 @@ _RULE_TO_CODE: dict[str, str] = {
     "no_power": ERC_NO_POWER,
     "no_ground": ERC_NO_GROUND,
     "net_alias": ERC_NET_ALIAS,
+    "unplaced_unit": ERC_UNPLACED_UNIT,
 }
 
 # --- rail-name heuristics (shared shape with power.py; net-NAME based) --------
@@ -106,6 +114,15 @@ def _prefix(designator: str) -> str:
     """Leading alpha prefix of a refdes (``$U3`` -> ``U``, ``IC2`` -> ``IC``)."""
     m = re.match(r"[A-Za-z]+", designator.lstrip("$"))
     return m.group(0).upper() if m else ""
+
+
+def _unit_letter(unit: int) -> str:
+    """KiCad's display letter for a unit number (1 -> A, 2 -> B, 27 -> AA)."""
+    s = ""
+    while unit > 0:
+        unit, r = divmod(unit - 1, 26)
+        s = chr(ord("A") + r) + s
+    return s
 
 
 # _norm / _implied_voltage / _rail_matches are shared with power.py — see ._rails.
@@ -364,5 +381,38 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                         refs=[comp.designator],
                     )
                 )
+
+    # --- unplaced units of multi-unit parts (KiCad-sourced only) ------------- #
+    # The KiCad reader merges every placed unit of a part into ONE Component
+    # whose pins carry owner_part_id = the placed unit (0 = common pins), so a
+    # unit that was never placed contributes no pins at all — its gate inputs
+    # float and its power pins connect to nothing, invisibly to every net-level
+    # rule above. Altium attaches all units' pins to the component record
+    # regardless of placement and its PARTCOUNT is unreliably off-by-one, so
+    # this rule stays silent for Altium sources.
+    if sch.source_format == "kicad":
+        for comp in sch.components:
+            if comp.undesignated or comp.part_count <= 1:
+                continue
+            placed = {p.owner_part_id for p in comp.pins if p.owner_part_id >= 1}
+            missing = sorted(set(range(1, comp.part_count + 1)) - placed)
+            if not missing or not placed:
+                continue
+            if waivers.waives(ERC_UNPLACED_UNIT, {_norm(comp.designator)}):
+                continue
+            placed_s = ", ".join(_unit_letter(u) for u in sorted(placed))
+            missing_s = ", ".join(_unit_letter(u) for u in missing)
+            findings.append(
+                Finding(
+                    ERC_UNPLACED_UNIT,
+                    Severity.WARNING,
+                    f"{comp.designator} has {comp.part_count} units but only "
+                    f"unit(s) {placed_s} placed — unit(s) {missing_s} missing "
+                    "(their pins connect to nothing). Place the missing units "
+                    "or tie them off with the terminate_unused_unit macro "
+                    "(akcli ops template terminate_unused_unit)",
+                    refs=[comp.designator],
+                )
+            )
 
     return findings

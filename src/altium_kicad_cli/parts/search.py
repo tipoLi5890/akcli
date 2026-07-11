@@ -34,6 +34,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import random
+import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -44,7 +48,10 @@ from pathlib import Path
 from .. import __version__
 
 # --- service + transport constants ------------------------------------------
-BASE_URL = "https://jlcsearch.tscircuit.com"
+# AKCLI_JLC_BASE_URL overrides the endpoint (self-hosted jlcsearch, a moved
+# service, or an unreachable address to exercise the NETWORK error path). It is
+# resolved per request (see base_url()) so setting it after import works.
+DEFAULT_BASE_URL = "https://jlcsearch.tscircuit.com"
 SEARCH_PATH = "/components/list.json"
 USER_AGENT = (
     f"altium-kicad-cli/{__version__} "
@@ -55,6 +62,38 @@ DEFAULT_LIMIT = 20
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024   # hard cap on a single response body
 CACHE_TTL_SECONDS = 3600          # on-disk cache freshness window
 
+MAX_ATTEMPTS = 3                  # total tries per request (1 + up to 2 retries)
+BACKOFF_BASE = 0.5                # seconds; doubles per attempt, plus jitter
+BACKOFF_CAP = 8.0                 # upper bound on the computed backoff delay
+RETRY_AFTER_CAP = 30.0            # never honor a Retry-After longer than this
+STALE_EVICT_MULTIPLIER = 7        # cache entries older than 7x TTL get evicted
+
+
+def base_url() -> str:
+    """The jlcsearch endpoint, resolved at call time.
+
+    Reading ``AKCLI_JLC_BASE_URL`` here (not at import) lets callers and tests
+    set/override the endpoint after this module has been imported.
+    """
+    return os.environ.get("AKCLI_JLC_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+
+
+def default_cache_dir() -> Path | None:
+    """The CLI's default on-disk cache location, or ``None`` when disabled.
+
+    ``AKCLI_JLC_CACHE`` overrides: a path relocates the cache, ``0``/``off``
+    disables it. Library callers still opt in explicitly via ``cache_dir=``;
+    only the CLI layer applies this default.
+    """
+    env = os.environ.get("AKCLI_JLC_CACHE")
+    if env is not None:
+        if env.strip().lower() in ("0", "off", "no", ""):
+            return None
+        return Path(env).expanduser()
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
+    return base / "akcli" / "jlc"
+
 
 class JlcNetworkError(Exception):
     """A jlcsearch request failed.
@@ -62,11 +101,21 @@ class JlcNetworkError(Exception):
     Covers an unreachable host, a timeout, a non-2xx HTTP status, an oversized
     body, or undecodable JSON. Carries a clean human-readable ``message``; the CLI
     maps this onto the external-tool exit code and never leaks a traceback.
+
+    ``kind`` classifies the failure (``http`` / ``network`` / ``timeout`` /
+    ``size`` / ``decode``) and ``retryable`` marks the transient subset (URLError,
+    timeout, HTTP 429/5xx) that the transport retries with backoff before this
+    error escapes. ``retry_after`` carries the server's numeric Retry-After
+    seconds when one was sent.
     """
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, kind: str = "network",
+                 retryable: bool = False, retry_after: float | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.kind = kind
+        self.retryable = retryable
+        self.retry_after = retry_after
 
 
 @dataclass
@@ -213,7 +262,7 @@ def _extract_rows(payload: object) -> list:
 
 def _build_url(params: dict) -> str:
     qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-    return f"{BASE_URL}{SEARCH_PATH}?{qs}"
+    return f"{base_url()}{SEARCH_PATH}?{qs}"
 
 
 def _default_opener() -> urllib.request.OpenerDirector:
@@ -245,22 +294,93 @@ def _cache_read(cache_dir: str | Path | None, url: str, ttl: float | None) -> ob
         return None
 
 
-def _cache_write(cache_dir: str | Path | None, url: str, payload: object) -> None:
+def _cache_write(cache_dir: str | Path | None, url: str, payload: object,
+                 *, ttl: float | None = None) -> None:
+    """Atomically persist ``payload``, then opportunistically evict old siblings.
+
+    tempfile + ``os.replace`` so a crashed or parallel writer can never leave a
+    truncated JSON file behind for a later read to trip over.
+    """
     if not cache_dir:
         return
     try:
         d = Path(cache_dir)
         d.mkdir(parents=True, exist_ok=True)
-        _cache_path(cache_dir, url).write_text(json.dumps(payload), encoding="utf-8")
+        target = _cache_path(cache_dir, url)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=target.stem + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(payload))
+            os.replace(tmp, target)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        _cache_evict(d, ttl)
     except OSError:
         pass  # cache is best-effort; never fail a query because of it
+
+
+def _cache_evict(d: Path, ttl: float | None) -> None:
+    """Drop sibling entries older than ``STALE_EVICT_MULTIPLIER`` x TTL.
+
+    Bounds the stale-if-error window: an entry may outlive its TTL (it can
+    still serve as a fallback while the service is down) but not forever.
+    """
+    if not ttl or ttl <= 0:
+        return
+    cutoff = time.time() - STALE_EVICT_MULTIPLIER * ttl
+    try:
+        entries = list(d.glob("jlc_*.json"))
+    except OSError:
+        return
+    for p in entries:
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            continue
+
+
+def _stale_fallback_enabled() -> bool:
+    return (os.environ.get("AKCLI_JLC_CACHE_STALE", "").strip().lower()
+            not in ("0", "off", "no"))
 
 
 # --------------------------------------------------------------------------- #
 # transport
 # --------------------------------------------------------------------------- #
-def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: float) -> object:
-    """GET ``url`` and decode JSON, mapping every failure to :class:`JlcNetworkError`."""
+def _parse_retry_after(err: object) -> float | None:
+    """Numeric ``Retry-After`` seconds from an HTTPError, or ``None``.
+
+    The HTTP-date form is deliberately ignored — a wall-clock parse is not
+    worth the complexity for a best-effort backoff hint.
+    """
+    get = getattr(getattr(err, "headers", None), "get", None)
+    raw = get("Retry-After") if callable(get) else None
+    if raw is None:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except (ValueError, TypeError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _retry_delay(attempt: int, retry_after: float | None) -> float:
+    """Seconds to wait before retry number ``attempt + 1``.
+
+    A server-sent Retry-After (capped) wins; otherwise exponential backoff
+    with jitter so parallel clients desynchronize.
+    """
+    if retry_after is not None:
+        return min(retry_after, RETRY_AFTER_CAP)
+    base = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** attempt))
+    return base + random.uniform(0, base)
+
+
+def _fetch_json_once(url: str, *, opener: urllib.request.OpenerDirector,
+                     timeout: float) -> object:
+    """GET ``url`` once and decode JSON, mapping every failure to :class:`JlcNetworkError`."""
     req = urllib.request.Request(
         url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
     )
@@ -268,16 +388,22 @@ def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: flo
         resp = opener.open(req, timeout=timeout)
     except urllib.error.HTTPError as e:      # subclass of URLError — must come first
         reason = getattr(e, "reason", "") or ""
-        raise JlcNetworkError(f"jlcsearch returned HTTP {e.code} {reason}".strip()) from e
+        raise JlcNetworkError(
+            f"jlcsearch returned HTTP {e.code} {reason}".strip(), kind="http",
+            retryable=(e.code == 429 or 500 <= e.code < 600),
+            retry_after=_parse_retry_after(e)) from e
     except urllib.error.URLError as e:
-        raise JlcNetworkError(f"could not reach jlcsearch: {getattr(e, 'reason', e)}") from e
+        raise JlcNetworkError(f"could not reach jlcsearch: {getattr(e, 'reason', e)}",
+                              kind="network", retryable=True) from e
     except TimeoutError as e:                # socket.timeout is an alias since 3.10
-        raise JlcNetworkError(f"jlcsearch request timed out after {timeout}s") from e
+        raise JlcNetworkError(f"jlcsearch request timed out after {timeout}s",
+                              kind="timeout", retryable=True) from e
 
     try:
         raw = resp.read(MAX_RESPONSE_BYTES + 1)
     except (OSError, urllib.error.URLError) as e:
-        raise JlcNetworkError(f"jlcsearch read failed: {e}") from e
+        raise JlcNetworkError(f"jlcsearch read failed: {e}",
+                              kind="network", retryable=True) from e
     finally:
         close = getattr(resp, "close", None)
         if callable(close):
@@ -287,11 +413,33 @@ def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: flo
                 pass
 
     if len(raw) > MAX_RESPONSE_BYTES:
-        raise JlcNetworkError("jlcsearch response exceeded the size cap")
+        raise JlcNetworkError("jlcsearch response exceeded the size cap", kind="size")
     try:
         return json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
-        raise JlcNetworkError(f"jlcsearch returned invalid JSON: {e}") from e
+        raise JlcNetworkError(f"jlcsearch returned invalid JSON: {e}", kind="decode") from e
+
+
+def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: float,
+                sleep=None, attempts: int = MAX_ATTEMPTS) -> object:
+    """GET ``url`` and decode JSON, retrying transient failures.
+
+    Only ``retryable`` errors (unreachable host, timeout, HTTP 429/5xx) are
+    retried, up to ``attempts`` total tries with exponential backoff + jitter
+    (a numeric Retry-After wins). ``sleep`` is injectable so offline tests can
+    assert retry behavior without waiting.
+    """
+    if sleep is None:
+        sleep = time.sleep
+    attempts = max(1, int(attempts))
+    for attempt in range(attempts):
+        try:
+            return _fetch_json_once(url, opener=opener, timeout=timeout)
+        except JlcNetworkError as exc:
+            if not exc.retryable or attempt >= attempts - 1:
+                raise
+            sleep(_retry_delay(attempt, exc.retry_after))
+    raise JlcNetworkError("unreachable")  # pragma: no cover - loop returns or raises
 
 
 # --------------------------------------------------------------------------- #
@@ -305,12 +453,16 @@ def search(
     timeout: float = DEFAULT_TIMEOUT,
     cache_dir: str | Path | None = None,
     cache_ttl: float | None = CACHE_TTL_SECONDS,
+    sleep=None,
 ) -> list[Part]:
     """Keyword-search jlcsearch and return up to ``limit`` :class:`Part` results.
 
     ``query`` matches MPN, category and the LCSC C-number. ``opener`` injects a
     transport (defaults to a real urllib opener) so tests run offline. Pass
-    ``cache_dir`` to enable a short on-disk cache keyed by request URL.
+    ``cache_dir`` to enable a short on-disk cache keyed by request URL; when
+    every retry is exhausted and a (possibly expired) cached copy exists, the
+    stale copy is served with a stderr warning — set ``AKCLI_JLC_CACHE_STALE=off``
+    to fail hard instead. ``sleep`` is forwarded to the retrying transport.
     """
     if opener is None:
         opener = _default_opener()
@@ -322,8 +474,18 @@ def search(
     url = _build_url({"search": query, "limit": lim})
     payload = _cache_read(cache_dir, url, cache_ttl)
     if payload is None:
-        payload = _fetch_json(url, opener=opener, timeout=timeout)
-        _cache_write(cache_dir, url, payload)
+        try:
+            payload = _fetch_json(url, opener=opener, timeout=timeout, sleep=sleep)
+        except JlcNetworkError as exc:
+            payload = (_cache_read(cache_dir, url, None)      # stale-if-error
+                       if _stale_fallback_enabled() else None)
+            if payload is None:
+                raise
+            sys.stderr.write(
+                f"WARNING: {exc.message}; serving a stale cached result "
+                "(set AKCLI_JLC_CACHE_STALE=off to fail instead)\n")
+        else:
+            _cache_write(cache_dir, url, payload, ttl=cache_ttl)
 
     parts = [_to_part(r) for r in _extract_rows(payload) if isinstance(r, dict)]
     return parts[:lim]
@@ -336,6 +498,7 @@ def get(
     timeout: float = DEFAULT_TIMEOUT,
     cache_dir: str | Path | None = None,
     cache_ttl: float | None = CACHE_TTL_SECONDS,
+    sleep=None,
 ) -> Part | None:
     """Fetch one part by LCSC C-number (``"C7593"`` or ``"7593"``); ``None`` if absent."""
     digits = _lcsc_digits(lcsc_id)
@@ -348,6 +511,7 @@ def get(
         timeout=timeout,
         cache_dir=cache_dir,
         cache_ttl=cache_ttl,
+        sleep=sleep,
     )
     for p in results:
         if _lcsc_digits(p.lcsc) == digits:

@@ -31,6 +31,9 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
+import random
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -62,6 +65,12 @@ DEFAULT_TIMEOUT = 15.0                 # seconds; bounded so a hung host can't w
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024  # hard cap on a single response body
 CACHE_TTL_SECONDS = 3600               # on-disk cache freshness window
 
+MAX_ATTEMPTS = 3                       # total tries per request (1 + up to 2 retries)
+BACKOFF_BASE = 0.5                     # seconds; doubles per attempt, plus jitter
+BACKOFF_CAP = 8.0                      # upper bound on the computed backoff delay
+RETRY_AFTER_CAP = 30.0                 # never honor a Retry-After longer than this
+STALE_EVICT_MULTIPLIER = 7             # cache entries older than 7x TTL get evicted
+
 
 class EasyEdaError(Exception):
     """An EasyEDA metadata request failed at the transport/HTTP/decoding layer.
@@ -70,11 +79,21 @@ class EasyEdaError(Exception):
     undecodable JSON. A *missing part* (``success: false`` / empty result) is **not**
     an error — :func:`lookup` returns ``None`` for that. The CLI maps this onto the
     external-tool exit code and never leaks a traceback.
+
+    ``kind`` classifies the failure (``http`` / ``network`` / ``timeout`` /
+    ``size`` / ``decode``) and ``retryable`` marks the transient subset (URLError,
+    timeout, HTTP 429/5xx) that the transport retries with backoff before this
+    error escapes. ``retry_after`` carries the server's numeric Retry-After
+    seconds when one was sent.
     """
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, kind: str = "network",
+                 retryable: bool = False, retry_after: float | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.kind = kind
+        self.retryable = retryable
+        self.retry_after = retry_after
 
 
 @dataclass
@@ -218,15 +237,47 @@ def _cache_read(cache_dir: str | Path | None, url: str, ttl: float | None) -> ob
         return None
 
 
-def _cache_write(cache_dir: str | Path | None, url: str, payload: object) -> None:
+def _cache_write(cache_dir: str | Path | None, url: str, payload: object,
+                 *, ttl: float | None = None) -> None:
+    """Atomically persist ``payload``, then opportunistically evict old siblings.
+
+    tempfile + ``os.replace`` so a crashed or parallel writer can never leave a
+    truncated JSON file behind for a later read to trip over.
+    """
     if not cache_dir:
         return
     try:
         d = Path(cache_dir)
         d.mkdir(parents=True, exist_ok=True)
-        _cache_path(cache_dir, url).write_text(json.dumps(payload), encoding="utf-8")
+        target = _cache_path(cache_dir, url)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=target.stem + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(payload))
+            os.replace(tmp, target)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        _cache_evict(d, ttl)
     except OSError:
         pass  # cache is best-effort; never fail a lookup because of it
+
+
+def _cache_evict(d: Path, ttl: float | None) -> None:
+    """Drop sibling entries older than ``STALE_EVICT_MULTIPLIER`` x TTL."""
+    if not ttl or ttl <= 0:
+        return
+    cutoff = time.time() - STALE_EVICT_MULTIPLIER * ttl
+    try:
+        entries = list(d.glob("easyeda_*.json"))
+    except OSError:
+        return
+    for p in entries:
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            continue
 
 
 # --------------------------------------------------------------------------- #
@@ -242,23 +293,52 @@ def _maybe_gunzip(raw: bytes) -> bytes:
     return raw
 
 
-def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: float) -> object:
-    """GET ``url`` and decode JSON, mapping every failure to :class:`EasyEdaError`."""
+def _parse_retry_after(err: object) -> float | None:
+    """Numeric ``Retry-After`` seconds from an HTTPError, or ``None`` (dates ignored)."""
+    get = getattr(getattr(err, "headers", None), "get", None)
+    raw = get("Retry-After") if callable(get) else None
+    if raw is None:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except (ValueError, TypeError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _retry_delay(attempt: int, retry_after: float | None) -> float:
+    """Seconds before retry ``attempt + 1``: Retry-After (capped) wins, else
+    exponential backoff with jitter so parallel clients desynchronize."""
+    if retry_after is not None:
+        return min(retry_after, RETRY_AFTER_CAP)
+    base = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** attempt))
+    return base + random.uniform(0, base)
+
+
+def _fetch_json_once(url: str, *, opener: urllib.request.OpenerDirector,
+                     timeout: float) -> object:
+    """GET ``url`` once and decode JSON, mapping every failure to :class:`EasyEdaError`."""
     req = urllib.request.Request(url, headers=dict(_HEADERS))
     try:
         resp = opener.open(req, timeout=timeout)
     except urllib.error.HTTPError as e:      # subclass of URLError — must come first
         reason = getattr(e, "reason", "") or ""
-        raise EasyEdaError(f"easyeda returned HTTP {e.code} {reason}".strip()) from e
+        raise EasyEdaError(
+            f"easyeda returned HTTP {e.code} {reason}".strip(), kind="http",
+            retryable=(e.code == 429 or 500 <= e.code < 600),
+            retry_after=_parse_retry_after(e)) from e
     except urllib.error.URLError as e:
-        raise EasyEdaError(f"could not reach easyeda: {getattr(e, 'reason', e)}") from e
+        raise EasyEdaError(f"could not reach easyeda: {getattr(e, 'reason', e)}",
+                           kind="network", retryable=True) from e
     except TimeoutError as e:                # socket.timeout is an alias since 3.10
-        raise EasyEdaError(f"easyeda request timed out after {timeout}s") from e
+        raise EasyEdaError(f"easyeda request timed out after {timeout}s",
+                           kind="timeout", retryable=True) from e
 
     try:
         raw = resp.read(MAX_RESPONSE_BYTES + 1)
     except (OSError, urllib.error.URLError) as e:
-        raise EasyEdaError(f"easyeda read failed: {e}") from e
+        raise EasyEdaError(f"easyeda read failed: {e}",
+                           kind="network", retryable=True) from e
     finally:
         close = getattr(resp, "close", None)
         if callable(close):
@@ -268,12 +348,34 @@ def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: flo
                 pass
 
     if len(raw) > MAX_RESPONSE_BYTES:
-        raise EasyEdaError("easyeda response exceeded the size cap")
+        raise EasyEdaError("easyeda response exceeded the size cap", kind="size")
     raw = _maybe_gunzip(raw)
     try:
         return json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
-        raise EasyEdaError(f"easyeda returned invalid JSON: {e}") from e
+        raise EasyEdaError(f"easyeda returned invalid JSON: {e}", kind="decode") from e
+
+
+def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: float,
+                sleep=None, attempts: int = MAX_ATTEMPTS) -> object:
+    """GET ``url`` and decode JSON, retrying transient failures.
+
+    Only ``retryable`` errors (unreachable host, timeout, HTTP 429/5xx) are
+    retried, up to ``attempts`` total tries with exponential backoff + jitter
+    (a numeric Retry-After wins). ``sleep`` is injectable so offline tests can
+    assert retry behavior without waiting.
+    """
+    if sleep is None:
+        sleep = time.sleep
+    attempts = max(1, int(attempts))
+    for attempt in range(attempts):
+        try:
+            return _fetch_json_once(url, opener=opener, timeout=timeout)
+        except EasyEdaError as exc:
+            if not exc.retryable or attempt >= attempts - 1:
+                raise
+            sleep(_retry_delay(attempt, exc.retry_after))
+    raise EasyEdaError("unreachable")  # pragma: no cover - loop returns or raises
 
 
 # --------------------------------------------------------------------------- #
@@ -286,6 +388,7 @@ def lookup(
     timeout: float = DEFAULT_TIMEOUT,
     cache_dir: str | Path | None = None,
     cache_ttl: float | None = CACHE_TTL_SECONDS,
+    sleep=None,
 ) -> EasyEdaInfo | None:
     """Return :class:`EasyEdaInfo` for ``lcsc_id``, or ``None`` when the part is absent.
 
@@ -307,8 +410,8 @@ def lookup(
     url = COMPONENTS_URL.format(lcsc=urllib.parse.quote(lcsc, safe=""))
     payload = _cache_read(cache_dir, url, cache_ttl)
     if payload is None:
-        payload = _fetch_json(url, opener=opener, timeout=timeout)
-        _cache_write(cache_dir, url, payload)
+        payload = _fetch_json(url, opener=opener, timeout=timeout, sleep=sleep)
+        _cache_write(cache_dir, url, payload, ttl=cache_ttl)
 
     if not isinstance(payload, dict):
         return None

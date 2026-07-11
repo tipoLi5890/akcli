@@ -102,8 +102,16 @@ def _identity(comp: Component) -> object:
 
 
 def _real_components(sch: Schematic) -> list[Component]:
-    """Components eligible for BOM checks (drop synthesized/undesignated ones)."""
-    return [c for c in sch.components if not c.undesignated and _clean(c.designator)]
+    """Components eligible for BOM checks.
+
+    Drops synthesized/undesignated placements and ``#``-prefixed virtual
+    parts (power ports, PWR_FLAG): those never appear on a BOM, so flagging
+    their missing value/footprint — or "gaps" in #PWR numbering — is noise.
+    """
+    return [c for c in sch.components
+            if not c.undesignated
+            and _clean(c.designator)
+            and not c.designator.lstrip().startswith("#")]
 
 
 def run(sch: Schematic) -> list[Finding]:

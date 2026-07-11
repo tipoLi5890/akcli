@@ -78,24 +78,54 @@ def _attenuator_parts(r):
     return parts
 
 
+# Calculators whose network maps onto a MACRO op: the emitted op-list carries
+# the compound op (placeholder net names — edit them), and `plan`/`draw`
+# expand it into components + pin-anchored labels, so the parts arrive
+# CONNECTED instead of as a loose strip.
+_MACRO_MAP = {
+    "vdivider-design": lambda i, r: [{
+        "op": "place_divider", "x_mil": _X, "y_mil": _Y0,
+        "top_net": "VIN", "mid_net": "VOUT", "bottom_net": "GND",
+        "designators": ["R1", "R2"],
+        "values": [_val(_r(r, "r_top")), _val(_r(r, "r_bottom"))]}],
+    "led": lambda i, r: [{
+        "op": "place_led_indicator", "x_mil": _X, "y_mil": _Y0,
+        "net": "LED_CTRL", "gnd_net": "GND",
+        "r_value": _val(_r(r, "r_standard"))}],
+    "i2c-pullup": lambda i, r: [
+        {"op": "place_pullup", "x_mil": _X, "y_mil": _Y0,
+         "net": "SDA", "rail_net": "VDD",
+         "designator": "R1", "value": _val(_r(r, "suggested"))},
+        {"op": "place_pullup", "x_mil": _X + _DY, "y_mil": _Y0,
+         "net": "SCL", "rail_net": "VDD",
+         "designator": "R2", "value": _val(_r(r, "suggested"))}],
+    "crystal-caps": lambda i, r: [{
+        "op": "place_crystal", "x_mil": _X, "y_mil": _Y0,
+        "in_net": "OSC_IN", "out_net": "OSC_OUT",
+        "load_c": _val(_r(r, "c1_c2_standard"))}],
+}
+
+
 def to_oplist(calc_name: str, envelope: dict) -> dict:
     """Build a protocol-1 op-list document from a compute() envelope."""
-    fn = MAPPABLE.get(calc_name)
-    if fn is None:
+    if calc_name not in MAPPABLE:
         raise CalcError(
             f"--ops not supported for {calc_name!r}; mappable calculators: "
             + ", ".join(sorted(MAPPABLE)))
-    parts = fn(envelope.get("inputs", {}), envelope.get("results", {}))
-    ops = []
-    for idx, (lib_id, ref, value) in enumerate(parts):
-        ops.append({
+    macro_fn = _MACRO_MAP.get(calc_name)
+    if macro_fn is not None:
+        ops = macro_fn(envelope.get("inputs", {}), envelope.get("results", {}))
+    else:
+        parts = MAPPABLE[calc_name](
+            envelope.get("inputs", {}), envelope.get("results", {}))
+        ops = [{
             "op": "place_component",
             "lib_id": lib_id,
             "designator": ref,
             "x_mil": _X,
             "y_mil": _Y0 + idx * _DY,
             "value": value,
-        })
+        } for idx, (lib_id, ref, value) in enumerate(parts)]
     return {
         "protocol_version": 1,
         "target_format": "kicad",
@@ -103,6 +133,9 @@ def to_oplist(calc_name: str, envelope: dict) -> dict:
         "meta": {
             "generated_by": f"akcli calc {calc_name}",
             "reference": envelope.get("reference", ""),
+            **({"note": "macro ops: edit the placeholder net names, then "
+                        "`akcli plan` — draw expands them into parts + "
+                        "pin-anchored labels"} if macro_fn else {}),
         },
         "ops": ops,
     }

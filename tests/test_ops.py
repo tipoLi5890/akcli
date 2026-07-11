@@ -18,9 +18,10 @@ def test_protocol_version_and_op_names():
     assert ops.PROTOCOL_VERSION == 1
     assert "place_component" in ops.OP_NAMES
     assert "place_gnd" in ops.OP_NAMES and "place_vcc" in ops.OP_NAMES
-    # 13 original + delete_component / delete_object / move_component
-    assert len(ops.OP_NAMES) == 16
-    assert {"delete_component", "delete_object", "move_component"} <= ops.OP_NAMES
+    # 13 original + delete_component / delete_object / move_component + rename_net
+    assert len(ops.OP_NAMES) == 17
+    assert {"delete_component", "delete_object", "move_component",
+            "rename_net"} <= ops.OP_NAMES
 
 
 def test_valid_oplist_has_no_errors():
@@ -112,3 +113,120 @@ def test_capabilities_loadable():
     cap = ops.load_capabilities()
     assert cap["ops"]["add_bus"]["altium"] is False
     assert cap["ops"]["place_component"]["kicad"] is True
+    assert cap["ops"]["rename_net"] == {
+        "kicad": True, "altium": False,
+        "notes": "rewrites label texts + power-port net Values; "
+                 "0 matches = replay-safe note"}
+
+
+# ------------------------------------------------------ validator hardening ----
+
+def test_field_type_table_enforced():
+    errs = ops.validate_oplist(_doc([
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "x_mil": "oops", "y_mil": 0},
+    ]))
+    assert len(errs) == 1 and errs[0].op_index == 0
+    assert "x_mil" in errs[0].message and "number" in errs[0].message
+    errs = ops.validate_oplist(_doc([
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "x_mil": 0, "y_mil": 0, "unit": 0},
+    ]))
+    assert any("unit" in e.message and ">= 1" in e.message for e in errs)
+    errs = ops.validate_oplist(_doc([
+        {"op": "delete_component", "designator": "R1", "cascade": "yes"},
+    ]))
+    assert any("cascade" in e.message for e in errs)
+
+
+def test_unknown_field_did_you_mean():
+    errs = ops.validate_oplist(_doc([
+        {"op": "add_net_label", "name": "N1", "at": [0, 0], "orientatoin": 90},
+    ]))
+    assert len(errs) == 1
+    assert "unknown field 'orientatoin'" in errs[0].message
+    assert "did you mean 'orientation'" in errs[0].message
+    # keys starting with "_" are annotation-safe
+    assert ops.validate_oplist(_doc([
+        {"op": "add_junction", "at": [0, 0], "_note": "T here"},
+    ])) == []
+
+
+def test_unknown_op_did_you_mean():
+    errs = ops.validate_oplist(_doc([{"op": "plce_component"}]))
+    assert any("did you mean 'place_component'" in e.message for e in errs)
+
+
+def test_duplicate_designator_unit_lint():
+    errs = ops.validate_oplist(_doc([
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "x_mil": 0, "y_mil": 0},
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "x_mil": 100, "y_mil": 0},
+    ]))
+    assert len(errs) == 1 and errs[0].op_index == 1
+    assert "duplicate placement" in errs[0].message and "'R1'" in errs[0].message
+    # a different UNIT of the same part is legitimate
+    assert ops.validate_oplist(_doc([
+        {"op": "place_component", "lib_id": "X:OPA", "designator": "U1",
+         "x_mil": 0, "y_mil": 0, "unit": 1},
+        {"op": "place_component", "lib_id": "X:OPA", "designator": "U1",
+         "x_mil": 500, "y_mil": 0, "unit": 2},
+    ])) == []
+    # delete-then-replace in one op-list is NOT a duplicate
+    assert ops.validate_oplist(_doc([
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "x_mil": 0, "y_mil": 0},
+        {"op": "delete_component", "designator": "R1"},
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "x_mil": 300, "y_mil": 0},
+    ])) == []
+
+
+def test_delete_object_exactly_one_of_uuid_match():
+    assert any("exactly one" in e.message for e in
+               ops.validate_oplist(_doc([{"op": "delete_object"}])))
+    assert any("exactly one" in e.message for e in ops.validate_oplist(_doc([
+        {"op": "delete_object", "uuid": "u", "match": {"kind": "wire"}}])))
+    assert ops.validate_oplist(_doc([
+        {"op": "delete_object", "match": {"kind": "label", "name": "N1"}}])) == []
+    errs = ops.validate_oplist(_doc([
+        {"op": "delete_object", "match": {"kind": "resistor"}}]))
+    assert any("match.kind" in e.message for e in errs)
+    errs = ops.validate_oplist(_doc([
+        {"op": "delete_object", "match": {"kind": "wire", "att": [0, 0]}}]))
+    assert any("match.att" in e.message and "did you mean" in e.message
+               for e in errs)
+
+
+def test_mid_anchor_accepted_for_labels_and_ports_only():
+    assert ops.parse_mid_anchor("mid(U1.1,U2.3)") == ("U1.1", "U2.3")
+    assert ops.parse_mid_anchor("mid( R1.2 , R2.1 )") == ("R1.2", "R2.1")
+    assert ops.parse_mid_anchor("mid(U1.1)") is None
+    assert ops.validate_oplist(_doc([
+        {"op": "add_net_label", "name": "N", "at": "mid(U1.1,U2.3)"},
+        {"op": "place_power_port", "lib_id": "power:PWR_FLAG",
+         "net_name": "PWR_FLAG", "at": "mid(U1.1,U2.3)"},
+    ])) == []
+    # malformed mid() is rejected, not treated as a pin ref
+    errs = ops.validate_oplist(_doc([
+        {"op": "add_net_label", "name": "N", "at": "mid(U1.1,U2"},
+    ]))
+    assert any("at" in e.message for e in errs)
+    # wire vertices do NOT take mid() anchors
+    errs = ops.validate_oplist(_doc([
+        {"op": "add_wire", "vertices": ["mid(U1.1,U2.3)", [0, 0]]},
+    ]))
+    assert any(e.code == "NON_ORTHOGONAL_WIRE" for e in errs)
+
+
+def test_rename_net_validation():
+    assert ops.validate_oplist(_doc([
+        {"op": "rename_net", "from": "A", "to": "B"},
+        {"op": "rename_net", "from": "A", "to": "B", "scope": "global"},
+    ])) == []
+    errs = ops.validate_oplist(_doc([{"op": "rename_net", "from": "A"}]))
+    assert any("'to'" in e.message for e in errs)
+    errs = ops.validate_oplist(_doc([
+        {"op": "rename_net", "from": "A", "to": "B", "scope": "power"}]))
+    assert any("scope" in e.message for e in errs)

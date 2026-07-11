@@ -264,15 +264,25 @@ def test_calc_ops_emits_valid_oplist(tmp_path, capsys):
     assert cli.main(["calc", "vdivider-design", "vin=5", "vout=3.3",
                      "--ops", str(dest)]) == 0
     doc = json.loads(dest.read_text())
-    assert ops.validate_oplist(doc) == []                    # schema-valid
-    assert [o["designator"] for o in doc["ops"]] == ["R1", "R2"]
-    assert all(o["op"] == "place_component" for o in doc["ops"])
+    assert ops.validate_oplist(doc) == []          # macros validate un-expanded
+    assert [o["op"] for o in doc["ops"]] == ["place_divider"]
+    assert doc["ops"][0]["designators"] == ["R1", "R2"]
+    # plan/draw expand the macro into placements + pin-anchored labels
+    expanded = ops.expand_macros(doc)["ops"]
+    assert [o["designator"] for o in expanded
+            if o["op"] == "place_component"] == ["R1", "R2"]
+    assert sum(o["op"] == "add_net_label" for o in expanded) == 4
+    assert ops.validate_oplist(ops.expand_macros(doc)) == []
 
 
 def test_calc_ops_stdout_and_unsupported(capsys):
     assert cli.main(["calc", "crystal-caps", "cl=12.5p", "--ops", "-"]) == 0
     doc = json.loads(capsys.readouterr().out)
-    assert [o["value"] for o in doc["ops"]] == ["18p", "18p"]
+    assert [o["op"] for o in doc["ops"]] == ["place_crystal"]
+    assert doc["ops"][0]["load_c"] == "18p"
+    expanded = ops.expand_macros(doc)["ops"]
+    assert [o["value"] for o in expanded
+            if o.get("lib_id") == "Device:C"] == ["18p", "18p"]
     assert cli.main(["calc", "rc", "r=1k", "c=1n", "--ops", "-"]) == 2
 
 

@@ -38,7 +38,10 @@ _WS = frozenset(" \t\r\n\f\v")
 # A bare (unquoted) atom runs until whitespace, a paren, or a quote.  Matched at
 # C speed so a multi-megabyte hostile atom is located in one pass (then rejected
 # by the MAX_ATOM_BYTES guard) instead of a slow per-character Python loop.
-_BARE_RE = re.compile(r'[^\s()"]+')
+# The character class spells out _WS explicitly: `\s` would additionally match
+# UNICODE whitespace (NBSP, U+2028, ...) that the _WS scanner does not skip,
+# and that mismatch turned such bytes into an unscannable crash (fuzz-found).
+_BARE_RE = re.compile(r'[^ \t\r\n\f\v()"]+')
 
 # A quoted atom: opening quote, then runs of (non-quote/non-backslash | escape),
 # then the closing quote.  The two alternatives are mutually exclusive, so there
@@ -290,12 +293,14 @@ def _scan_atom(text: str, i: int, n: int) -> tuple[str, int]:
         return tok, m.end()
 
     m = _BARE_RE.match(text, i)
-    # ``_BARE_RE`` always matches >=1 char here: the caller guarantees text[i] is
-    # neither whitespace nor a paren nor a quote.
-    tok = m.group()  # type: ignore[union-attr]
+    if m is None:
+        # unreachable while _WS and _BARE_RE agree; never crash on drift
+        fail("KICAD_SEXPR_UNTERMINATED",
+             f"unscannable character {text[i]!r} at offset {i}")
+    tok = m.group()
     if len(tok) > MAX_ATOM_BYTES:
         fail("KICAD_SEXPR_TOOBIG", f"bare atom exceeds {MAX_ATOM_BYTES} bytes")
-    return tok, m.end()  # type: ignore[union-attr]
+    return tok, m.end()
 
 
 def dumps(node: SNode) -> str:

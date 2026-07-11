@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>akcli — bench</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23d08a3d'/%3E%3Cpath d='M4 11.5 8 4.5 12 11.5' fill='none' stroke='%231a1408' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --mono: ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code","Fira Code",Menlo,Consolas,monospace;
+  --disp: "Avenir Next Condensed","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#14161a; --bg2:#181b20; --panel:#1d2127; --panel2:#171a1f; --inset:#101317;
+  --border:#2b3038; --border2:#3a414c;
+  --text:#ced3da; --muted:#8b929d; --faint:#5f6671;
+  --brand:#d08a3d; --brand2:#e8ab61; --oncopper:#1a1408;
+  --data:#66c8de; --live:#58c48e; --err:#e5665f; --warn:#d9a13c;
+  --sel:rgba(208,138,61,.13); --focus:rgba(102,200,222,.45);
+  --grid:rgba(102,200,222,.045); --grid2:rgba(102,200,222,.028);
+  --shadow:0 6px 24px rgba(0,0,0,.35);
+}
+:root[data-theme="light"]{
+  --bg:#e9e5db; --bg2:#efece3; --panel:#faf8f2; --panel2:#f0ede4; --inset:#fdfcf9;
+  --border:#d3ccbb; --border2:#bcb4a0;
+  --text:#2b2e33; --muted:#6c7076; --faint:#9a9c9e;
+  --brand:#a96617; --brand2:#8a5310; --oncopper:#fff8ec;
+  --data:#0f6f88; --live:#1e8a57; --err:#bf3934; --warn:#8f6408;
+  --sel:rgba(169,102,23,.10); --focus:rgba(15,111,136,.35);
+  --grid:rgba(15,111,136,.055); --grid2:rgba(15,111,136,.03);
+  --shadow:0 4px 18px rgba(60,50,30,.12);
+}
+*{box-sizing:border-box; margin:0}
+[hidden]{display:none !important}
+html,body{height:100%}
+body{
+  background:
+    linear-gradient(var(--grid2) 1px, transparent 1px) 0 0/100% 96px,
+    linear-gradient(90deg,var(--grid2) 1px, transparent 1px) 0 0/96px 100%,
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0/100% 24px,
+    linear-gradient(90deg,var(--grid) 1px, transparent 1px) 0 0/24px 100%,
+    var(--bg);
+  color:var(--text); font:13.5px/1.55 var(--mono);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:24px; gap:26px;
+}
+:focus-visible{outline:2px solid var(--focus); outline-offset:2px; border-radius:6px}
+@media (prefers-reduced-motion:reduce){ *,*::before,*::after{animation:none !important; transition:none !important} }
+
+/* ---- shared bench chrome (identical on hub/calc/live) ---- */
+#topbar{position:fixed; top:0; left:0; right:0; display:flex; align-items:center;
+        gap:12px; padding:8px 14px; background:var(--panel2);
+        border-bottom:1px solid var(--border); z-index:5}
+#mark{font-family:var(--disp); font-size:15px; font-weight:600; letter-spacing:.1em;
+      text-transform:uppercase; color:var(--brand2); text-decoration:none; white-space:nowrap}
+#mark:hover{color:var(--brand)}
+.tabs{display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden;
+      background:var(--panel)}
+.tabs a{display:flex; align-items:center; padding:3px 13px; color:var(--muted);
+        text-decoration:none; font-family:var(--disp); font-size:11.5px; font-weight:600;
+        letter-spacing:.12em; text-transform:uppercase; border-right:1px solid var(--border)}
+.tabs a:last-child{border-right:none}
+.tabs a.on{background:var(--sel); color:var(--brand2)}
+.tabs a:hover:not(.on){color:var(--text)}
+.spacer{flex:1}
+
+header.hero{text-align:center; animation:rise .3s ease-out both}
+header.hero h1{font-family:var(--disp); font-size:clamp(34px,6vw,52px); font-weight:600;
+          letter-spacing:.12em; text-transform:uppercase; color:var(--text)}
+header.hero h1 em{font-style:normal; color:var(--brand2)}
+header.hero p{color:var(--muted); font-size:12.5px; margin-top:2px}
+@keyframes rise{from{opacity:0; transform:translateY(8px)}}
+
+#cards{display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 380px));
+       gap:20px; width:min(820px, 100%); justify-content:center}
+.card{display:block; background:var(--panel); border:1px solid var(--border);
+      border-radius:14px; padding:22px 24px 18px; text-decoration:none; color:inherit;
+      box-shadow:var(--shadow); transition:transform .12s, border-color .12s;
+      animation:rise .3s ease-out both; position:relative}
+.card:nth-child(2){animation-delay:.06s}
+.card:hover{transform:translateY(-3px); border-color:var(--brand)}
+.card .key{position:absolute; top:14px; right:16px; border:1px solid var(--border2);
+           border-bottom-width:2px; border-radius:5px; padding:0 7px; font-size:11px;
+           color:var(--muted); background:var(--panel2)}
+.card .glyph{font-size:26px; line-height:1; color:var(--brand2); font-family:var(--mono)}
+.card h2{font-family:var(--disp); font-size:20px; font-weight:600; letter-spacing:.1em;
+         text-transform:uppercase; margin:10px 0 2px}
+.card .sub{color:var(--muted); font-size:12px; min-height:36px}
+.card .statusrow{display:flex; align-items:center; gap:8px; margin-top:14px;
+                 padding-top:12px; border-top:1px solid var(--border); font-size:12px;
+                 flex-wrap:wrap; min-height:34px}
+.dot{width:8px; height:8px; border-radius:50%; background:var(--live); animation:pulse 2.2s infinite}
+.dot.idle{background:var(--faint); animation:none}
+@keyframes pulse{50%{opacity:.3}}
+.pill{border:1px solid var(--border); border-radius:99px; padding:1px 9px; font-size:11px;
+      color:var(--muted); white-space:nowrap}
+.pill b{color:var(--text); font-weight:600}
+.pill.ok{color:var(--live); border-color:var(--live)}
+.pill.bad{color:var(--err); border-color:var(--err)}
+.card .cta{margin-top:12px; display:inline-block; background:var(--brand);
+           color:var(--oncopper); border-radius:7px; padding:6px 18px; font-weight:700;
+           letter-spacing:.03em; font-size:12.5px}
+.card:hover .cta{background:var(--brand2)}
+.card.idle .glyph, .card.idle h2{color:var(--muted)}
+.card .hintcmd{margin-top:12px; font-size:11px; color:var(--faint)}
+.card .hintcmd code{background:var(--inset); border:1px solid var(--border);
+                    border-radius:5px; padding:1px 7px; color:var(--data)}
+
+footer{color:var(--faint); font-size:11px; display:flex; gap:14px; align-items:center;
+       flex-wrap:wrap; justify-content:center; animation:rise .3s ease-out .12s both}
+footer .kbd{border:1px solid var(--border2); border-bottom-width:2px; border-radius:4px;
+            padding:0 5px; font-size:10px; background:var(--panel)}
+#themebtn{background:var(--panel); color:var(--muted); border:1px solid var(--border);
+          border-radius:6px; padding:2px 10px; font:inherit; font-size:11px; cursor:pointer}
+#themebtn:hover{border-color:var(--border2); color:var(--text)}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <a id="mark" href="/">⌂ akcli</a>
+  <nav class="tabs" aria-label="pages">
+    <a href="/" class="on">⌂</a>
+    <a href="/calc" title="calculator bench (c)">= calc</a>
+    <a href="/live" title="live schematic timeline (l)">◎ live</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="themebtn" title="toggle dark / light">◐</button>
+</div>
+<header class="hero">
+  <h1>akcli <em>bench</em></h1>
+  <p>local engineering dashboard · 127.0.0.1 only · zero dependencies</p>
+</header>
+
+<div id="cards">
+  <a class="card" href="/calc" id="calccard">
+    <span class="key">C</span>
+    <div class="glyph">=</div>
+    <h2>Calc Bench</h2>
+    <div class="sub">standards-cited calculators — every result carries its formal
+      reference. Auto-compute, ⌘K palette, op-list export.</div>
+    <div class="statusrow" id="calcstatus"><span class="pill">loading…</span></div>
+    <span class="cta">open /calc →</span>
+  </a>
+
+  <a class="card idle" href="/live" id="livecard">
+    <span class="key">L</span>
+    <div class="glyph">◎</div>
+    <h2>Live Schematic</h2>
+    <div class="sub">watch a <b>.kicad_sch</b> while it is drawn — step timeline,
+      per-step ERC findings, diff ghosting, SSE push.</div>
+    <div class="statusrow" id="livestatus">
+      <span class="dot idle" id="livedot"></span><span class="pill">checking…</span>
+    </div>
+    <span class="cta">open /live →</span>
+    <div class="hintcmd" id="livehint" hidden>
+      start watching: <code>akcli view live &lt;sch.kicad_sch&gt;</code>
+    </div>
+  </a>
+</div>
+
+<footer>
+  <span id="finfo">akcli</span>
+  <span><span class="kbd">C</span> calc · <span class="kbd">L</span> live · <span class="kbd">H</span> hub</span>
+</footer>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function store(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch(e){ return d; } }
+function applyTheme(t){ document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("akcli-theme", JSON.stringify(t)); } catch(e){} }
+applyTheme(store("akcli-theme", null) ||
+  (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+$("themebtn").onclick = e => { e.preventDefault();
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); };
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+const pill = (html, cls="") => `<span class="pill ${cls}">${html}</span>`;
+
+async function loadCalc(){
+  try {
+    const doc = await (await fetch("/api/list")).json();
+    const groups = Object.keys(doc.groups).length;
+    $("calcstatus").innerHTML =
+      pill(`<b>${doc.meta.count}</b> calculators`) + pill(`<b>${groups}</b> groups`);
+    $("finfo").textContent = "akcli " + (doc.meta.version || "") + " · " + location.host;
+  } catch (e){ $("calcstatus").innerHTML = pill("server unreachable", "bad"); }
+}
+async function loadLive(){
+  try {
+    const s = await (await fetch("/live/state.json?ts=" + Date.now(), {cache:"no-store"})).json();
+    const watching = !!s.watching, steps = s.steps || [];
+    const last = steps[steps.length - 1];
+    $("livecard").classList.toggle("idle", !watching);
+    $("livedot").classList.toggle("idle", !watching);
+    $("livehint").hidden = watching;
+    let html = watching
+      ? pill(`watching <b>${esc(s.file)}</b>`) : pill("not watching");
+    if (steps.length) html += pill(`<b>${steps.length}</b> steps`);
+    if (last && last.parts != null) html += pill(`<b>${last.parts}</b> parts · <b>${last.nets}</b> nets`);
+    if (last && !last.erc_pending && last.erc_err != null)
+      html += last.erc_err
+        ? pill(`ERC <b>${last.erc_err}E ${last.erc_warn || 0}W</b>`, "bad")
+        : pill("ERC ✓", "ok");
+    $("livestatus").innerHTML = `<span class="dot${watching ? "" : " idle"}" id="livedot"></span>` + html;
+  } catch (e){
+    $("livestatus").innerHTML = '<span class="dot idle" id="livedot"></span>' + pill("unavailable");
+  }
+}
+loadCalc(); loadLive();
+try {                    // live card refreshes the moment a step lands
+  const es = new EventSource("/live/events");
+  es.onmessage = () => loadLive();
+} catch (e) {}
+setInterval(loadLive, 10000);
+
+document.addEventListener("keydown", e => {
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (k === "c" || e.key === "1") location.href = "/calc";
+  else if (k === "l" || e.key === "2") location.href = "/live";
+  else if (k === "h") location.href = "/";   // same key set on every page
+});
+</script>
+</body>
+</html>

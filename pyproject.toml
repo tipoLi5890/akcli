@@ -1,10 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
+# PEP 639 bare license string (`license = "MIT"`) requires setuptools >= 77.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "altium-kicad-cli"
-version = "0.3.1"
+version = "0.4.0"
 description = "Read Altium binary .SchDoc and KiCad .kicad_sch with no EDA install; run ERC/design checks and draw KiCad. For AI coding agents."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -19,15 +20,47 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
 ]
+
+[project.urls]
+Homepage = "https://github.com/tipoLi5890/altium-kicad-cli"
+Repository = "https://github.com/tipoLi5890/altium-kicad-cli.git"
+Changelog = "https://github.com/tipoLi5890/altium-kicad-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
 akcli = "altium_kicad_cli.cli:main"
 altium-kicad-cli = "altium_kicad_cli.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "jsonschema>=4", "build", "twine"]
+dev = ["pytest>=8", "jsonschema>=4", "build", "twine", "ruff>=0.15"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"altium_kicad_cli.webui" = ["*.html"]
+"altium_kicad_cli.schemas" = ["*.json"]
+
+[tool.ruff]
+# Vendored jlc2kicadlib is kept byte-close to upstream; never lint it.
+extend-exclude = ["src/altium_kicad_cli/_vendor"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# `l` is inductance throughout the calc domain, not an ambiguous name.
+"src/altium_kicad_cli/calc/electrical.py" = ["E741"]
+"src/altium_kicad_cli/calc/power.py" = ["E741"]
+# Grandfathered spare imports/f-strings; clean up at next functional touch
+# rather than churning otherwise-untouched modules for the lint gate.
+"src/altium_kicad_cli/calc/registry.py" = ["F401"]
+"src/altium_kicad_cli/calc/regulator.py" = ["F401"]
+"src/altium_kicad_cli/ops.py" = ["F401"]
+"src/altium_kicad_cli/parts/bom_jlc.py" = ["F401", "F541"]
+# Deliberate compact paired coordinate statements in the S-expression writer.
+"src/altium_kicad_cli/writers/kicad.py" = ["E702"]
+# Tests favor readability: spare imports/locals and compact fuzz mutators are fine.
+"tests/**" = ["E702", "E741", "F401", "F841"]

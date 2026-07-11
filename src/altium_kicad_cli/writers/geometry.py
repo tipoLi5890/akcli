@@ -18,16 +18,21 @@ Hard rules (SPEC §1.1 / §1.2 / §2.1):
   ``{0,90,180,270}``; mirror is ``{none,x,y}`` where ``x`` mirrors across the X
   axis (negates Y) and ``y`` mirrors across the Y axis (negates X).
 
-The rotation matrices match the (frozen) KiCad reader's instance transform so a
-component round-trips writer→reader→writer identically:
+The rotation matrices implement **eeschema's** instance transform, established
+empirically against ``kicad-cli sch export netlist`` (KiCad 10.0.4) over the
+full rot × mirror matrix (see ``tests/test_kicad_parity.py``). A file angle of
+``+90`` rotates the symbol 90° *counter-clockwise on screen*, which in the
++Y-down algebra is:
 
     0   -> ( x,  y)
-    90  -> (-y,  x)
+    90  -> ( y, -x)
     180 -> (-x, -y)
-    270 -> ( y, -x)
+    270 -> (-y,  x)
 
-(For the rotation-0 fixtures, rotate-then-mirror and mirror-then-rotate coincide,
-so this module and the reader agree exactly.)
+followed by the mirror. (The pre-parity code rotated the other way — ``90 ->
+(-y, x)`` — which put every rot-90/270 pin on the point-mirrored position;
+eeschema then saw the wire miss the pin. The KiCad reader delegates here, so
+reader and writer cannot diverge again.)
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ from ..units import mil_to_nm, nm_to_mm_str
 
 __all__ = [
     "pin_world",
+    "label_angle_away",
     "transform_point",
     "transform_angle",
     "transform_child",
@@ -66,7 +72,8 @@ def transform_point(
 
     All coordinates are integer nanometres in the canonical **+Y-down** frame.
     ``rot`` is one of ``{0,90,180,270}`` (any other multiple of 90 is normalised;
-    non-multiples raise ``ValueError``). ``mirror`` is ``{none,x,y}``.
+    non-multiples raise ``ValueError``). ``mirror`` is ``{none,x,y}``. Rotation
+    is eeschema's: +90 turns counter-clockwise on screen (see module docstring).
     """
     x = int(pt[0])
     y = int(pt[1])
@@ -75,11 +82,11 @@ def transform_point(
     if r == 0:
         pass
     elif r == 90:
-        x, y = -y, x
+        x, y = y, -x
     elif r == 180:
         x, y = -x, -y
     elif r == 270:
-        x, y = y, -x
+        x, y = -y, x
     else:
         raise ValueError(f"rotation must be a multiple of 90, got {rot!r}")
 
@@ -108,6 +115,31 @@ def transform_angle(angle: float, rot: int = 0, mirror: str = "none") -> float:
     elif mirror not in ("none", "", None):
         raise ValueError(f"mirror must be one of none|x|y, got {mirror!r}")
     return a % 360.0
+
+
+# Lib-frame (+Y up) unit vectors for the four pin orientations.
+_PIN_DIR: dict[int, tuple[int, int]] = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}
+
+
+def label_angle_away(pin_orientation: int, rot: int = 0, mirror: str = "none") -> int:
+    """KiCad label angle whose text extends AWAY from the symbol body.
+
+    A library pin's ``(at x y a)`` angle points from its electrical tip *toward*
+    the body, so the free side of the pin is the opposite direction. This
+    transforms that away-vector through the library Y-flip and the instance
+    rotate-then-mirror, then maps the world vector to the KiCad label-angle
+    convention (0 = text extends +X, 90 = up-screen, 180 = -X, 270 = down-screen).
+    A label at the pin tip with this angle reads outward instead of running
+    over the symbol it names.
+    """
+    dx, dy = _PIN_DIR.get(int(pin_orientation) % 360, (1, 0))
+    flipped = (-dx, dy)                      # away = -dir, then +Y-up -> +Y-down
+    wx, wy = transform_point(flipped, rot, mirror)
+    if wx > 0:
+        return 0
+    if wx < 0:
+        return 180
+    return 90 if wy < 0 else 270
 
 
 def transform_child(

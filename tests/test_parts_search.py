@@ -10,6 +10,8 @@ monkeypatching ``parts.search._default_opener``.
 from __future__ import annotations
 
 import json
+import os
+import time
 import urllib.error
 
 import pytest
@@ -193,6 +195,163 @@ def test_on_disk_cache_avoids_second_request(tmp_path):
     second = ps.search("NE555", opener=opener, cache_dir=tmp_path)
     assert [p.lcsc for p in first] == [p.lcsc for p in second]
     assert len(opener.calls) == 1  # second served from cache
+
+
+# --------------------------------------------------------------------------- #
+# hermetic guard (tests/conftest.py) — accidental real network fails loudly
+# --------------------------------------------------------------------------- #
+def test_network_guard_blocks_search_default_opener():
+    with pytest.raises(RuntimeError, match="network disabled in tests"):
+        ps.search("NE555")
+
+
+def test_network_guard_blocks_easyeda_default_opener():
+    from altium_kicad_cli.parts import easyeda as ee
+    with pytest.raises(RuntimeError, match="network disabled in tests"):
+        ee.lookup("C7593")
+
+
+# --------------------------------------------------------------------------- #
+# retry / backoff (sleep injected; no real waiting)
+# --------------------------------------------------------------------------- #
+def _flaky(fail_times: int, payload, *, code: int = 503, headers=None):
+    """An opener that fails ``fail_times`` requests, then serves ``payload``."""
+    state = {"n": 0}
+
+    def route(url):
+        state["n"] += 1
+        if state["n"] <= fail_times:
+            raise urllib.error.HTTPError(url, code, "boom", headers or {}, None)
+        return _FakeResp(payload)
+
+    return FakeOpener(route)
+
+
+def test_retry_recovers_from_5xx():
+    opener = _flaky(2, SEARCH_RESULT)                 # succeeds on the 3rd try
+    sleeps: list[float] = []
+    parts = ps.search("NE555", opener=opener, sleep=sleeps.append)
+    assert [p.lcsc for p in parts][0] == "C7593"
+    assert len(opener.calls) == 3
+    assert len(sleeps) == 2 and all(s > 0 for s in sleeps)
+
+
+def test_retry_exhausted_raises_with_kind_and_retryable():
+    def boom(url):
+        raise urllib.error.URLError("down")
+
+    opener = FakeOpener(boom)
+    sleeps: list[float] = []
+    with pytest.raises(ps.JlcNetworkError) as ei:
+        ps.search("NE555", opener=opener, sleep=sleeps.append)
+    assert len(opener.calls) == ps.MAX_ATTEMPTS
+    assert len(sleeps) == ps.MAX_ATTEMPTS - 1
+    assert ei.value.kind == "network" and ei.value.retryable is True
+
+
+def test_no_retry_on_plain_4xx():
+    opener = _flaky(99, SEARCH_RESULT, code=404)
+    sleeps: list[float] = []
+    with pytest.raises(ps.JlcNetworkError) as ei:
+        ps.search("NE555", opener=opener, sleep=sleeps.append)
+    assert len(opener.calls) == 1 and sleeps == []    # failed fast
+    assert ei.value.kind == "http" and ei.value.retryable is False
+
+
+def test_429_honors_numeric_retry_after():
+    opener = _flaky(1, SEARCH_RESULT, code=429, headers={"Retry-After": "7"})
+    sleeps: list[float] = []
+    parts = ps.search("NE555", opener=opener, sleep=sleeps.append)
+    assert parts and sleeps == [7.0]                  # server delay, not backoff
+
+
+def test_timeout_is_retryable_decode_is_not():
+    def slow(url):
+        raise TimeoutError("slow")
+
+    with pytest.raises(ps.JlcNetworkError) as ei:
+        ps._fetch_json("http://x/", opener=FakeOpener(slow), timeout=1,
+                       sleep=lambda s: None, attempts=2)
+    assert ei.value.kind == "timeout" and ei.value.retryable is True
+
+    class BadResp:
+        def read(self, n=-1):
+            return b"<html>not json</html>"
+
+        def close(self):
+            pass
+
+    opener = FakeOpener(lambda url: BadResp())
+    with pytest.raises(ps.JlcNetworkError) as ei:
+        ps._fetch_json("http://x/", opener=opener, timeout=1,
+                       sleep=lambda s: None)
+    assert ei.value.kind == "decode" and ei.value.retryable is False
+    assert len(opener.calls) == 1                     # no retry on bad payload
+
+
+# --------------------------------------------------------------------------- #
+# cache hardening: atomic writes, stale-if-error, eviction, live BASE_URL
+# --------------------------------------------------------------------------- #
+def test_cache_write_is_atomic_and_leaves_no_temp_files(tmp_path):
+    ps.search("NE555", opener=_static(SEARCH_RESULT), cache_dir=tmp_path)
+    entries = list(tmp_path.glob("jlc_*.json"))
+    assert len(entries) == 1
+    json.loads(entries[0].read_text(encoding="utf-8"))  # complete, valid JSON
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_stale_cache_served_on_network_failure(tmp_path, capsys):
+    ps.search("NE555", opener=_static(SEARCH_RESULT), cache_dir=tmp_path)
+    entry = next(tmp_path.glob("jlc_*.json"))
+    past = time.time() - 2 * ps.CACHE_TTL_SECONDS     # expired, not yet evicted
+    os.utime(entry, (past, past))
+
+    def boom(url):
+        raise urllib.error.URLError("offline")
+
+    sleeps: list[float] = []
+    parts = ps.search("NE555", opener=FakeOpener(boom), cache_dir=tmp_path,
+                      sleep=sleeps.append)
+    assert [p.lcsc for p in parts] == ["C7593", "C695838", "C14663"]
+    assert len(sleeps) == ps.MAX_ATTEMPTS - 1         # retries ran first
+    assert "stale" in capsys.readouterr().err.lower()
+
+
+def test_stale_fallback_opt_out(tmp_path, monkeypatch):
+    ps.search("NE555", opener=_static(SEARCH_RESULT), cache_dir=tmp_path)
+    entry = next(tmp_path.glob("jlc_*.json"))
+    past = time.time() - 2 * ps.CACHE_TTL_SECONDS
+    os.utime(entry, (past, past))
+    monkeypatch.setenv("AKCLI_JLC_CACHE_STALE", "off")
+
+    def boom(url):
+        raise urllib.error.URLError("offline")
+
+    with pytest.raises(ps.JlcNetworkError):
+        ps.search("NE555", opener=FakeOpener(boom), cache_dir=tmp_path,
+                  sleep=lambda s: None)
+
+
+def test_cache_eviction_drops_ancient_siblings_only(tmp_path):
+    ancient = tmp_path / "jlc_ancient.json"
+    ancient.write_text("{}", encoding="utf-8")
+    then = time.time() - (ps.STALE_EVICT_MULTIPLIER + 1) * ps.CACHE_TTL_SECONDS
+    os.utime(ancient, (then, then))
+    stale = tmp_path / "jlc_stale.json"               # expired but still useful
+    stale.write_text("{}", encoding="utf-8")
+    recent = time.time() - 2 * ps.CACHE_TTL_SECONDS
+    os.utime(stale, (recent, recent))
+
+    ps.search("NE555", opener=_static(SEARCH_RESULT), cache_dir=tmp_path)
+    assert not ancient.exists()
+    assert stale.exists()
+
+
+def test_base_url_env_read_at_call_time(monkeypatch):
+    opener = _static(EMPTY_RESULT)
+    monkeypatch.setenv("AKCLI_JLC_BASE_URL", "http://localhost:9999/api/")
+    ps.search("x", opener=opener)
+    assert opener.calls[0].startswith("http://localhost:9999/api/components/list.json")
 
 
 # --------------------------------------------------------------------------- #

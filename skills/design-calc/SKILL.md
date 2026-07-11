@@ -6,12 +6,14 @@ description: >-
   dividers, LM317/FB regulator networks, IPC-2221 track width and clearance,
   via parasitics, fusing current, AWG, microstrip/stripline impedance, RF
   attenuators, buck/boost power stages, NE555, op-amp gain pairs, I2C
-  pull-ups, crystal load caps, junction thermal, battery life, resistor
-  color/SMD/EIA-96 codes, galvanic compatibility. Use whenever a design task
-  needs a computed component value or a standards-backed physical check.
-  Triggers on: resistor value, E24/E96, divider, LDO feedback, trace width,
+  pull-ups, crystal load caps, junction thermal, battery life, LDO headroom,
+  comparator hysteresis, envelope detectors, resistor color/SMD/EIA-96
+  codes, galvanic compatibility. Use whenever a design task needs a computed
+  component value or a standards-backed physical check. Triggers on:
+  resistor value, E24/E96, divider, LDO feedback, dropout, trace width,
   current capacity, clearance, creepage, via, impedance, attenuator, 555,
-  pull-up, load capacitance, heatsink, color code, SMD marking.
+  pull-up, load capacitance, heatsink, hysteresis, envelope detector,
+  battery runtime, color code, SMD marking.
 ---
 
 # design-calc — standards-backed calculators for circuit design
@@ -70,6 +72,10 @@ Inputs accept engineering notation: `4k7`, `100n`, `35u`, `2M2`, `1e-7`.
 | Cap-charging inrush | `inrush-ntc` | TDK/EPCOS NTC guide |
 | Antenna/PA impedance match | `lmatch`, `pimatch` | Pozar §5.1; Bowick ch. 4 |
 | Isolated supply first cut | `flyback` | Erickson & Maksimović ch. 6 |
+| Battery runtime from a datasheet mAh figure | `battery-life` | ANSI C18.1M + mfr. alkaline data (advisory) |
+| Comparator window incl. open-drain pull-up | `comparator-hysteresis` | TI SLVA954 |
+| Diode peak/envelope detector RC window | `envelope-detector` | Haykin §2.2; AoE 3rd ed. §1.6.6 |
+| Enough input voltage for the LDO? | `ldo-headroom` | LDO datasheet V_DO; TI SLVA079 |
 
 **Deliberately missing:** IPC-2152 track current — chart-based licensed
 measurement data with no public closed form; this tool refuses to fake it.
@@ -86,7 +92,7 @@ Say so when a user asks, and use the conservative IPC-2221 fit
   `sallen-key`, `attenuator`) emit a valid `place_component` op-list with the
   computed standard values filled in: edit coordinates, `akcli plan`, then
   `draw`.
-- `tools/calc-view/` — local web UI (localhost) with SVG illustrations,
+- `akcli view calc` — local web UI (localhost) with SVG illustrations,
   pinned/recent lists and shareable URLs, for humans reviewing your numbers.
 
 ## Workflow integration (this is the point)
@@ -109,8 +115,8 @@ Say so when a user asks, and use the conservative IPC-2221 fit
 - Transmission-line numbers (`microstrip`/`stripline`) are closed-form
   estimates (zero trace thickness); for production impedance control defer to
   the fab's field solver and say so.
-- `fusing` and `battery` are explicitly advisory estimates — never size
-  protection from them without margin.
+- `fusing`, `battery`, and `battery-life` are explicitly advisory estimates
+  — never size protection or promise runtime from them without margin.
 - IPC-2221 track-width is the conservative classic; IPC-2152 measured data
   allows narrower traces. If the layout is tight, mention that.
 - Worst-case regulator output (`regulator` with `vref_min/max`, `tol`) is a

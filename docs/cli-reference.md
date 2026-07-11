@@ -2,8 +2,9 @@
 
 `akcli` (long alias `altium-kicad-cli`) is the command-line entry point of `altium-kicad-cli`. It reads
 Altium binary `.SchDoc`/`.SchLib`/`.PcbDoc` and KiCad `.kicad_sch`/`.kicad_sym`/`.kicad_pcb`, runs
-checks, diffs revisions, draws KiCad schematics, and provides 56 standards-cited engineering
-calculators (`akcli calc`) — with no Altium or KiCad install required.
+checks (including design-intent assertions), diffs revisions, draws KiCad schematics with a
+before/after net-connectivity diff, and provides 60 standards-cited engineering calculators
+(`akcli calc`) — with no Altium or KiCad install required.
 
 > This reference is the contract for the CLI surface. It tracks the subcommands and flags defined in
 > `src/altium_kicad_cli/cli.py`.
@@ -51,15 +52,93 @@ Extract the netlist (net → pin membership) using the shared `netbuild` engine.
 - Output: nets with members, aliases, and source names; `--json` validates against
   `schemas/netlist.schema.json`.
 
+### `akcli nets <file> [--intent-snapshot OUT.json] [--include-unnamed]`
+Print **every net → sorted members**, one line per net (`MID: C1.1, R1.2, R2.1`); unnamed nets
+render as `<unnamed net_...>`. `--json` emits `{source, nets: [{name, stable_id, members}]}`.
+- `--intent-snapshot OUT.json` additionally writes the netlist as a **design-intent JSON**
+  document (`'-'` = stdout) that `akcli check --intent` consumes — the snapshot → edit → assert
+  workflow. Named nets only by default; `--include-unnamed` also captures unnamed nets keyed by
+  their `stable_id`.
+- A snapshot round-trips: `akcli check <sch> --intent <snapshot>` on the unchanged schematic
+  reports zero findings.
+
 ### `akcli component <file> [REF]`
 Without `REF`: list components (designator, library reference, value, footprint, pin count, sheet).
 With `REF`: that component's pin → net table. A missing `REF` prints a notice to **stderr** and
 exits `0`.
 
+### `akcli pins <lib_id> [--at X Y] [--rotation {0,90,180,270}] [--mirror {none,x,y}] [--symbols PATH ...]`
+Op-list authoring helper: resolve a symbol (`Device:R`, `Timer:NE555P`, ...) from the same
+sources the writer uses (repeatable `--symbols`, config `[paths]` `.kicad_sym` entries) and print
+every pin's number, name, electrical type, owning unit, and **world coordinate** for the given
+placement:
+
+```
+$ akcli pins Device:R --at 2000 1000 --symbols .../Device.kicad_sym
+Device:R  @(2000,1000) rot=0 mirror=none
+   pin  name       type       unit      x_mil     y_mil
+     1             passive       1       2000       850
+     2             passive       1       2000      1150
+```
+
+It mirrors the writer's `geometry.pin_world`, so a printed coordinate is byte-for-byte where
+`draw` will place that pin — the exact point wires, labels, and power ports must land on. An
+unresolvable `lib_id` is `SYMBOL_NOT_FOUND` (exit `6`). `--json` emits the table as objects.
+
 ### `akcli check <file>`
-Run the design checks (ERC-lite + power + BOM hygiene) and print findings.
-- `-C/--config` supplies rails, MCU designator, and `[[erc_waiver]]` entries.
-- `--erc` / `--power` / `--bom` select check families (default: all).
+Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print findings.
+- `-C/--config` supplies rails, MCU designator, the schematic grid, and `[[erc_waiver]]` entries.
+- `--erc` / `--power` / `--bom` / `--nets` / `--layout` / `--intent` / `--libsync` select check
+  families (default: `erc`+`power`+`bom`+`nets`+`layout`; `layout` only runs on `.kicad_sch`;
+  `intent` and `libsync` are **opt-in only** — they never run by default).
+- `--nets` is **connectivity hygiene**: `NET_SINGLE_PIN` (a floating label or
+  a power port driving nothing), `NET_OFF_GRID` (pins off the configured grid
+  — wires that touch on screen without ever connecting), and, on `.kicad_sch`
+  inputs, the attachment near-miss lints `NET_PIN_MIDSPAN_TOUCH` (a pin tip on
+  a wire's mid-span with no junction — connected in Altium's dialect, NOT in
+  eeschema), `NET_LABEL_UNATTACHED` (a label anchored on neither a pin tip nor
+  a wire), and `NET_WIRE_CORNER_ON_PIN` (an L-wire corner landing on a pin tip
+  — the classic accidental-short trap). The grid comes from config
+  `[project] grid` (bare number = mils, or `"50mil"` / `"1.27mm"` / `"0.5mm"`
+  strings; default 50 mil), compared in exact integer nanometres.
+- `--layout` is a **geometric-overlap lint**: estimated bounding boxes for
+  symbol bodies and label text, reporting symbols drawn over each other,
+  labels running over a body or pin field, label-label overlaps, texts
+  stacked on one anchor, plus `LAYOUT_POWER_ON_PIN` (a power symbol — notably
+  `PWR_FLAG` — anchored directly on another symbol's pin tip; move it
+  mid-wire, see the `place_pwr_flag` macro), `LAYOUT_WIRE_THROUGH_SYMBOL`
+  (a wire routed through a symbol body), and `LAYOUT_LABEL_OVER_WIRE` (NOTE:
+  label text crossing an unrelated wire). ERC can never see these — a
+  schematic can be electrically perfect and visually unreadable.
+- `--erc` additionally reports `ERC_UNPLACED_UNIT` (WARNING, `.kicad_sch`
+  only): a multi-unit part with units never placed (e.g. gate B of a dual
+  comparator) — terminate them with the `terminate_unused_unit` macro.
+  Waiver rule token: `unplaced_unit`.
+- `--intent FILE` asserts a **design-intent JSON** file (written by
+  `akcli nets --intent-snapshot`, or by hand) against the built netlist:
+
+  ```json
+  {"protocol_version": 1,
+   "mode": "exact",
+   "nets": {"SWCLK": ["U1.4", "J2.2"], "SWDIO": ["U1.5", "J2.4"]}}
+  ```
+
+  `mode` is `"exact"` (the matched net must contain exactly the listed pins)
+  or `"subset"` (containment only). Members are `"REF.PIN"` split on the FIRST
+  dot, so pin names with dots parse (`"U1.P0.25"` = pin `P0.25`). Intent nets
+  are matched to actual nets by **pin membership**, never by display name, so
+  renames can't fake a pass. Findings (all ERROR): `INTENT_PIN_UNKNOWN`,
+  `INTENT_NET_NOT_FOUND`, `INTENT_MISSING_MEMBER`, `INTENT_EXTRA_MEMBER`
+  (exact mode only), `INTENT_NETS_SHORTED` (two intent nets landed on ONE
+  actual net). A malformed file is `BAD_CONFIG` (exit `2`); a wrong
+  `protocol_version` is `PROTOCOL_MISMATCH` (exit `6`); a missing file exits `4`.
+- `--libsync [--symbols DIR ...]` checks the freshness of the embedded
+  `lib_symbols` cache (`.kicad_sch` only). With `--symbols` sources it
+  compares **pin signatures** (number/name/type/position/unit) against the
+  fresh libraries and warns `LIB_EMBED_STALE` on drift (graphics-only drift
+  is deliberately silent); without sources it falls back to an old-format
+  heuristic and notes `LIB_EMBED_OLD_FORMAT` (pre-20231120 document version
+  or symbols missing `exclude_from_sim`), pointing at `akcli relink-symbols`.
 - **Lint-style exit:** non-zero (`1`) when findings are present.
 - `--exit-zero` forces exit `0` even with findings (report mode).
 - `--format text|json|sarif|junit` — `sarif` emits SARIF 2.1.0 for GitHub code
@@ -70,6 +149,31 @@ Run the design checks (ERC-lite + power + BOM hygiene) and print findings.
 ### `akcli diff <file_a> <file_b>`
 Diff two schematic revisions. Nets are matched by **membership** (not display name); components by
 UniqueID, then `(value, footprint, pin-count)` signature, then refdes.
+
+### `akcli arrange <target.kicad_sch> [--apply] [--grid MIL] [--margin MIL] [--symbols PATH ...]`
+Resolve symbol overlaps by nudging **free** components — parts with no wire
+endpoint or label anchor on any pin (moving anchored parts would strand their
+connectivity, which is exactly what `check --nets` flags). Greedy first-fit in
+reading order; anchored overlaps are reported for manual fixing (exit `1`).
+Dry-run by default; `--apply` writes through the draw pipeline (`.bak` +
+connectivity re-verify), so `akcli undo` reverts an arrange. `--symbols`
+supplies extra symbol sources for the write pipeline (same semantics as
+`draw --symbols`).
+
+### `akcli verify <file_a> <file_b> [--strict]`
+**Net-equivalence proof** on top of the diff engine — the one-command answer to
+"did the conversion keep the circuit?". PASS (exit `0`) iff the component set
+matches and every net's **pin membership** is identical; nets that merely
+changed display name are listed but do not fail (conversions rename unnamed
+nets). Component value/footprint drift is reported as a note — `--strict`
+turns it into a failure. `--json` carries the verdict plus the full diff
+report. Works across formats: `akcli verify board.SchDoc board.kicad_sch`.
+
+### `akcli undo <target.kicad_sch> [--apply]`
+Swap the target with the `<name>.bak` that `akcli draw --apply` writes beside
+it. Dry-run by default (prints the part/net delta that restoring would cause);
+`--apply` swaps the two files, so **undo twice is a redo**. Exit `4` when no
+backup exists.
 
 ### `akcli pinmap <file>`
 Emit the MCU pin → net table (MCU chosen by `mcu_designator` in config, or `--mcu REF`).
@@ -86,7 +190,7 @@ Exits `1` when nothing was extracted (an empty table would make `pinmap
 file is missing. The schematic stays authoritative — this table is advisory.
 
 ### `akcli calc [list | info <name> | batch <file> | <name> key=value ...]`
-Offline **engineering calculators** (56): E-series snapping and 2–4-resistor
+Offline **engineering calculators** (60): E-series snapping and 2–4-resistor
 combination search (IEC 60063:2015), voltage dividers and LED resistors,
 LM317/FB regulator networks with worst-case corners (TI SLVS044Y), IPC-2221B
 track width ↔ current ↔ temperature rise and Table 6-1 clearance, via
@@ -101,7 +205,10 @@ Sallen–Key filters (TI SLOA024B), ADC resolution/settling, I²C pull-up window
 (NXP UM10204), RS-485 fail-safe bias (TIA-485-A), CAN split termination
 (ISO 11898-2), crystal load caps (ST AN2867), junction thermal (JESD51), TVS
 selection (IEC 61000-4-5 surge), fuse derating (IEC 60127 R10), NTC inrush,
-battery life, unit conversions (dBm/W/Vrms, mil/mm, oz/µm), resistor
+battery life (`battery` and the datasheet-mAh `battery-life`), LDO headroom
+go/no-go (`ldo-headroom`), open-drain-aware comparator thresholds
+(`comparator-hysteresis`), diode envelope-detector RC validity
+(`envelope-detector`), unit conversions (dBm/W/Vrms, mil/mm, oz/µm), resistor
 color/SMD/EIA-96 markings (IEC 60062:2016), galvanic compatibility
 (MIL-STD-889C).
 - Inputs take engineering notation (`4k7`, `100n`, `2M2`); **every result
@@ -124,9 +231,9 @@ color/SMD/EIA-96 markings (IEC 60062:2016), galvanic compatibility
   chart-based licensed measurement data with no public closed form — this
   tool refuses to fake it (`tracktemp`/`trackwidth` use the conservative
   IPC-2221 fit instead).
-- A local web UI for all calculators ships in `tools/calc-view/`
-  (`python3 tools/calc-view/server.py`, localhost only): grouped sidebar,
-  physical-style SVG illustrations, pinned/recent lists, shareable URLs.
+- `akcli view calc` launches a local web UI for all calculators (localhost
+  only): auto-compute forms with live notation parsing, physical-style SVG
+  illustrations, ⌘K palette, session log, shareable URLs, op-list export.
 
 ### `akcli export <file> [--format protel|kicad|csv] [-o FILE]`
 Export the schematic's **netlist** for other EDA tools. Default `--format protel` (an
@@ -135,29 +242,130 @@ Writes stdout unless `-o` is given. Deterministically sorted; unnamed nets are n
 membership-derived `stable_id`, so re-exports diff cleanly. `--json` is **refused** (exit `2`) —
 use `akcli net --json` for structured output.
 
-### `akcli plan <target.kicad_sch> --ops FILE [--symbols PATH ...]`
+### `akcli plan <target.kicad_sch> --ops FILE [--symbols PATH ...] [--no-net-diff]`
 Validate an op-list against `protocol_version` and `schemas/ops.schema.json`, resolve it against the
 target `.kicad_sch` (symbols from repeatable `--symbols` sources and the target's inline cache), and
-print what *would* change. Never writes.
+print what *would* change. Never writes. Includes the **Net changes** block (below);
+`--no-net-diff` skips it.
 
-### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply]`
-Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 16 ops (see
-`schemas/ops.schema.json`), including `delete_component` / `delete_object` / `move_component` and
-multi-unit placement via `place_component`'s optional `"unit"` field.
+### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets]`
+Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 17 ops + 9 macros (see
+`schemas/ops.schema.json`), including `delete_component` (with `cascade`) / `delete_object` /
+`move_component` / `rename_net` and multi-unit placement via `place_component`'s optional
+`"unit"` field.
 - **Default is a dry run** (no file written): prints per-op results and the connectivity
   verification. (`--dry-run` is accepted but inert — omitting `--apply` already is the dry run.)
 - `--apply` performs the write via the atomic snapshot → temp → verify-on-temp → `os.replace`
   pipeline, writing a `<target>.bak` copy alongside the file. The write is rejected (exit `6`)
-  if any op errors or the connectivity verifier finds an ERROR.
+  if any op errors or the connectivity verifier finds an ERROR (e.g. `DANGLING_ENDPOINT`,
+  `DANGLING_BUS_ENTRY` — a bus entry end landing on neither a bus nor a wire).
+- **Net changes** (both `plan` and `draw`, dry-run and apply): the op-list is dry-applied to a
+  temp copy placed *next to the target* (so a hierarchical root still resolves its child
+  sheets) and the before/after netlists are diffed by **pin membership** (never by name).
+  The block prints one deterministic line per change, most severe first:
+
+  ```
+  Net changes:
+    ! SPLIT THR (4 pins) -> THR(2) + <unnamed@R7.2>(2)
+    ! MERGE MID + +3V3 -> MID
+    ~ VTH: +U1.7 (5->6 pins)
+    = RENAME MID -> VOUT (3 pins)
+    + NEW BALL1_N (5)
+    - GONE SENSE1 (3)
+  ```
+
+  `(none)` when connectivity is unchanged; the block is suppressed (not shown as "(none)") when
+  the dry-apply itself fails. `--no-net-diff` skips the computation. If the diff cannot be
+  computed at all (unreadable target, missing child sheet, ...) a
+  `WARNING: net diff unavailable: ...` line goes to stderr — never a silent skip.
+- `--strict-nets` (with `--apply`): **refuse to write** (exit `6`, evidence lines on stderr)
+  when the diff shows a split or merge touching a *named* net on either side — splits/merges of
+  unnamed nets are ordinary wiring edits and pass. It forces the diff even under `--no-net-diff`,
+  and it fails **closed**: when the diff cannot be computed, the write is refused
+  (`REFUSED: --strict-nets: net diff unavailable (...)`) rather than waved through.
+- A final status line states the outcome unambiguously:
+  `status: dry-run — nothing written (re-run with --apply)`,
+  `status: APPLIED — wrote board.kicad_sch (backup board.kicad_sch.bak; akcli undo reverts)`, or
+  `REFUSED: --strict-nets: net split/merge touches a named net; nothing written`.
+- `--json` payloads carry `"status"` and
+  `"net_diff": {"equivalent", "risk", "lines"}` (or `null` when unavailable).
+
+### `akcli relink-symbols <target.kicad_sch> [--libs DIR ...] [--only NICKS] [--apply]`
+Re-embed **stale `lib_symbols` cache entries** from fresh `.kicad_sym` libraries — the fix for
+KiCad's `lib_symbol_mismatch` ERC noise on files carrying old embedded symbols. For each embedded
+`Nick:Name` entry it resolves `<libdir>/<Nick>.kicad_sym` (`--libs` takes dirs or `.kicad_sym`
+files, repeatable; default: the KiCad.app SharedSupport symbols dir when it exists) and
+classifies it `up-to-date`, `replace`, or `missing-lib` (comparison is whitespace-insensitive,
+so formatting alone never triggers a replace):
+
+```
+$ akcli relink-symbols board.kicad_sch
+  replace     Device:R  [/Applications/KiCad/.../symbols/Device.kicad_sym]
+  replace     power:GND  [/Applications/KiCad/.../symbols/power.kicad_sym]
+status: dry-run — 2 replacement(s) pending; re-run with --apply
+```
+
+- Dry-run by default. `--apply` splices the fresh blocks in, then a **safety gate** re-reads
+  both versions and requires identical net membership — a moved pin in the new library refuses
+  the write with `VERIFY_FAILED` (exit `6`) and leaves the file untouched. On pass it writes
+  `<name>.bak` and replaces atomically.
+- `--only power,Device` restricts to the listed library nicknames (or full lib_ids).
+- Exit `6` when any entry is `missing-lib` (scope with `--only` to silence intentionally
+  unavailable nicks); `--json` lists the actions (minus the raw symbol text).
 
 ### `akcli ops <list|template OP> [--required-only]`
-Op-list authoring kit: `list` prints the 16-op vocabulary with required fields
-and per-executor support; `template` emits a fill-in JSON op-list skeleton for
-one op (guide: [docs/op-list-authoring.md](op-list-authoring.md)).
+Op-list authoring kit: `list` prints the 17-op vocabulary with required fields
+and per-executor support, plus the **9 macro ops** (`connect_and_label`,
+`place_pwr_flag`, `terminate_unused_unit`, `place_divider`, `place_decoupling`,
+`place_pullup`, `place_led_indicator`, `place_rc_filter`, `place_crystal`)
+that expand to core ops before validation; `template` emits a fill-in JSON
+op-list skeleton for any op or macro (guide:
+[docs/op-list-authoring.md](op-list-authoring.md)). A mistyped op or
+calculator name gets a did-you-mean suggestion.
 
-### `akcli jlc <search|show|add> ...`
-JLCPCB/LCSC part search and library conversion — the only **networked** subcommand family. See
-[docs/jlc.md](jlc.md) for the full reference.
+### `akcli view <calc|live|SCH> [PATH] [--port N] [--no-browser] [--state-dir DIR] [--max-steps N]`
+ONE local dashboard server for both pages (127.0.0.1 only, zero dependencies,
+HTML bundled in the package). Default port `8765`, auto-incrementing when
+busy. `/` is the **hub** — the entry page the browser opens on launch, with
+one card per dashboard (the live card shows the watched file, step count and
+latest ERC state in real time; `C`/`L` jump straight in).
+`view <sch.kicad_sch>` is shorthand for `view live <sch>`; `view calc`
+serves `/calc` alone.
+- `/calc` — the calculator bench: home launcher + grouped sidebar with fuzzy
+  filter, ⌘K command palette, forms that auto-compute as you type with live
+  engineering-notation parse hints (defaults shown in typed-back notation,
+  e.g. `35u`), results with formal references, change chips vs the previous
+  run, click-to-copy values, copy as markdown/JSON/CLI, diagram captions
+  annotated with the computed values, a session log, shareable URL hashes,
+  theme-aware physical-style SVG illustrations, and one-click op-list export
+  for the mappable design calculators (`GET /api/ops`, the web twin of
+  `calc --ops`).
+- `/live` — watches the schematic; every on-disk change (e.g. an
+  `akcli draw --apply`) exports every sheet's SVG via `kicad-cli` and appends
+  a step to the timeline **immediately**; KiCad's JSON ERC back-fills the
+  step seconds later (badge `ERC…` while pending). Updates are pushed over
+  Server-Sent Events (`/live/events`), with a slow poll as fallback. The
+  dashboard: inline SVG with zoom/pan/crop, sheet tabs for hierarchical
+  designs, per-step ERC badges plus a violation panel that marks **NEW**
+  findings vs the previous step (with click-to-locate markers on the sheet),
+  diff mode (previous step ghosted in red), timeline replay, PNG export,
+  parts-trend sparkline, a note box that annotates the next step
+  (`POST /live/note`, the UI twin of `note.txt`), and a clear-timeline
+  action. Steps live in a per-run temp dir; `--state-dir DIR` persists the
+  timeline across runs and `--max-steps N` bounds it (default 500 — oldest
+  SVGs are deleted; `0` = unlimited). Needs `kicad-cli` (KiCad 8+) on
+  `PATH`, in the macOS app bundle, or via `KICAD_CLI=`. `AUTO_REVERT=1` asks
+  an open KiCad editor to File→Revert after each step (macOS only).
+
+### `akcli jlc <search|show|bom|add> ...`
+JLCPCB/LCSC part search, BOM purchasability check (`jlc bom <sch>` — stock/tier-price/est-cost
+per BOM line via LCSC/MPN parameters; `--qty N` evaluates at build quantity; `--suggest`/`--fix`
+find and write catalog replacements for missing/dead part ids — `--fix` writes only
+high-confidence matches, `--fix-all` also writes low-confidence ones; `--csv OUT.csv` exports a
+JLCPCB upload BOM CSV, `'-'` = stdout), and library conversion — the only **networked**
+subcommand family. Network failures exit `7` (`ERROR: NETWORK: ...`); transient errors are
+retried with backoff, and a stale cached response is served with a warning when retries are
+exhausted. See [docs/jlc.md](jlc.md) for the full reference.
 
 ## Exit codes
 
@@ -165,12 +373,12 @@ JLCPCB/LCSC part search and library conversion — the only **networked** subcom
 |---|---|
 | `0` | Success / no findings. |
 | `1` | Check findings present (lint-style; suppress with `--exit-zero`). |
-| `2` | Usage / argument error. |
+| `2` | Usage / argument / config error (incl. `BAD_CONFIG`, `PATH_OUTSIDE_ROOT`). |
 | `3` | Parse error (corrupt OLE2 or S-expression). |
 | `4` | File not found. |
-| `5` | Unsupported format. |
-| `6` | Op-list or verify failure. |
-| `7` | Required external tool missing. |
+| `5` | Unsupported format (incl. `ALTIUM_UNSUPPORTED` features). |
+| `6` | Op-list or verify failure (incl. `--strict-nets` refusal, `relink-symbols` gate refusal, `PROTOCOL_MISMATCH`). |
+| `7` | Required external tool missing **or network failure** (`KICAD_CLI_MISSING`/`KICAD_CLI_TIMEOUT`, `jlc` `ERROR: NETWORK`, `BINFETCH_*`). |
 
 ## Structured errors
 
@@ -180,12 +388,27 @@ Without `--debug`, failures print a single structured line, e.g.:
 ERROR: ALTIUM_FAT_CYCLE: FAT chain revisits sector 42 (cycle); aborting
 ```
 
-Error codes (registry in `src/altium_kicad_cli/errors.py`) include `ALTIUM_BAD_MAGIC`,
-`ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`,
-`ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG`,
-`SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`,
-`OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH`, `PATH_OUTSIDE_ROOT`,
-`KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, and `BAD_CONFIG`.
+Error codes (frozen registry in `src/altium_kicad_cli/errors.py`), grouped by the exit code they
+surface as:
+
+| Exit | Error codes |
+|---|---|
+| `3` (parse) | `ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`, `ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG` |
+| `5` (unsupported) | `ALTIUM_UNSUPPORTED` |
+| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH` |
+| `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG` |
+| `7` (tool/network) | `KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, `BINFETCH_DOWNLOAD`, `BINFETCH_CHECKSUM` (and `jlc`'s `ERROR: NETWORK: ...` line) |
+
+Two related but distinct vocabularies:
+
+- **Per-op results** (`plan`/`draw` output) carry an `error_code` from the same registry; a
+  crashing op handler is contained and reported as error code `INTERNAL` instead of a traceback.
+- **Finding codes** (`check` output; these drive exit `1`, not the table above) now also include
+  `NET_PIN_MIDSPAN_TOUCH`, `NET_LABEL_UNATTACHED`, `NET_WIRE_CORNER_ON_PIN`,
+  `LAYOUT_POWER_ON_PIN`, `LAYOUT_WIRE_THROUGH_SYMBOL`, `LAYOUT_LABEL_OVER_WIRE`,
+  `ERC_UNPLACED_UNIT`, `INTENT_PIN_UNKNOWN`, `INTENT_NET_NOT_FOUND`, `INTENT_MISSING_MEMBER`,
+  `INTENT_EXTRA_MEMBER`, `INTENT_NETS_SHORTED`, `LIB_EMBED_STALE`, `LIB_EMBED_OLD_FORMAT`, and
+  the connectivity-gate finding `DANGLING_BUS_ENTRY`.
 
 ## Examples
 
@@ -196,6 +419,9 @@ akcli check main.SchDoc -C altium-kicad-cli.toml          # exit 1 if findings
 akcli diff  v1.SchDoc v2.SchDoc
 akcli pinmap main.SchDoc -C altium-kicad-cli.toml --expected pins.csv
 akcli export main.SchDoc --format protel -o board.net
+akcli nets board.kicad_sch --intent-snapshot intent.json  # snapshot the netlist you meant
 akcli plan board.kicad_sch --ops ops.json --symbols Device.kicad_sym
-akcli draw board.kicad_sch --ops ops.json --symbols Device.kicad_sym --apply
+akcli draw board.kicad_sch --ops ops.json --symbols Device.kicad_sym --apply --strict-nets
+akcli check board.kicad_sch --intent intent.json          # assert the intent held
+akcli relink-symbols board.kicad_sch --apply              # refresh embedded lib_symbols
 ```

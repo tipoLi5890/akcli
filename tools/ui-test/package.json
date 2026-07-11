@@ -1,0 +1,9 @@
+{
+  "name": "akcli-ui-test",
+  "private": true,
+  "type": "module",
+  "description": "Full-browser regression for the akcli view dashboards (drives the system Chrome via puppeteer-core).",
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

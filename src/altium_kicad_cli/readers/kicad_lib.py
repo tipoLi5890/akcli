@@ -90,6 +90,10 @@ def _parse_pin(node: sexpr.SNode) -> model.Pin:
     at = node.find("at")
     x_mm = float(_atom_value(at, 1) or 0.0) if at else 0.0
     y_mm = float(_atom_value(at, 2) or 0.0) if at else 0.0
+    try:
+        angle = int(round(float(_atom_value(at, 3) or 0.0))) % 360 if at else 0
+    except (TypeError, ValueError):
+        angle = 0
 
     name_node = node.find("name")
     name = _atom_value(name_node, 1) if name_node else None
@@ -103,6 +107,7 @@ def _parse_pin(node: sexpr.SNode) -> model.Pin:
         x_mil=_mm_to_mil(x_mm),
         y_mil=_mm_to_mil(y_mm),
         electrical_type=etype,
+        orientation=angle,
     )
 
 
@@ -318,3 +323,68 @@ def pin_offsets(sym: model.SymbolDef) -> list[tuple[str, float, float]]:
     ``(extends ...)`` derived symbol).
     """
     return [(p.number, p.x_mil, p.y_mil) for p in sym.pins]
+
+
+def is_power_symbol(symdef: model.SymbolDef) -> bool:
+    """True when the symbol carries KiCad's ``(power)`` marker."""
+    body = symdef.body_sexpr
+    return body is not None and body.find("power") is not None
+
+
+def body_extent_mil(
+    symdef: model.SymbolDef, unit: int = 1,
+) -> tuple[float, float, float, float] | None:
+    """Lib-frame (mil, +Y up) extent of the *drawn body* of ``unit`` — no pins.
+
+    Walks the graphic primitives (rectangle/circle/arc/polyline/bezier) of the
+    body and of the ``Name_<u>_<style>`` sub-symbols a placed ``unit`` draws
+    (``u`` in {0, unit}, style <= 1; style >= 2 is the DeMorgan alternate).
+    Pin-only symbols (or ``extends`` stubs) return ``None`` — fall back to the
+    pin bounding box. This is what text autoplacement and the layout lint need:
+    the pin box alone under-reports connectors (pins on one side) and power
+    symbols (single pin at the origin).
+    """
+    body = symdef.body_sexpr
+    if body is None:
+        return None
+    xs: list[float] = []
+    ys: list[float] = []
+
+    def take(node: sexpr.SNode | None, idx_x: int = 1, idx_y: int = 2) -> None:
+        if node is not None:
+            xs.append(_mm_to_mil(float(_atom_value(node, idx_x) or 0.0)))
+            ys.append(_mm_to_mil(float(_atom_value(node, idx_y) or 0.0)))
+
+    holders = [body]
+    for sub in body.find_all("symbol"):
+        u, style = _sub_unit_style(_atom_value(sub, 1))
+        if style is not None and style >= 2:
+            continue
+        if u is None or u in (0, unit):
+            holders.append(sub)
+    for holder in holders:
+        for g in holder.children or []:
+            if not g.is_list:
+                continue
+            if g.tag == "rectangle":
+                take(g.find("start"))
+                take(g.find("end"))
+            elif g.tag == "circle":
+                c = g.find("center")
+                if c is not None:
+                    r = _mm_to_mil(float(_atom_value(g.find("radius"), 1) or 0.0))
+                    cx = _mm_to_mil(float(_atom_value(c, 1) or 0.0))
+                    cy = _mm_to_mil(float(_atom_value(c, 2) or 0.0))
+                    xs.extend((cx - r, cx + r))
+                    ys.extend((cy - r, cy + r))
+            elif g.tag == "arc":
+                take(g.find("start"))
+                take(g.find("mid"))
+                take(g.find("end"))
+            elif g.tag in ("polyline", "bezier"):
+                pts = g.find("pts")
+                for xy in (pts.find_all("xy") if pts is not None else []):
+                    take(xy)
+    if not xs:
+        return None
+    return min(xs), min(ys), max(xs), max(ys)

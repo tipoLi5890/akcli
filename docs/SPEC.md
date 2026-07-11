@@ -249,13 +249,19 @@ class NetPrimitives:
 ### 2.1 Coordinate / unit contract for ops (LOCKED)
 - Origin **top-left, +Y down**, units **mils**, default **50-mil grid** (pins/wire endpoints snap to grid).
 - Rotation is an **enum `{0,90,180,270}`** (never free degrees — both tools quantize). `add_text` may use any angle.
-- Mirror is an **enum `{none,x,y}`**. Transform order: **rotate, then mirror**.
+- Mirror is an **enum `{none,x,y}`**. Transform order: **rotate, then mirror**. Rotation
+  direction (established against kicad-cli over the full rot×mirror matrix, v0.4): a file
+  angle of `+90` rotates **counter-clockwise on screen**, i.e. `(x,y) → (y,−x)` in the
+  +Y-down frame.
 - Wire geometry is a **structured array of `[x,y]` vertices** (even length, orthogonal segments). CSV-in-JSON
   is banned.
 - Wire/port endpoints MAY be a **pin reference string `"REF.PIN"`** (e.g. `"U3.7"`); the executor snaps it to
   the pin's computed world coordinate. Raw `[x,y]` snaps to grid.
+- Label/power-port anchors MAY additionally be **`"mid(REF.PIN,REF.PIN)"`** (v0.4): the midpoint
+  of two exactly axis-aligned pins, snapped to grid along the wire axis (misaligned pins fail
+  with `NON_ORTHOGONAL_WIRE`).
 
-### 2.2 Op vocabulary (13 LOCKED ops + 3 additive v0.2 ops)
+### 2.2 Op vocabulary (13 LOCKED ops + 3 additive v0.2 ops + 1 additive v0.4 op)
 
 | op | purpose | KiCad writer | Altium live |
 |---|---|---|---|
@@ -270,9 +276,10 @@ class NetPrimitives:
 | `add_bus` | bus polyline | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
 | `add_bus_entry` | bus entry (fixed 2.54 mm @ 45°) | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
 | `add_text` | free text/note | ✅ | ✅ |
-| `delete_component` | remove ALL placed instances of a designator (wires left for the gate to flag; absent target = replay-safe no-op) | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
-| `delete_object` | remove ONE top-level object by uuid | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `delete_component` | remove ALL placed instances of a designator (wires left for the gate to flag; absent target = replay-safe no-op; optional `cascade: true` also removes attached wires/labels/no-connects plus junctions no longer needed by surviving wires) | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `delete_object` | remove ONE top-level object by uuid, or via `match: {kind, name?, at?}` selector (exactly-one semantics) | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
 | `move_component` | move one instance (designator + optional `unit`); its properties travel along, wires are NOT stretched | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `rename_net` (v0.4) | rewrite matching label texts + power-port net Values (`scope` restricts kind; 0 matches = replay-safe note) | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
 
 `place_component` additionally takes an optional `"unit": N` (multi-unit parts: each unit is
 its own placed instance sharing the designator; `"REF.PIN"` resolves against the instance whose

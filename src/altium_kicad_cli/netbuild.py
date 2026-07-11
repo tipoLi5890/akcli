@@ -11,11 +11,17 @@ LOCKED pipeline (``build_nets``):
 
 1. Exact-integer geometric union-find on wire segments.
 2. Union each junction(29) point onto every segment it lies on.
-3. T-junction: union every wire vertex lying on another wire's mid-span.
+3. T-junction: union every wire vertex lying on another wire's mid-span —
+   **only when** ``t_midspan_connects`` (the Altium rule). eeschema does NOT
+   join a wire end to another wire's interior without an explicit junction
+   node (verified against ``kicad-cli sch export netlist``, KiCad 10.0.4:
+   the arm pin stayed ``unconnected-*``), so the KiCad reader passes
+   ``False``; eeschema-authored files always carry the junction anyway.
 4. Union pins/labels lying on a segment (exact-integer cross-product ``on_seg``).
    Pins connect at segment ENDPOINTS or at a junction-marked point — a bare
    mid-span touch does not connect (eeschema's rule; Altium's editor inserts a
-   junction record for every pin tap). Labels connect anywhere along the wire.
+   junction record for every pin tap). Labels connect anywhere along the wire
+   (kicad-cli-verified: a mid-span local label joins the net).
 5. GLOBAL same-name merge: group label/power-port names, union every pair of
    clusters sharing any name. This stitches the two STAT clusters AND collapses
    same-name ``GND`` ports. Net labels are sheet-local; power ports / ports /
@@ -123,8 +129,15 @@ def _name_key(scope: str, text: str, sheet: str):
     return (sheet, text)
 
 
-def build_nets(prims: model.NetPrimitives) -> list[model.Net]:
-    """Infer nets from raw primitives. See module docstring for the pipeline."""
+def build_nets(
+    prims: model.NetPrimitives, *, t_midspan_connects: bool = True
+) -> list[model.Net]:
+    """Infer nets from raw primitives. See module docstring for the pipeline.
+
+    ``t_midspan_connects`` selects step 3's dialect: ``True`` (Altium — a wire
+    vertex on another wire's mid-span connects with no explicit dot), ``False``
+    (eeschema — only a junction node joins a mid-span touch).
+    """
     dsu = _DSU()
 
     # Geometry is per-sheet: every node key is (sheet, qpoint), so two sheets
@@ -159,14 +172,16 @@ def build_nets(prims: model.NetPrimitives) -> list[model.Net]:
                 dsu.union(nj, _node(j.sheet, qa))
 
     # (3) T-junctions — a wire vertex on another same-sheet wire's mid-span.
-    for sheet, segs in segs_by_sheet.items():
-        for i, (qa, qb) in enumerate(segs):
-            for v in (qa, qb):
-                for k, (a2, b2) in enumerate(segs):
-                    if k == i or v == a2 or v == b2:
-                        continue
-                    if _on_seg(v, a2, b2):
-                        dsu.union(_node(sheet, v), _node(sheet, a2))
+    # Altium dialect only; eeschema requires a junction node (see docstring).
+    if t_midspan_connects:
+        for sheet, segs in segs_by_sheet.items():
+            for i, (qa, qb) in enumerate(segs):
+                for v in (qa, qb):
+                    for k, (a2, b2) in enumerate(segs):
+                        if k == i or v == a2 or v == b2:
+                            continue
+                        if _on_seg(v, a2, b2):
+                            dsu.union(_node(sheet, v), _node(sheet, a2))
 
     # (4a) pins on segments (same sheet). A pin connects at a segment ENDPOINT,
     # or anywhere on the segment when a junction marks that exact point — but a
@@ -200,8 +215,22 @@ def build_nets(prims: model.NetPrimitives) -> list[model.Net]:
     # (5)/(8) GLOBAL same-name merge — stitches disjoint clusters sharing a name
     # (the STAT fix; same-name GND collapse; cross-sheet Port/global join).
     name_groups: dict = defaultdict(list)
+    global_on_sheet: dict = defaultdict(set)  # text -> sheets with a global anchor
     for text, scope, sheet, ql in label_nodes:
         name_groups[_name_key(scope, text, sheet)].append(ql)
+        if scope in _GLOBAL_SCOPES and scope != "hier":
+            global_on_sheet[text].add(sheet)
+    # (5b) a LOCAL label also joins a same-name global-class name (power port /
+    # global label) anchored on the SAME sheet — KiCad semantics, verified
+    # against kicad-cli 10.0.4 netlists (tests/test_kicad_parity.py): eeschema
+    # merges a local "X" with a same-sheet global "X" / power port EVEN WHEN
+    # the two are physically disconnected, but NEVER across sheets (a child
+    # sheet's local "+3V3" netlists as "/child/+3V3", separate from "+3V3").
+    # This is what makes the label-on-pin pattern connect to rails.
+    for key, nodes in list(name_groups.items()):
+        first, text = key
+        if first != "\x00global" and first in global_on_sheet.get(text, ()):
+            name_groups[("\x00global", text)].extend(nodes)
     cross_cluster_names: set[str] = set()
     for (_, text), nodes in name_groups.items():
         roots = {dsu.find(n) for n in nodes}

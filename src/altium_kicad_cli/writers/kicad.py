@@ -23,6 +23,13 @@ Per-op behaviour (SPEC §2.2):
   ``add_bus_entry`` — single-node primitives.
 * ``place_power_port`` (+ sugar ``place_gnd`` / ``place_vcc``) — a power symbol with
   an auto-allocated ``#PWR0<n>`` reference.
+* ``add_net_label`` / ``place_power_port`` ``at`` also accepts
+  ``"mid(REF.PIN,REF.PIN)"`` — the midpoint of two axis-aligned pins, snapped to
+  the 50-mil grid along the wire axis (labels auto-orient along that axis).
+* ``delete_component`` with ``"cascade": true`` also removes wires ending on a
+  deleted pin plus labels/no_connects/junctions anchored there;
+  ``delete_object`` alternatively takes a ``match`` selector (exactly-one).
+* ``rename_net`` — rewrite matching label texts + power-port net Values.
 
 **Atomic write with backup + verify (SPEC §3.5, risk #13).** Nothing is written in
 ``--dry-run`` (the default). On ``apply=True`` the sequence is: snapshot the
@@ -47,7 +54,7 @@ from pathlib import Path
 
 from .. import model, units
 from ..errors import AkcliError, fail
-from ..ops import PROTOCOL_VERSION, validate_oplist
+from ..ops import PROTOCOL_VERSION, parse_mid_anchor, validate_oplist
 from ..readers import kicad_lib, sexpr
 from ..readers.sexpr import SNode
 from ..report import Severity
@@ -139,10 +146,24 @@ def _effects(hide: bool = False, justify: str | None = None) -> SNode:
     kids = [_atom("effects"),
             _list(_atom("font"), _list(_atom("size"), _atom("1.27"), _atom("1.27")))]
     if justify:
-        kids.append(_list(_atom("justify"), _atom(justify)))
+        kids.append(_list(_atom("justify"), *[_atom(t) for t in justify.split()]))
     if hide:
         kids.append(_list(_atom("hide"), _atom("yes")))
     return _list(*kids)
+
+
+def _label_justify(tag: str, orientation: int) -> str:
+    """The ``(justify ...)`` eeschema pairs with a label's angle.
+
+    KiCad renders label text horizontal-or-vertical only (never upside-down):
+    the side it extends to comes from the JUSTIFICATION, not the angle — a
+    180° label without ``(justify right)`` still runs +X, straight over the
+    symbol it names. eeschema's four spin styles are (0,left) (90,left)
+    (180,right) (270,right); local labels additionally sit on the wire, so
+    they carry ``bottom`` to lift the text above it.
+    """
+    j = "left" if orientation in (0, 90) else "right"
+    return f"{j} bottom" if tag == "label" else j
 
 
 def _uuid_node(value: str) -> SNode:
@@ -322,8 +343,10 @@ def _instance_component(sym: SNode, lib_id: str):
     )
 
 
-def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tuple[int, int]:
-    """World coordinate (nm) of ``ref.pin_number`` in the current document.
+def _resolve_pin_inst(
+    doc: SNode, ctx: dict, ref: str, pin_number: str,
+) -> tuple[model.Component, model.Pin, tuple[int, int]]:
+    """``(instance, pin, world_nm)`` of ``ref.pin_number`` in the current document.
 
     A multi-unit part is several placed instances sharing ``ref``; the pin is
     looked up on the instance whose UNIT owns it (eeschema exposes only that
@@ -345,7 +368,7 @@ def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tupl
         comp = _instance_component(sym, lib_id)
         for pin in kicad_lib.unit_pins(symdef, unit):
             if pin.number == pin_number:
-                return geometry.pin_world(symdef, comp, pin)
+                return comp, pin, geometry.pin_world(symdef, comp, pin)
     if symdef is not None:
         owners = sorted({p.owner_part_id for p in symdef.pins if p.number == pin_number})
         if owners:
@@ -355,6 +378,38 @@ def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tupl
                 f'place it first (place_component with "unit": {owners[0]})',
             )
     fail("VERIFY_FAILED", f"component {ref!r} has no pin {pin_number!r}")
+
+
+def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tuple[int, int]:
+    """World coordinate (nm) of ``ref.pin_number`` (see :func:`_resolve_pin_inst`)."""
+    return _resolve_pin_inst(doc, ctx, ref, pin_number)[2]
+
+
+def _pin_at_point(
+    doc: SNode, ctx: dict, p: tuple[int, int],
+) -> tuple[model.Component, model.Pin] | None:
+    """The placed ``(instance, pin)`` whose electrical tip sits exactly at ``p``.
+
+    Reverse lookup for label auto-orientation: a label anchored on a raw
+    coordinate that happens to be a pin tip should still orient away from that
+    pin's body. Returns the first match (coincident pins of two symbols share
+    the point anyway; either orientation choice is between the same bodies).
+    """
+    for sym in _placed_symbols(doc):
+        lib_id_node = sym.find("lib_id")
+        lib_id = (lib_id_node.children[1].value or "") if lib_id_node is not None else ""
+        if not lib_id:
+            continue
+        try:
+            symdef = _ctx_symdef(doc, ctx, lib_id)
+        except AkcliError:
+            continue
+        unit = _symbol_unit(sym)
+        comp = _instance_component(sym, lib_id)
+        for pin in kicad_lib.unit_pins(symdef, unit):
+            if geometry.pin_world(symdef, comp, pin) == p:
+                return comp, pin
+    return None
 
 
 def _resolve_endpoint(doc: SNode, ctx: dict, ep: object) -> tuple[int, int]:
@@ -380,6 +435,53 @@ def _point_nm(at: object) -> tuple[int, int]:
     fail("OFF_GRID", f"malformed point {at!r}")
 
 
+# mid() anchors: the two pins must be axis-aligned within half a grid step.
+def _snap_within_nm(v: int, a: int, b: int) -> int:
+    """Snap ``v`` to the 50-mil grid, clamped into ``[min(a,b), max(a,b)]``.
+
+    Clamping keeps the anchor ON the wire between off-grid pins — a snapped
+    midpoint outside the span would leave the label/flag floating.
+    """
+    s = int(round(v / _GRID_NM)) * _GRID_NM
+    lo, hi = min(a, b), max(a, b)
+    return min(max(s, lo), hi)
+
+
+def _resolve_mid_anchor(
+    doc: SNode, ctx: dict, at: str, opname: str,
+) -> tuple[tuple[int, int], str]:
+    """Resolve ``"mid(A.p,B.p)"`` to ``(point_nm, wire_axis)``.
+
+    Both pins must be EXACTLY axis-aligned (equal integer-nm cross-axis
+    coordinate); the midpoint is snapped to the 50-mil grid ALONG the wire
+    axis (``"x"`` horizontal / ``"y"`` vertical) while the cross-axis
+    coordinate keeps the pins' shared value — so the anchor always lands on
+    the straight wire drawn between the two pins. A tolerance here would be
+    a lie: a snapped anchor between misaligned pins leaves the (slightly
+    diagonal) wire, and netbuild's exact-integer on-segment test would let
+    the label/flag silently attach to nothing.
+    """
+    parsed = parse_mid_anchor(at)
+    if parsed is None:
+        fail("OP_UNSUPPORTED",
+             f'{opname}: malformed mid() anchor {at!r}; '
+             f'expected "mid(REF.PIN,REF.PIN)"')
+    a, b = parsed
+    pa = _resolve_pin_world(doc, ctx, *a.rsplit(".", 1))
+    pb = _resolve_pin_world(doc, ctx, *b.rsplit(".", 1))
+    dx, dy = abs(pa[0] - pb[0]), abs(pa[1] - pb[1])
+    if min(dx, dy) != 0:
+        fail("NON_ORTHOGONAL_WIRE",
+             f"{opname}: mid() pins are not axis-aligned: "
+             f"{a} at ({units.nm_to_mil(pa[0]):g},{units.nm_to_mil(pa[1]):g}) mil, "
+             f"{b} at ({units.nm_to_mil(pb[0]):g},{units.nm_to_mil(pb[1]):g}) mil")
+    if dx >= dy:   # wire runs along X
+        return (_snap_within_nm((pa[0] + pb[0]) // 2, pa[0], pb[0]),
+                (pa[1] + pb[1]) // 2), "x"
+    return ((pa[0] + pb[0]) // 2,
+            _snap_within_nm((pa[1] + pb[1]) // 2, pa[1], pb[1])), "y"
+
+
 # --------------------------------------------------------------------------- #
 # property helpers
 # --------------------------------------------------------------------------- #
@@ -397,9 +499,10 @@ def _set_property(sym: SNode, key: str, value: str) -> None:
             return
     at = sym.find("at")
     pos = (_at_nm(at) if at is not None else (0, 0))
-    # Bookkeeping fields render as raw text on top of the body in eeschema;
-    # KiCad itself creates them hidden, so do the same.
-    hide = key in _HIDDEN_PROPERTIES
+    # KiCad creates every field except Reference/Value hidden by default —
+    # a NEW property node sits at the symbol anchor, so a visible custom
+    # field (LCSC, MPN, ...) renders as raw text piled on the body.
+    hide = key not in _VISIBLE_PROPERTIES
     prop = _list(
         _atom("property"),
         _atom(_q(key)),
@@ -427,7 +530,7 @@ def _at_nm(at: SNode) -> tuple[int, int]:
 
 
 # Properties eeschema creates hidden (raw text over the body otherwise).
-_HIDDEN_PROPERTIES = frozenset({"Footprint", "Datasheet", "Description"})
+_VISIBLE_PROPERTIES = frozenset({"Reference", "Value"})
 
 # Gap between a symbol's pin bounding box and its Reference/Value text (nm).
 _PROP_MARGIN_NM = units.mm_to_nm(1.27)
@@ -461,17 +564,41 @@ def _free_anchor(ctx: dict, pos: tuple[int, int],
     return (x, y)
 
 
+def _body_box_world(
+    symdef, unit: int, comp, origin: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    """World (nm, +Y down) box of the symbol's drawn body, or ``None``."""
+    ext = kicad_lib.body_extent_mil(symdef, unit)
+    if ext is None:
+        return None
+    x0, y0, x1, y1 = ext
+    pts = [
+        geometry.transform_point(
+            (geometry.mil_to_nm(cx), -geometry.mil_to_nm(cy)),
+            comp.rotation, comp.mirror, origin,
+        )
+        for (cx, cy) in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
+    ]
+    return (min(p[0] for p in pts), min(p[1] for p in pts),
+            max(p[0] for p in pts), max(p[1] for p in pts))
+
+
 def _autoplace_ref_value(sym: SNode, symdef, unit: int, ctxpos: tuple[int, int],
                          ctx: dict | None = None) -> None:
     """Position Reference/Value clear of the body (KiCad-autoplace style).
 
     The writer used to leave every property at the component origin (and the
     synthesized Reference at absolute 0,0), stacking raw text over the symbol
-    body. Heuristic: from the placed unit's pin bounding box, put the text to
-    the RIGHT of a tall (vertical-pin) part, or ABOVE/BELOW a wide one; power
-    symbols show only their value below the anchor and hide the #PWR reference,
-    exactly like eeschema. Neighboring parts' labels are avoided via the
-    per-apply anchor registry (deterministic bump, replay-stable).
+    body. Heuristic: from the placed unit's pin bounding box UNION its drawn
+    body extent, put the text to the RIGHT of a tall part, or ABOVE/BELOW a
+    wide one; power symbols hide the reference (any ``(power)`` symbol, not
+    just ``#``-refs — a PWR_FLAG placed as ``FLG1`` must not print its ref)
+    and show the value past the side the body extends to (+5V arrow: above;
+    GND: below), exactly like eeschema. Property text angle compensates the
+    instance rotation (KiCad renders properties at symbol+property angle), so
+    a rotated resistor's "R3"/"470" still read horizontally. Neighboring
+    parts' labels are avoided via the per-apply anchor registry
+    (deterministic bump, replay-stable).
     """
     ctx = ctx if ctx is not None else {}
     lib_id_node = sym.find("lib_id")
@@ -479,7 +606,11 @@ def _autoplace_ref_value(sym: SNode, symdef, unit: int, ctxpos: tuple[int, int],
     comp = _instance_component(sym, lib_id)
     pts = [geometry.pin_world(symdef, comp, p) for p in kicad_lib.unit_pins(symdef, unit)]
     ref = _symbol_reference(sym) or ""
-    is_power = ref.startswith("#")
+    is_power = ref.startswith("#") or kicad_lib.is_power_symbol(symdef)
+    # Counter-rotate so the text renders horizontal on a rotated instance
+    # (mod 180: KiCad never draws text upside-down, and an angle of 180
+    # WOULD render inverted rather than normalize).
+    text_angle = (360 - comp.rotation) % 180
 
     if pts:
         min_x = min(p[0] for p in pts); max_x = max(p[0] for p in pts)
@@ -487,42 +618,52 @@ def _autoplace_ref_value(sym: SNode, symdef, unit: int, ctxpos: tuple[int, int],
     else:
         min_x = max_x = ctxpos[0]
         min_y = max_y = ctxpos[1]
+    body = _body_box_world(symdef, unit, comp, ctxpos)
+    if body is not None:
+        min_x = min(min_x, body[0]); min_y = min(min_y, body[1])
+        max_x = max(max_x, body[2]); max_y = max(max_y, body[3])
 
     if is_power:
-        # eeschema: hidden #PWR reference; value just below the anchor.
-        _place_prop(sym, "Reference", (ctxpos[0], max_y + _PROP_MARGIN_NM), hide=True)
-        vpos = _free_anchor(ctx, (ctxpos[0], max_y + 2 * _PROP_MARGIN_NM),
-                            (0, _PROP_MARGIN_NM))
-        _place_prop(sym, "Value", vpos)
+        # eeschema: hidden reference; value past the body's far side (a +5V
+        # arrow extends up -> value above it; GND extends down -> below).
+        _place_prop(sym, "Reference", (ctxpos[0], max_y + _PROP_MARGIN_NM),
+                    hide=True, angle=text_angle)
+        if (min_y + max_y) // 2 < ctxpos[1]:
+            vpos = _free_anchor(ctx, (ctxpos[0], min_y - _PROP_MARGIN_NM),
+                                (0, -_PROP_MARGIN_NM))
+        else:
+            vpos = _free_anchor(ctx, (ctxpos[0], max_y + _PROP_MARGIN_NM),
+                                (0, _PROP_MARGIN_NM))
+        _place_prop(sym, "Value", vpos, angle=text_angle)
         return
     tall = (max_y - min_y) >= (max_x - min_x)
-    if tall:   # vertical pins (R/C/L...): text to the right, left-justified
+    if tall:   # vertical body (R/C/L...): text to the right, left-justified
         x = max_x + _PROP_MARGIN_NM
         rpos = _free_anchor(ctx, (x, ctxpos[1] - _PROP_MARGIN_NM),
                             (_TEXT_CLEAR_X_NM, 0))
         vpos = _free_anchor(ctx, (rpos[0], ctxpos[1] + _PROP_MARGIN_NM),
                             (_TEXT_CLEAR_X_NM, 0))
-        _place_prop(sym, "Reference", rpos, justify="left")
-        _place_prop(sym, "Value", vpos, justify="left")
-    else:      # horizontal pins (ICs, connectors): text above/below the body
+        _place_prop(sym, "Reference", rpos, justify="left", angle=text_angle)
+        _place_prop(sym, "Value", vpos, justify="left", angle=text_angle)
+    else:      # wide body (ICs, connectors): text above/below the body
         rpos = _free_anchor(ctx, (ctxpos[0], min_y - _PROP_MARGIN_NM),
                             (0, -_PROP_MARGIN_NM))
         vpos = _free_anchor(ctx, (ctxpos[0], max_y + _PROP_MARGIN_NM),
                             (0, _PROP_MARGIN_NM))
-        _place_prop(sym, "Reference", rpos)
-        _place_prop(sym, "Value", vpos)
+        _place_prop(sym, "Reference", rpos, angle=text_angle)
+        _place_prop(sym, "Value", vpos, angle=text_angle)
 
 
 def _place_prop(
     sym: SNode, key: str, pos_nm: tuple[int, int],
-    *, justify: str | None = None, hide: bool = False,
+    *, justify: str | None = None, hide: bool = False, angle: float = 0.0,
 ) -> None:
     """Set an existing property's ``(at ...)`` / ``(effects ...)`` in place."""
     for prop in sym.find_all("property"):
         kids = prop.children or []
         if len(kids) >= 2 and kids[1].value == key:
             at = prop.find("at")
-            new_at = _at(pos_nm, 0)
+            new_at = _at(pos_nm, angle)
             if at is not None:
                 kids[kids.index(at)] = new_at
             else:
@@ -727,16 +868,44 @@ def _op_add_no_connect(doc, op, idx, src_libs, path, ctx) -> list[str]:
 
 
 def _op_add_net_label(doc, op, idx, src_libs, path, ctx) -> list[str]:
-    p = _point_nm(op["at"])
+    at = op["at"]
+    comp = pin = axis = None
+    if isinstance(at, str) and at.startswith("mid("):
+        # "mid(A.p,B.p)" anchor: grid-snapped midpoint of two axis-aligned pins.
+        p, axis = _resolve_mid_anchor(doc, ctx, at, "add_net_label")
+    elif isinstance(at, str) and "." in at:
+        # "REF.PIN" anchor: exact pin world coordinate, never grid-snapped.
+        ref, pin_number = at.rsplit(".", 1)
+        comp, pin, p = _resolve_pin_inst(doc, ctx, ref, pin_number)
+    else:
+        p = _point_nm(at)
+        if "orientation" not in op:
+            hit = _pin_at_point(doc, ctx, p)
+            if hit is not None:
+                comp, pin = hit
     scope = op.get("scope", "local")
-    orientation = int(op.get("orientation", 0))
+    if "orientation" in op:
+        orientation = int(op["orientation"])
+    elif pin is not None:
+        # Label lands on a pin tip: orient the text away from the symbol body
+        # so it never runs over the part it names.
+        orientation = geometry.label_angle_away(pin.orientation, comp.rotation, comp.mirror)
+    elif axis is not None:
+        # Label sits mid-wire: read along the wire axis (never across it).
+        orientation = 0 if axis == "x" else 90
+    else:
+        orientation = 0
     tag = {"local": "label", "global": "global_label", "hierarchical": "hierarchical_label"}[scope]
     root = _root_uuid(doc)
     uid = instances.deterministic_uuid(root, f"{tag}:{op['name']}:{p[0]}:{p[1]}", idx)
     children = [_atom(tag), _atom(_q(str(op["name"])))]
     if tag != "label":
         children.append(_list(_atom("shape"), _atom("input")))
-    children += [_at(p, orientation), _effects(), _uuid_node(uid)]
+    children += [
+        _at(p, orientation),
+        _effects(justify=_label_justify(tag, orientation)),
+        _uuid_node(uid),
+    ]
     _append_top_idempotent(doc, _list(*children), uid)
     return [uid]
 
@@ -772,7 +941,16 @@ def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
     else:
         lib_id = op["lib_id"]
         net_name = op["net_name"]
-    pos = _point_nm(op["at"])
+    at = op["at"]
+    if isinstance(at, str) and at.startswith("mid("):
+        # "mid(A.p,B.p)" anchor: the port lands mid-wire (on-seg connects).
+        pos, _axis = _resolve_mid_anchor(doc, ctx, at, name or "place_power_port")
+    elif isinstance(at, str) and "." in at:
+        # "REF.PIN" anchor: the port lands on the pin tip (connects with no wire).
+        ref_ep, pin_number = at.rsplit(".", 1)
+        pos = _resolve_pin_world(doc, ctx, ref_ep, pin_number)
+    else:
+        pos = _point_nm(at)
     rotation = int(op.get("rotation", 0))
     # Reuse the ref from a prior replay of this op so the auto-allocated #PWR
     # designator (and thus the deterministic uuid) stays stable -> idempotent.
@@ -836,26 +1014,134 @@ def _delete_top_nodes(doc: SNode, keep) -> int:
     return removed
 
 
+def _pt_on_seg_nm(p: tuple[int, int], a: tuple[int, int],
+                  b: tuple[int, int]) -> bool:
+    """Exact integer-nm point-on-segment (endpoints inclusive)."""
+    if not (min(a[0], b[0]) <= p[0] <= max(a[0], b[0])
+            and min(a[1], b[1]) <= p[1] <= max(a[1], b[1])):
+        return False
+    return ((b[0] - a[0]) * (p[1] - a[1])
+            == (b[1] - a[1]) * (p[0] - a[0]))
+
+
+def _xy_points_nm(node: SNode) -> list[tuple[int, int]]:
+    """The ``(xy ...)`` endpoints of a wire/bus ``(pts ...)`` block, in nm."""
+    pts = node.find("pts")
+    out: list[tuple[int, int]] = []
+    for xy in (pts.find_all("xy") if pts is not None else []):
+        kids = xy.children or []
+        if len(kids) >= 3:
+            try:
+                out.append((units.mm_to_nm(float(kids[1].value)),
+                            units.mm_to_nm(float(kids[2].value))))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _node_uuid(node: SNode) -> str | None:
+    u = node.find("uuid")
+    if u is not None and len(u.children or []) >= 2:
+        return u.children[1].value
+    return None
+
+
 def _op_delete_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
     """Remove every placed instance of a designator (all units).
 
     Attached wires are intentionally left in place: the connectivity gate then
     reports their now-dangling endpoints, so stale wiring is cleaned up
-    explicitly instead of silently. Deleting an absent designator is a no-op
-    (idempotent replay of a delta op-list must converge), reported in the
-    result message.
+    explicitly instead of silently. With ``"cascade": true`` the cleanup is
+    done here: wires with an endpoint on any deleted pin's world coordinate,
+    plus labels / no_connects anchored there, are deleted too; a junction
+    anchored there is deleted only when fewer than two SURVIVING wires still
+    pass through its point (a pure-X crossing of two untouched wires keeps
+    its junction, else their shared net would silently split). The cascaded
+    uuids are reported in the result message. Deleting an absent
+    designator is a no-op (idempotent replay of a delta op-list must
+    converge), reported in the result message.
     """
     ref = op["designator"]
-    targets = {id(s) for s in _symbols_by_ref(doc, ref)}
+    syms = _symbols_by_ref(doc, ref)
+    cascade = bool(op.get("cascade", False))
+    pin_pts: set[tuple[int, int]] = set()
+    if cascade:
+        for sym in syms:
+            lib_id_node = sym.find("lib_id")
+            lib_id = (lib_id_node.children[1].value or "") if lib_id_node is not None else ""
+            symdef = _ctx_symdef(doc, ctx, lib_id)   # uncached lib_id fails loudly
+            comp = _instance_component(sym, lib_id)
+            for pin in kicad_lib.unit_pins(symdef, _symbol_unit(sym)):
+                pin_pts.add(geometry.pin_world(symdef, comp, pin))
+    targets = {id(s) for s in syms}
     removed = _delete_top_nodes(doc, lambda c: id(c) not in targets)
     if removed == 0:
         # replay-safe no-op; surfaced via the op result message (not an error)
         raise _Note(f"no placed instance of {ref!r} (already absent)")
+    cascaded: list[str] = []
+    if pin_pts:
+        hit_ids: set[int] = set()
+        junction_nodes: list[SNode] = []
+        surviving_segs: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        for c in doc.children or []:
+            if not c.is_list or not (c.children or []):
+                continue
+            head = c.children[0].value
+            if head in ("wire", "bus"):
+                pts = _xy_points_nm(c)
+                if any(p in pin_pts for p in pts):
+                    hit_ids.add(id(c))
+                    uid = _node_uuid(c)
+                    if uid:
+                        cascaded.append(uid)
+                else:
+                    surviving_segs.extend(zip(pts, pts[1:]))
+            elif head == "junction":
+                a = c.find("at")
+                if a is not None and _at_nm(a) in pin_pts:
+                    junction_nodes.append(c)
+            elif head in ("label", "global_label", "hierarchical_label",
+                          "no_connect"):
+                a = c.find("at")
+                if a is not None and _at_nm(a) in pin_pts:
+                    hit_ids.add(id(c))
+                    uid = _node_uuid(c)
+                    if uid:
+                        cascaded.append(uid)
+        # A junction anchored on a deleted pin may STILL be doing real work:
+        # two surviving wires crossing there (pure X) stay joined only through
+        # it, and auto_junctions never re-adds pure-X joins — deleting it would
+        # silently rewire nets the op never touched. Keep the junction unless
+        # fewer than two surviving segments pass through its point.
+        for c in junction_nodes:
+            at = _at_nm(c.find("at"))
+            touching = sum(1 for a, b in surviving_segs
+                           if _pt_on_seg_nm(at, a, b))
+            if touching < 2:
+                hit_ids.add(id(c))
+                uid = _node_uuid(c)
+                if uid:
+                    cascaded.append(uid)
+        if hit_ids:
+            _delete_top_nodes(doc, lambda c: id(c) not in hit_ids)
+    if cascaded:
+        raise _Note(f"cascade deleted {len(cascaded)} object(s): "
+                    + ", ".join(cascaded))
     return []
 
 
 def _op_delete_object(doc, op, idx, src_libs, path, ctx) -> list[str]:
-    """Remove ONE top-level object (wire/label/junction/text/...) by uuid."""
+    """Remove ONE top-level object by ``uuid`` or by a ``match`` selector.
+
+    ``match`` is ``{kind, name?, at?}``: ``kind`` is the node tag (wire, label,
+    global_label, ...), ``name`` matches a label/text's content, ``at`` an
+    exact ``[x, y]`` mil anchor (a wire matches when EITHER endpoint lands
+    there; the point is NOT grid-snapped, so a pin's exact off-grid coordinate
+    matches too). Exactly-one semantics: 0 matches is a replay-safe note,
+    >1 is an error listing the candidate uuids (tighten the selector).
+    """
+    if "match" in op:
+        return _delete_object_match(doc, op["match"])
     uid = op["uuid"]
 
     def keep(c: SNode) -> bool:
@@ -866,6 +1152,80 @@ def _op_delete_object(doc, op, idx, src_libs, path, ctx) -> list[str]:
     if removed == 0:
         raise _Note(f"no object with uuid {uid!r} (already absent)")
     return []
+
+
+def _delete_object_match(doc: SNode, match: dict) -> list[str]:
+    kind = match.get("kind")
+    want_name = match.get("name")
+    want_at = None
+    if match.get("at") is not None:
+        at = match["at"]
+        want_at = (geometry.mil_to_nm(float(at[0])), geometry.mil_to_nm(float(at[1])))
+    candidates: list[SNode] = []
+    for c in doc.children or []:
+        if not c.is_list or not (c.children or []) or c.children[0].value != kind:
+            continue
+        if want_name is not None:
+            kids = c.children or []
+            text = kids[1].value if len(kids) >= 2 and kids[1].is_atom else None
+            if text != want_name:
+                continue
+        if want_at is not None:
+            if kind in ("wire", "bus"):
+                if want_at not in _xy_points_nm(c):
+                    continue
+            else:
+                a = c.find("at")
+                if a is None or _at_nm(a) != want_at:
+                    continue
+        candidates.append(c)
+    if not candidates:
+        raise _Note(f"no {kind} matches the selector (already absent)")
+    if len(candidates) > 1:
+        uuids = ", ".join(_node_uuid(c) or "<no-uuid>" for c in candidates)
+        fail("VERIFY_FAILED",
+             f"delete_object match is ambiguous: {len(candidates)} candidates: "
+             f"{uuids} (add name/at to the selector or use uuid)")
+    target = id(candidates[0])
+    _delete_top_nodes(doc, lambda c: id(c) != target)
+    return []
+
+
+def _op_rename_net(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Rename a net everywhere it is NAMED: label texts + power-port Values.
+
+    ``scope`` restricts the rewrite to one label kind (local / global /
+    hierarchical); without it every label kind AND power-port net Values
+    (symbols with an auto ``#``-prefixed reference) are rewritten. Renaming a
+    net nobody names is a replay-safe note, not an error; the match count is
+    reported in the result message.
+    """
+    frm, to = str(op["from"]), str(op["to"])
+    scope = op.get("scope")
+    tags = {"local": ("label",), "global": ("global_label",),
+            "hierarchical": ("hierarchical_label",)}.get(
+                scope, ("label", "global_label", "hierarchical_label"))
+    count = 0
+    for tag in tags:
+        for node in doc.find_all(tag):
+            kids = node.children or []
+            if len(kids) >= 2 and kids[1].is_atom and kids[1].value == frm:
+                kids[1] = _atom(_q(to))
+                count += 1
+    if scope is None:
+        for sym in _placed_symbols(doc):
+            ref = _symbol_reference(sym) or ""
+            if not ref.startswith("#"):
+                continue
+            for prop in sym.find_all("property"):
+                kids = prop.children or []
+                if (len(kids) >= 3 and kids[1].value == "Value"
+                        and kids[2].value == frm):
+                    kids[2] = _atom(_q(to))
+                    count += 1
+    if count == 0:
+        raise _Note(f"no label or power port named {frm!r} (nothing renamed)")
+    raise _Note(f"renamed {count} object(s) from {frm!r} to {to!r}")
 
 
 def _op_move_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
@@ -935,6 +1295,7 @@ _HANDLERS = {
     "delete_component": _op_delete_component,
     "delete_object": _op_delete_object,
     "move_component": _op_move_component,
+    "rename_net": _op_rename_net,
 }
 
 
@@ -1022,6 +1383,13 @@ def apply(
             res.status = "error"
             res.error_code = exc.code
             res.message = exc.message
+            any_error = True
+        except Exception as exc:  # noqa: BLE001 — per-op containment (SPEC §2.4):
+            # a handler bug must surface as ONE failed OpResult, never as a
+            # traceback aborting the whole run (nothing is written on any_error).
+            res.status = "error"
+            res.error_code = "INTERNAL"
+            res.message = f"{type(exc).__name__}: {exc}"
             any_error = True
         results.append(res)
 

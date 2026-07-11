@@ -22,6 +22,7 @@ from . import (  # noqa: F401
     protection,
     regulator,
     rf,
+    sensor,
 )
 from .registry import CALCS, CalcError, compute  # noqa: F401
 from .si import fmt_eng, parse_value  # noqa: F401

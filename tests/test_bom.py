@@ -276,3 +276,19 @@ def test_fffd_in_parameter_reports_corrupt_text():
 def test_clean_text_reports_no_corrupt_text():
     out = bom.run(_sch([_comp("R1", value="10kΩ")]))
     assert "BOM_CORRUPT_TEXT" not in _codes(out)
+
+
+# ---------------------------------------------------------------------------
+# virtual (#-prefixed) parts never reach the BOM
+
+
+def test_power_symbols_are_not_bom_items():
+    # power ports / PWR_FLAG have no value/footprint by design and their
+    # numbering is not a refdes sequence — none of that is a finding
+    sch = _sch([
+        _comp("#PWR01", value=None, footprint=None),
+        _comp("#PWR07", value=None, footprint=None),
+        _comp("#FLG01", value=None, footprint=None),
+        _comp("R1"),
+    ])
+    assert bom.run(sch) == []

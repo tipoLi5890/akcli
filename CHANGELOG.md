@@ -30,9 +30,250 @@ All notable changes to `altium-kicad-cli` are documented here. The format is bas
 
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
-## [Unreleased]
+## [0.4.0] - 2026-07-11
 
 ### Added
+- **Net-connectivity diff on every `plan`/`draw`** — the op-list is
+  dry-applied to a temp copy and the before/after netlists are diffed by
+  **pin membership** (never by name, so renames can't masquerade as
+  remove+create). A deterministic "Net changes:" block prints splits,
+  merges, membership edits, renames, created and removed nets most-severe
+  first (`! SPLIT THR (4 pins) -> THR(2) + <unnamed@R7.2>(2)`); `(none)`
+  when connectivity is provably unchanged. `--no-net-diff` opts out;
+  `draw --apply --strict-nets` **refuses the write** (exit 6) when a
+  split/merge touches a named net. `--json` carries
+  `net_diff: {equivalent, risk, lines}`.
+- **`akcli nets <sch>`** — every net → sorted members on one line each
+  (`--json` for machines); `--intent-snapshot OUT.json` writes the netlist
+  as a design-intent document (`--include-unnamed` keys unnamed nets by
+  stable id).
+- **`akcli check --intent FILE`** — first-class **design-intent
+  assertions**: a JSON file (`{"protocol_version":1, "mode":"exact"|"subset",
+  "nets": {"SWCLK": ["U1.4","J2.2"]}}`) is asserted against the built
+  netlist, matched by pin membership. Finding codes: `INTENT_PIN_UNKNOWN`,
+  `INTENT_NET_NOT_FOUND`, `INTENT_MISSING_MEMBER`, `INTENT_EXTRA_MEMBER`
+  (exact mode), `INTENT_NETS_SHORTED`. Snapshot → edit → assert round-trips
+  cleanly; `--intent` alone runs as a pure selector like `--erc`.
+- **`akcli relink-symbols <sch>`** — automated re-embed of stale
+  `lib_symbols` cache entries from fresh `.kicad_sym` libraries (`--libs`
+  dirs/files, default KiCad.app SharedSupport; `--only` scopes nicknames).
+  Dry-run by default; `--apply` is gated by a **net-membership equivalence
+  proof** (a moved pin in the new library refuses with `VERIFY_FAILED`,
+  file untouched) and leaves `<name>.bak`. Companion check:
+  `check --libsync [--symbols DIR]` warns `LIB_EMBED_STALE` on
+  pin-signature drift (graphics-only drift stays silent) or notes
+  `LIB_EMBED_OLD_FORMAT` without sources (opt-in only).
+- **`rename_net` core op** (17 ops now) — rewrites matching label texts and
+  power-port net Values; optional `scope` restricts the label kind; zero
+  matches is a replay-safe note; match count reported. KiCad only.
+- **`delete_component` `cascade: true`** — also deletes wires ending on any
+  deleted pin's coordinate plus labels/no-connects/junctions anchored
+  there (cascaded uuids reported). **`delete_object` `match`** selector
+  (`{kind, name?, at?}`) addresses an object without a uuid —
+  exactly-one semantics (0 = replay-safe note, >1 = error listing
+  candidates).
+- **`mid(REF.PIN,REF.PIN)` anchors** — `add_net_label` and the power-port
+  ops accept the midpoint of two axis-aligned pins (25-mil tolerance,
+  grid-snapped along the wire axis, clamped into the span); labels
+  auto-orient along the wire.
+- **Three connectivity macros** (9 macros now): `connect_and_label`
+  (pin-to-pin wire + ONE mid-wire label — the fix for facing-pin label
+  collisions), `place_pwr_flag` (`power:PWR_FLAG` placed MID-WIRE, never
+  on-pin), `terminate_unused_unit` (place a spare op-amp/comparator unit +
+  tie the inputs + no-connect the output in one op).
+- **Op-list validator hardening** — unknown fields are now errors with a
+  did-you-mean suggestion (`_`-prefixed keys stay annotation-safe);
+  per-op field types are enforced with the op index and field named;
+  duplicate `(designator, unit)` placements are a lint error
+  (`delete_component` releases the designator); a crashing op handler is
+  contained as a per-op `INTERNAL` error result, never a traceback.
+- **New offline checks** (all advisory): `check --nets` on `.kicad_sch`
+  gains `NET_PIN_MIDSPAN_TOUCH` (pin tip on a wire mid-span with no
+  junction — NOT connected in eeschema), `NET_LABEL_UNATTACHED`, and
+  `NET_WIRE_CORNER_ON_PIN` (the L-wire short trap); `check --layout` gains
+  `LAYOUT_POWER_ON_PIN` (a PWR_FLAG/power symbol anchored on another
+  symbol's pin tip), `LAYOUT_WIRE_THROUGH_SYMBOL`, and
+  `LAYOUT_LABEL_OVER_WIRE`; `check --erc` gains `ERC_UNPLACED_UNIT`
+  (unplaced units of a multi-unit part, `.kicad_sch` only; waiver token
+  `unplaced_unit`).
+- **Configurable schematic grid** — `[project] grid` in
+  `altium-kicad-cli.toml` (bare number = mils, or `"50mil"`/`"1.27mm"`/
+  `"0.5mm"`; default 50 mil); `check --nets` compares in exact integer
+  nanometres, so metric grids are first-class.
+- **Bus-entry connectivity gate** — wires may terminate on a bus entry's
+  ends without false-dangling, and every bus entry end must land on a bus
+  or a wire: a floating end is a new `DANGLING_BUS_ENTRY` ERROR that
+  refuses the write like `DANGLING_ENDPOINT`.
+- **`jlc bom --csv OUT.csv`** — JLCPCB upload BOM CSV
+  (`Comment,Designator,Footprint,LCSC Part #`; refs comma-joined in one
+  quoted cell; unresolved lines get a blank LCSC cell so a dead C-number
+  never lands in an order file; `'-'` = stdout). **`--fix` is now
+  confidence-gated** (writes only when the package matched AND the value
+  is visible in the candidate description/MPN); **`--fix-all`** also
+  writes low-confidence suggestions.
+- **jlc network resilience** — transient failures (URLError/timeout/HTTP
+  429/5xx) retry with exponential backoff honoring `Retry-After`; when
+  retries are exhausted a stale cached response is served with a stderr
+  warning (`AKCLI_JLC_CACHE_STALE=off` restores hard failure); cache
+  writes are atomic.
+- **Four more calculators (60 total)** — `battery-life` (datasheet mAh →
+  runtime, ANSI C18.1M), `comparator-hysteresis` (open-drain-aware
+  thresholds, TI SLVA954), `envelope-detector` (RC validity verdict),
+  `ldo-headroom` (go/no-go + dissipation, TI SLVA079).
+- **CLI UX** — one unambiguous status line on plan/draw
+  (`dry-run — nothing written` / `APPLIED — wrote ... (backup ...; akcli
+  undo reverts)` / `REFUSED — nothing written`); did-you-mean suggestions
+  for mistyped calc and ops names; duplicate-designator reader warnings
+  now print to stderr; `ops list`/`arrange`/`undo` honor `--json`.
+- **Packaging & CI honesty** — `[project.urls]`, setuptools ≥ 77 floor
+  (PEP 639), Python 3.14 classifier + CI matrix entry, a fast `ruff` lint
+  job, and a wheel-smoke job (build → install into a fresh venv →
+  `akcli --version && akcli ops list && akcli ops template add_wire`);
+  the ops schema ships inside the wheel
+  (`altium_kicad_cli/schemas/`, repo-root `schemas/` stays canonical).
+- **`akcli arrange <sch>`** — closes the layout loop: nudges **free**
+  components (no wire endpoints or label anchors on any pin — moving
+  anchored parts would strand their connectivity) until no symbol boxes
+  overlap. Greedy first-fit in reading order, `--grid`/`--margin` tune the
+  packing, dry-run by default; `--apply` writes through the standard draw
+  pipeline (`.bak` + connectivity re-verify), so `akcli undo` reverts it.
+- **`jlc bom --qty N`** — purchasability at build quantity: each line needs
+  `qty × refs` pieces, stock is checked against that, the applicable
+  **price tier** is selected at that quantity, and the table gains
+  NEED/UNIT/EXT columns plus an estimated parts cost per run
+  (`totals` in `--json`).
+- **`jlc bom --suggest` / `--fix`** — for `not-found` / `no-part-id` lines,
+  search the catalog by value + footprint package (`100n` + `C_0402_…` →
+  `100nF 0402`; candidates must match the package, in-stock Basic parts
+  win) and print the best replacement; `--fix` writes the C-number back
+  into the schematic's LCSC parameter (same key when one existed) through
+  the draw pipeline (`.bak`, undo-able), then re-checks. Suggestions are
+  heuristics — verify the datasheet.
+- **jlc HTTP cache on by default** — `search`/`show`/`bom` reuse the
+  existing on-disk cache (1 h TTL) under `~/.cache/akcli/jlc`
+  (`AKCLI_JLC_CACHE` relocates or disables it; tests isolate via conftest).
+- **Four more macro ops** — `place_pullup`, `place_led_indicator`,
+  `place_rc_filter`, `place_crystal` (ST AN2867 topology), all label-on-pin.
+  The validator now accepts **un-expanded** macro documents (checking macro
+  required fields), so externally validated op-lists may carry macros.
+- **`calc --ops` emits macros** — `vdivider-design`, `led`, `i2c-pullup`
+  and `crystal-caps` now produce compound ops with placeholder net names
+  (edit, `plan`, draw) instead of loose part strips: the parts arrive
+  connected.
+- **Live dashboard BOM panel** — `b` / the `bom` toolbar button opens the
+  watched sheet's BOM (offline); *check purchasability* triggers the ONE
+  networked action (`GET /live/bom?check=1`) with stock/price/est-cost.
+- **CFBF/Altium fuzz suite** — seeded mutations (header damage, FAT
+  surgery, truncation, byte noise) over the OLE2 container reader; the
+  `ALTIUM_*` guard rails held with zero findings.
+- **Schema contract tests** — `read --json` exports of KiCad *and* Altium
+  fixtures now validate against `schemas/schematic.schema.json` in CI, and
+  the schema's `schema_version` const is pinned to the model's.
+
+- **`akcli view` — ONE dashboard server** (HTML ships as package data; binds
+  127.0.0.1, zero deps): `/calc` and `/live` are served by a single process
+  on port 8765 (auto-increments when busy). `/` is the **hub entry page** the
+  browser opens on launch — one card per dashboard, the live card streaming
+  the watched file, step count and latest ERC state over SSE; all pages
+  cross-link. `view calc` serves the bench alone;
+  `view live <sch>` (or the shorthand `view <sch.kicad_sch>`) additionally
+  watches the schematic: each change exports every sheet's SVG via
+  `kicad-cli`, counts parts/nets with the in-process reader, and appends a
+  timeline step **immediately** — KiCad's JSON ERC back-fills the step
+  seconds later, so a draw shows up in ~3 s instead of ~15 s. Updates are
+  pushed over Server-Sent Events (`/live/events`); responses gzip when
+  accepted; step SVGs serve as immutable. New endpoints: `POST /live/note`
+  (annotate the next step from the UI) and `POST /live/clear`; new flag
+  `--max-steps N` bounds the timeline (default 500, oldest SVGs deleted).
+  The standalone `tools/calc-view/` and `tools/live-view/` directories are
+  removed.
+- **`view` bench UI (`/calc`)** — full dashboard rebuild: home launcher over
+  all groups, ⌘K command palette + fuzzy sidebar filter, debounced
+  auto-compute with live engineering-notation parse hints (`4k7` → `= 4.7 kΩ`)
+  and field-level error highlighting, defaults shown in typed-back notation
+  (`35u`, not `0.000035`), per-result change chips vs the previous run,
+  click-to-copy exact values (with mm/mil tooltips), copy-as-markdown/JSON/CLI,
+  diagram captions annotated with the computed values (Z0, Vout, τ/fc, …),
+  a persistent session log, an `⤓ op-list` button (backed by a new
+  `GET /api/ops`, the web twin of `calc --ops`) on the 8 mappable calculators,
+  pinned/recent lists, shareable URL hashes, dark bench / light datasheet
+  themes (theme-aware SVG illustrations), print stylesheet, and a status bar
+  that mirrors the equivalent `akcli calc` command. `/api/list` now carries
+  `meta` (count, version, watched file) and a per-calculator `mappable` flag.
+- **`view` watch UI (`/live`)** — same rebuild: per-step **ERC violation
+  panel** (each step stores the KiCad JSON ERC findings; **NEW** findings vs
+  the previous step are tagged and counted, resolved ones reported; click a
+  finding to zoom to its marker on the sheet), ERC marker overlay, **diff
+  mode** (previous step ghosted in red under the current one), sheet tabs for
+  hierarchical designs, timeline replay, parts/nets delta per step,
+  parts-trend sparkline, PNG export of the current view, `ink` dark-paper
+  mode, an in-UI note box for the next step, a clear-timeline action,
+  relative timestamps (steps carry an epoch `ts`), and a keyboard map
+  (`←/→ L F C D E I space ?`).
+- **Browser UI regression suite** — `tools/ui-test/` drives the system Chrome
+  (puppeteer-core, no download) through ~35 checks on all three pages;
+  `tests/test_webui_browser.py` wires it into pytest (auto-skips when
+  node/Chrome are absent) and CI runs it on the macOS runner.
+- **Shared bench chrome** — hub, `/calc` and `/live` now carry the identical
+  top bar: the `⌂ akcli` mark and a `⌂ | calc | live` page switcher on the
+  left, theme + help on the right, `h` returns to the hub from any page.
+  One layout to learn; no page is ever a dead end.
+- **`akcli verify <a> <b>`** — a net-equivalence proof between two schematics
+  (e.g. an Altium original vs its KiCad conversion): PASS iff the component
+  set matches and every net's pin membership is identical; net renames are
+  reported but do not fail; `--strict` also fails value/footprint drift.
+  Exit 0/1; `--json` carries the full diff report.
+- **`akcli undo <sch>`** — swaps a `.kicad_sch` with the `<name>.bak` that
+  `draw --apply` leaves beside it (dry-run preview by default, `--apply` to
+  swap; undo twice = redo). The preview shows the part/net delta.
+- **Macro ops** — `place_divider` and `place_decoupling` expand to core ops
+  before validation (never touching `protocol_version`, the schema, or the
+  executors), using the collision-proof label-on-pin pattern for
+  connectivity. `ops list` shows them; `ops template <macro>` works.
+- **`akcli check --nets`** — connectivity-hygiene checks, in the default
+  check set: `NET_SINGLE_PIN` (floating label / undriven power port) and
+  `NET_OFF_GRID` (pins off the 50-mil grid — the classic wire-that-touches-
+  but-never-connects trap).
+- **Parser fuzzing** — seeded stdlib fuzz of the s-expression parser
+  (truncation, paren storms, quote damage, Unicode noise, depth bombs);
+  the contract is "SNode or structured AkcliError, never a crash".
+
+- **`akcli jlc bom <sch>`** — BOM → JLCPCB purchasability bridge: every BOM
+  line resolves to a catalog part (explicit LCSC C-number parameter first,
+  then exact-MPN search preferring in-stock Basic parts) and reports stock /
+  price / Basic-Preferred, with `low-stock` (`--min-stock N`),
+  `out-of-stock`, `not-found` and advisory `no-part-id` statuses. Lines
+  group by identity (one lookup per part, `QTY` = ref count), `#`-virtual
+  parts are excluded, Altium and KiCad inputs both work. Lint-style exit 1
+  on problems, exit 7 on network errors, `--json` for machines.
+- `AKCLI_JLC_BASE_URL` overrides the jlcsearch endpoint (self-hosted
+  instance, moved service, or exercising the `NETWORK`/exit-7 path in tests).
+
+- **`akcli check --layout`** — geometric-overlap lint for `.kicad_sch` (also in
+  the default check set): estimates world-space boxes for symbol bodies (from
+  the embedded `lib_symbols` graphics) and label text, then reports
+  `LAYOUT_SYMBOL_OVERLAP`, `LAYOUT_LABEL_OVER_SYMBOL`, `LAYOUT_LABEL_OVERLAP`,
+  and `LAYOUT_COINCIDENT_TEXT` findings. A schematic can pass ERC with every
+  label drawn on top of the part it names — ERC never checks graphics.
+- **`"at": "REF.PIN"` anchors for labels and power ports** — `add_net_label`,
+  `place_power_port`, `place_gnd`, `place_vcc` accept a pin reference as `at`
+  (exact world coordinate, never grid-snapped), making the collision-proof
+  label-on-pin pattern first-class.
+- **Net labels auto-orient away from the symbol** — a label anchored on a pin
+  (via `"REF.PIN"` or a coordinate that hits a pin tip) with no explicit
+  `orientation` is rotated so the text extends away from the body
+  (`geometry.label_angle_away`; `model.Pin` now records the lib-frame pin
+  orientation). Explicit `orientation` always wins.
+- `readers.kicad_lib.body_extent_mil()` / `is_power_symbol()` — shared
+  symbol-body extent (graphics, not pins) and power-marker detection, used by
+  text autoplacement and the layout lint.
+
+- **`akcli pins <lib_id>`** — op-list authoring helper that prints every pin's
+  number, name, electrical type, and **world coordinate** for a
+  `--at`/`--rotation`/`--mirror` placement, resolved from the same symbol sources
+  the writer uses (`--symbols` / config `.kicad_sym`) and computed with the writer's
+  own `geometry.pin_world`. Removes the guesswork of targeting pin coordinates when
+  hand-authoring wires/labels/power ports. `--json` for machine output.
 - **20 more calculators (56 total)**, all standards-cited: differential pairs
   (IPC-2141A over Hammerstad–Jensen/Cohn single-ended), `tracktemp` (IPC-2221 solved for ΔT),
   unit conversions (dBm/W/Vrms per IEEE Std 100; mil/mm exact 25.4; oz/µm copper nominal +
@@ -105,6 +346,82 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
   `system-out`; clean runs emit one passed case). Lint-style exit semantics unchanged.
 
 ### Fixed
+- **Rotation transform now matches eeschema exactly** — a file angle of
+  +90° rotates counter-clockwise on screen (`(x,y) → (y,−x)` in the
+  +Y-down frame); akcli's writer and reader each implemented a different
+  wrong order (the truth is rotate-by-minus-angle THEN mirror). Both now
+  share one transform, locked by a 12-combo rotation/mirror truth table
+  verified against kicad-cli's own netlister. **This corrects netlists of
+  schematics with rotated polarized parts** (e.g. LEDs at 270° had
+  anode/cathode swapped in the derived netlist); on the reference design
+  the corrected netlist now matches kicad-cli's export exactly.
+- **KiCad junction dialect** — eeschema does NOT connect a wire end
+  touching another wire's mid-span without a junction node; the KiCad
+  reader now matches (the Altium reader keeps Altium's bare-T-connects
+  dialect). Same-sheet local-label ↔ global/power merging was verified
+  against eeschema and kept: a local label DOES merge with a same-name
+  global label or power port on the same sheet even when physically
+  disconnected, and never across sheets.
+- **Duplicate designators are no longer silently merged** — a re-placement
+  of the same unit under an existing designator is kept as a distinct
+  component (with a reader warning and an `akcli_duplicate` parameter), so
+  `BOM_DUPLICATE_DESIGNATOR` now fires for KiCad inputs, matching how
+  eeschema netlists such placements.
+- **`check --nets` measures in exact integer nanometres** — off-grid and
+  coincidence comparisons no longer accumulate float error; the grid is
+  configurable (see `[project] grid`).
+- **Wires ending on a bus entry no longer report `DANGLING_ENDPOINT`**
+  (bus entries are now connection anchors; see `DANGLING_BUS_ENTRY`).
+- **`akcli view` hardening** — the live dashboard rejects non-loopback
+  `Host` headers (DNS-rebinding) and cross-origin POSTs (CSRF); a watcher
+  crash now surfaces as a dashboard banner instead of silently stopping;
+  step SVGs are cache-fingerprinted so a cleared timeline can never serve
+  stale renders; `/live/bom` failures return structured errors; timeline
+  steps are keyboard-accessible; `view <sch>` opens the browser on
+  `/live` directly.
+- **`set_component_parameters` no longer piles visible text on the symbol**
+  — a NEW property node sits at the symbol anchor, so custom fields (LCSC,
+  MPN, …) rendered as raw text over the body. The writer now creates every
+  field except Reference/Value hidden, matching KiCad's own default.
+- `schemas/schematic.schema.json` declared net `name` as `string`, but
+  unnamed nets export `null` (`is_named: false`) — the schema now matches
+  the long-standing export shape.
+
+- **BOM checks no longer flag `#`-prefixed virtual parts** — power ports and
+  PWR_FLAG have no value/footprint by design and never appear on a BOM;
+  `#PWR01 has no footprint` warnings were pure noise.
+- **netbuild: local labels now join same-name power/global nets on the same
+  sheet** — KiCad merges a local `+3V3` label into the `+3V3` power net;
+  akcli kept them as two nets, so label-on-pin connections to rails were
+  invisible to `net`/`export`/`diff`/checks. Verified against kicad-cli
+  netlist output.
+- **sexpr: Unicode whitespace no longer crashes the tokenizer** — the bare-
+  atom regex used `\s` (Unicode) while the scanner skips ASCII whitespace
+  only; an NBSP between tokens raised a raw AttributeError instead of a
+  structured error (found by the new fuzz suite).
+
+- **Labels now carry the `(justify ...)` their angle needs.** KiCad never
+  draws text upside-down: a global label at 180° WITHOUT `(justify right)`
+  still renders its text toward +X — i.e. straight over the symbol it names.
+  The writer now emits eeschema's exact angle/justify pairs
+  ((0,left) (90,left) (180,right) (270,right); local labels add `bottom`).
+- **Reference/Value of rotated instances render level and clear of the body.**
+  Property text angle now counter-rotates the instance rotation (mod 180 — a
+  180° property would render inverted), and autoplacement works from the pin
+  box UNION the drawn body extent, so a rotated resistor's value no longer
+  prints vertically through its own body, and a connector's value (pins all on
+  one side) no longer lands inside the outline.
+- **Any `(power)` symbol hides its Reference** — a `PWR_FLAG` placed as
+  `FLG1` (no `#` prefix) printed its designator into the schematic. Power-port
+  Value text is now placed past the side the body extends to (a +5V arrow's
+  name above it, GND's below), matching eeschema.
+- **`power:PWR_FLAG` no longer merges rails in net inference.** A `PWR_FLAG` power
+  symbol is meant only to mark a net as driven for ERC; the KiCad reader was
+  injecting a `"PWR_FLAG"` power-net name at its pin, so two flags (e.g. one on
+  +5V, one on GND) unioned every rail they touched into a single net — a false
+  +5V↔GND short in `akcli net`/`check` (KiCad ERC was unaffected). The reader now
+  emits the flag's pin (keeping it electrically on its net, satisfying KiCad's
+  `power_pin_not_driven`) but never names/merges a net from it.
 - **`calc` output never SI-prefixes non-base units:** values already carrying a prefixed or
   compound unit (mm, °C/W, m², Ω/km) print plain — the clearance table rendered 0.2 mm as
   "200 mmm".
