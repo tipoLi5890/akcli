@@ -37,6 +37,10 @@ sourcing loop.
 - **Read the datasheet before committing a part** — electrical characteristics, absolute
   maximum ratings and the typical application circuit come from the PDF, not from memory
   (step 4 below).
+- **Never manually `sed` the fp-lib-table or a symbol's Footprint field.** Run
+  `akcli library audit <project>` to find `FOOTPRINT_LIB_UNREGISTERED`, then fix it with
+  `akcli library repair <project> --rename-footprint-lib OLD=NEW --apply` — hand edits drift
+  out of sync with the schematic and the 3D models.
 
 ## Workflow
 
@@ -68,7 +72,16 @@ No results is exit `0` with a stderr notice; network/HTTP failures exit `7` with
 akcli jlc add C2040                                   # symbol + footprint
 akcli jlc add C2040 --3d                              # + 3D STEP model
 akcli jlc add C2040 --out ./mylib --lib-name akcli --force
+akcli jlc add C2040 --footprint-lib proj_jlc --3d-path relative
 ```
+
+`--footprint-lib NICKNAME` sets the fp-lib-table nickname written into the symbol's
+Footprint field (and the footprint output directory) — the default hardcoded `footprint`
+is the **#1 cause of "KiCad can't find footprint"**; set it to the nickname your
+project's fp-lib-table actually registers. `--3d-path {relative|absolute|'${VAR}'}`
+is a portability trade-off: `relative` (default) only resolves next to the library,
+`absolute` always resolves on this machine but breaks on another, and a `${VAR}`
+prefix resolves portably via a KiCad path variable.
 
 Conversion runs **in-process** (vendored MIT JLC2KiCadLib core — no external
 binary). Output layout: `symbol/<lib-name>.kicad_sym`,
@@ -103,6 +116,10 @@ akcli component board.kicad_sch U1             # confirm the placed part's pin -
   unambiguously. Re-run `akcli check board.kicad_sch --bom` after every edit; it exits `1`
   while findings remain (`--exit-zero` for report mode).
 - After any `--apply`, re-read (`akcli read` / `akcli net`) to confirm the write — never assume.
+- Run `akcli library audit <project>` to cross-check sym/fp-lib-table ↔ schematic ↔ footprint ↔
+  3D. Fix any `FOOTPRINT_LIB_UNREGISTERED`/`MODEL_MISSING` finding with
+  `akcli library repair <project> --rename-footprint-lib OLD=NEW --3d-path absolute --apply`
+  (leaves a `.bak`, then re-audits) instead of manual `sed`.
 
 ### (4) Datasheets — resolve, fetch, read, verify
 

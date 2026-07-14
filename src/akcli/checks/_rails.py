@@ -4,9 +4,9 @@ Kept in ONE place so the voltage-inference rules can't drift between ``erc.py`` 
 ``power.py`` (they used to carry identical copies — and an identical bug).
 
 Boundary note: the trailing assertions use ``(?![0-9A-Za-z])`` rather than ``\\b``,
-because ``_`` is a regex *word* character, so ``\\b`` does **not** treat ``V3V3_BNO``'s
-trailing ``_`` as a boundary — that made underscore-suffixed rails (``V3V3_BNO``,
-``V3V3_FSR``) fail to register as power, producing false ``ERC_NO_POWER``. The
+because ``_`` is a regex *word* character, so ``\\b`` does **not** treat ``V3V3_AUX``'s
+trailing ``_`` as a boundary — that made underscore-suffixed rails (``V3V3_AUX``,
+``V3V3_IO``) fail to register as power, producing false ``ERC_NO_POWER``. The
 digit-``V``-digit pattern deliberately has *no* leading assertion: in ``V3V3`` the
 matched ``3`` is preceded by ``V``, so a leading boundary would wrongly reject it.
 """
@@ -48,7 +48,7 @@ def implied_voltage(name: str | None) -> float | None:
 def rail_matches(net_name: str, cfg_rail_names: set[str]) -> bool:
     """True if ``net_name`` is a configured rail, exactly or as a ``<rail>_suffix``.
 
-    So a config ``[[rail]] name = "V3V3"`` covers ``V3V3``, ``V3V3_BNO``, ``V3V3-FSR``
+    So a config ``[[rail]] name = "V3V3"`` covers ``V3V3``, ``V3V3_AUX``, ``V3V3-IO``
     (rail name followed by a ``_``/``-`` separator), not arbitrary substrings.
     """
     n = norm(net_name)

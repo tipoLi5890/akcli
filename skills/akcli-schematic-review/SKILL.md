@@ -65,6 +65,7 @@ get the deep treatment in Steps 3–4.
 ```bash
 akcli check board.SchDoc --erc --power --bom --exit-zero -C akcli.toml
 akcli check board.SchDoc --exit-zero --json
+akcli check board.SchDoc --contract review.contract.toml --exit-zero   # if the project has a contract file
 ```
 
 `-C` supplies `[[rail]]` voltages, `mcu_designator`, and `[[erc_waiver]]` entries; omit it
@@ -80,7 +81,10 @@ and discovery walks up from the schematic's directory. Interpret the metadata he
 Finding codes you will see: `ERC_FLOATING_INPUT`, `ERC_DRIVER_CONFLICT`, `ERC_DANGLING_NET`,
 `ERC_NO_POWER`, `ERC_NO_GROUND`, `ERC_NET_ALIAS` (NOTE-only by design);
 `POWER_NO_DECOUPLING`, `POWER_VOLTAGE_MISMATCH`, `POWER_CURRENT_BUDGET`, `POWER_NO_RAILS`;
-`BOM_DUPLICATE_DESIGNATOR`, `BOM_MISSING_VALUE`, `BOM_MISSING_FOOTPRINT`, `BOM_REFDES_GAP`.
+`BOM_DUPLICATE_DESIGNATOR`, `BOM_MISSING_VALUE`, `BOM_MISSING_FOOTPRINT`, `BOM_REFDES_GAP`;
+`CONTRACT_PASS` (INFO — a contract rule was checked and held), `CONTRACT_WAIVED` (NOTE —
+a rule was demoted/dropped by a waiver), `CONTRACT_EXCEPTION_EXPIRED` (an approved
+exception's expiry has passed — the rule is enforced again; report as a finding, not a pass).
 
 Known blind spots — never let a clean `check` close these out:
 - IC detection is designator-prefix-only (`U`/`IC`): regulators named `VR1` or modules named
@@ -131,6 +135,22 @@ pins, removed decoupling caps, a connector or MCU pin that silently moved nets �
 there unexplained changes nobody asked for? If the JSON marks `low_confidence` (cross-revision
 files without shared UniqueIDs, or weak Jaccard matches), say so explicitly and downgrade
 diff-derived conclusions to Question where the match is doubtful.
+
+### Step 6 — Schematic ↔ PCB equivalence (when a board file exists)
+
+```bash
+akcli verify board.SchDoc board.kicad_pcb --strict --exit-zero
+```
+
+This compares the schematic against the layout on three axes: refdes presence (every
+designator on both sides), footprint/value assignment (`--strict` also fails on value/
+footprint mismatches), and the pad-level net **partition** — net *names* are untrusted,
+so nets are compared by which pads actually group together. Findings:
+`SCHPCB_NET_SPLIT` (a schematic net's pads land in two or more PCB nets),
+`SCHPCB_NET_MERGE` (two schematic nets share one PCB net), `SCHPCB_PAD_MISSING`
+(a schematic pin has no corresponding PCB pad), `SCHPCB_FOOTPRINT_MISMATCH`. Power
+symbols (`#PWR`) and No-ERC/PWR_FLAG markers (`#FLG`) are excluded from the comparison —
+do not report those refdes as missing on the PCB side, that is expected.
 
 ## Electrical heuristics the tool does not run — apply them yourself
 

@@ -368,7 +368,7 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
             continue
         # A "U"-prefixed part with fewer than 3 pins cannot be an IC needing
         # both power and ground -- it is a header/jumper stub (e.g. a 2-pin
-        # piezo header designated U9). Flagging those is pure noise.
+        # buzzer or header designated U9). Flagging those is pure noise.
         if len(comp.pins) < 3:
             continue
         touched = nets_of_comp.get(comp.designator, [])

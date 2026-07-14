@@ -87,7 +87,8 @@ def _cmd_arrange(args: argparse.Namespace) -> int:
     results = kwriter.apply(oplist, str(target), apply=True,
                             sources=_draw_symbol_sources(args, cfg),
                             verify_out=findings, backup_dir=target.parent,
-                            backup_depth=_backup_depth(cfg))
+                            backup_depth=_backup_depth(cfg),
+                            allow_open=bool(getattr(args, "allow_open", False)))
     code = _draw_exit(results, findings)
     if args.json:
         _emit(_dumps({
@@ -138,6 +139,20 @@ def _undo_summary(cur, old) -> str:
             f"{len(old.components)} parts/{len(old.nets)} nets "
             f"(+{len(rep.added_components)} −{len(rep.removed_components)} "
             f"components, {len(rep.member_changed_nets)} nets change membership)")
+
+
+def _refuse_if_gui_open(args: argparse.Namespace, target) -> None:
+    """Refuse a file swap while the KiCad GUI holds ``target`` open (no --allow-open)."""
+    from ..writers import kicad as kwriter
+    if getattr(args, "allow_open", False):
+        return
+    lck = kwriter.gui_lock_path(target)
+    if lck.exists():
+        raise _ExitWith(
+            EXIT["OPLIST"],
+            f"ERROR: TARGET_LOCKED: {target.name} appears open in the KiCad GUI "
+            f"(found {lck.name}); close it first, or pass --allow-open and "
+            "File>Revert in KiCad afterwards")
 
 
 def _cmd_undo(args: argparse.Namespace) -> int:
@@ -214,6 +229,7 @@ def _undo_swap(args: argparse.Namespace, target) -> int:
             _emit(f"undo (dry-run): would restore {bak.name}\n  {summary}\n"
                   "re-run with --apply to swap (undo again = redo)")
         return EXIT["OK"]
+    _refuse_if_gui_open(args, target)
     import shutil as _shutil
     tmp = target.parent / (target.name + ".undo-tmp")
     _shutil.copy2(bak, tmp)
@@ -258,6 +274,7 @@ def _undo_walk(args: argparse.Namespace, target, steps: int) -> int:
                   f"{positions[steps].name}\n  {summary}\n"
                   "re-run with --apply (a single `undo` afterwards redoes the last step)")
         return EXIT["OK"]
+    _refuse_if_gui_open(args, target)
     # Reverse the [target, .bak, ...] chain by swapping end-pairs through an
     # ON-DISK temp: every snapshot lives in SOME file at every instant, so a
     # crash mid-undo can at worst leave one pair part-swapped (with the third
@@ -539,10 +556,15 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         # and the stack `akcli undo` walks). Depth from [project] backup_depth.
         backup_dir=(target.parent if do_apply else None),
         backup_depth=_backup_depth(cfg),
+        allow_open=bool(getattr(args, "allow_open", False)),
     )
 
     if do_apply and _draw_exit(results, findings) == EXIT["OK"]:
         _log(args, 1, f"wrote {target}")
+        if kwriter.gui_lock_path(target).exists():
+            sys.stderr.write(
+                "WARNING: this file is open in the KiCad GUI — use File>Revert "
+                "there NOW; a GUI save would overwrite this edit from memory\n")
         # advisory secondary ERC via kicad-cli, if installed (never fatal)
         try:
             from ..drivers import kicad_cli
@@ -617,6 +639,9 @@ def register(sub, common) -> None:
                    help="required clearance between symbols (default 50)")
     p.add_argument("--symbols", metavar="PATH", action="append",
                    help="extra symbol source for the write pipeline")
+    p.add_argument("--allow-open", dest="allow_open", action="store_true",
+                   help="write even when a KiCad GUI lock file is present "
+                        "(File>Revert in KiCad afterwards)")
     p.set_defaults(handler=_cmd_arrange)
 
     p = sub.add_parser("new", parents=[common],
@@ -641,6 +666,9 @@ def register(sub, common) -> None:
                         "redoes the last step)")
     p.add_argument("--list", action="store_true",
                    help="show the backup stack (mtimes/sizes) and exit")
+    p.add_argument("--allow-open", dest="allow_open", action="store_true",
+                   help="swap even when a KiCad GUI lock file is present "
+                        "(File>Revert in KiCad afterwards)")
     p.set_defaults(handler=_cmd_undo)
 
     p = sub.add_parser("ops", parents=[common],
@@ -682,4 +710,8 @@ def register(sub, common) -> None:
     p.add_argument("--strict-nets", action="store_true",
                    help="with --apply: refuse to write when the net diff shows "
                         "a split/merge touching a named net")
+    p.add_argument("--allow-open", dest="allow_open", action="store_true",
+                   help="write even when a KiCad GUI lock file (~<name>.lck) is "
+                        "present — you accept that a GUI save may overwrite the "
+                        "edit; File>Revert in KiCad after applying")
     p.set_defaults(handler=_cmd_draw)

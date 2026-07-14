@@ -39,6 +39,7 @@ ERROR_CODES: frozenset[str] = frozenset(
         "OP_UNSUPPORTED",
         "HIERARCHICAL_UNSUPPORTED",
         "PROTOCOL_MISMATCH",
+        "TARGET_LOCKED",
         # safety / IO
         "PATH_OUTSIDE_ROOT",
         # external tooling
@@ -91,6 +92,7 @@ _CODE_EXIT: dict[str, int] = {
     "OP_UNSUPPORTED": EXIT["OPLIST"],
     "HIERARCHICAL_UNSUPPORTED": EXIT["OPLIST"],
     "PROTOCOL_MISMATCH": EXIT["OPLIST"],
+    "TARGET_LOCKED": EXIT["OPLIST"],
     # usage / config errors -> 2
     "PATH_OUTSIDE_ROOT": EXIT["USAGE"],
     "BAD_CONFIG": EXIT["USAGE"],

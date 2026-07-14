@@ -37,8 +37,11 @@ from .commands import calc as _calc_cmd
 from .commands import checks as _checks_cmd
 from .commands import doctor as _doctor_cmd
 from .commands import drawing as _drawing_cmd
+from .commands import fab as _fab_cmd
 from .commands import jlc as _jlc_cmd
+from .commands import library as _library_cmd
 from .commands import query as _query_cmd
+from .commands import release as _release_cmd
 from .commands import sim as _sim_cmd
 from .commands import view as _view_cmd
 from .commands._shared import _ExitWith
@@ -113,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
     _drawing_cmd.register(sub, common)
     _calc_cmd.register(sub, common)
     _jlc_cmd.register(sub, common)
+    _library_cmd.register(sub, common)
+    _fab_cmd.register(sub, common)
+    _release_cmd.register(sub, common)
     _doctor_cmd.register(sub, common)
     _sim_cmd.register(sub, common)
 

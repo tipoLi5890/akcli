@@ -476,6 +476,7 @@ def _build_place_oplist(result, args, value: str | None) -> dict | None:
     fp_art = next((a for a in result.artifacts if a.endswith(".kicad_mod")), None)
     fp_name = Path(fp_art).stem if fp_art else sym_name
 
+    fp_lib = getattr(args, "footprint_lib", None) or "footprint"
     x_mil, y_mil = args.at
     op: dict = {
         "op": "place_component",
@@ -483,7 +484,7 @@ def _build_place_oplist(result, args, value: str | None) -> dict | None:
         "designator": args.designator,
         "x_mil": float(x_mil),
         "y_mil": float(y_mil),
-        "footprint": f"footprint:{fp_name}",
+        "footprint": f"{fp_lib}:{fp_name}",
     }
     if value:
         op["value"] = value
@@ -522,17 +523,36 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
 
     from ..drivers import jlc2kicad  # lazy: vendored converter (networked)
 
+    fp_lib = getattr(args, "footprint_lib", None) or "footprint"
+    model_path = getattr(args, "model_path", None) or "relative"
     result = jlc2kicad.convert(
         lcsc,
         out_dir,
         with_3d=with_3d,
         lib_name=getattr(args, "lib_name", None) or "akcli",
+        footprint_lib=fp_lib,
+        model_path=model_path,
         force=bool(getattr(args, "force", False)),
     )
 
     if result.error_code is not None:
         sys.stderr.write(f"ERROR: {result.error_code}: {result.message}\n")
         return _ADD_EXIT.get(result.error_code, EXIT["OPLIST"])
+
+    if fp_lib == "footprint":
+        sys.stderr.write(
+            "note: the symbol's Footprint field uses the nickname 'footprint:'; "
+            "pass --footprint-lib <nickname> to match your project's "
+            "fp-lib-table (or register the library as 'footprint').\n")
+    if with_3d and model_path == "relative":
+        sys.stderr.write(
+            "note: 3D model paths are bare-relative (resolve only next to the "
+            "library). Use --3d-path absolute for this machine, or "
+            "--3d-path '${VAR}' with a configured path variable.\n")
+    elif with_3d and model_path == "absolute":
+        sys.stderr.write(
+            "note: 3D model paths are absolute — always resolvable on this "
+            "machine, NOT portable across machines/checkouts.\n")
 
     value = (info.mpn or info.title) if info is not None else None
     place_doc = None
@@ -660,6 +680,20 @@ def register(sub, common) -> None:
                     help="output directory (default: ./akcli-parts/<C-number>/)")
     pa.add_argument("--lib-name", metavar="NAME", default="akcli",
                     help="KiCad symbol library name (default: akcli)")
+    pa.add_argument("--footprint-lib", dest="footprint_lib", metavar="NICKNAME",
+                    default="footprint",
+                    help="fp-lib-table nickname written into the symbol's "
+                         "Footprint field AND used as the footprint output "
+                         "directory (default: footprint) — set it to the "
+                         "nickname your project registers or KiCad will not "
+                         "find the package")
+    pa.add_argument("--3d-path", dest="model_path", metavar="MODE",
+                    default="relative",
+                    help="how footprints reference the 3D model: 'relative' "
+                         "(default; portable, resolves only next to the "
+                         "library), 'absolute' (always resolves on this "
+                         "machine, not portable), or a '${VAR}' prefix "
+                         "(portable via a KiCad path variable)")
     pa.add_argument("--force", action="store_true",
                     help="overwrite existing artifacts")
     pa.add_argument("--place", action="store_true",

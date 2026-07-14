@@ -16,7 +16,11 @@ import enum
 import hashlib
 from dataclasses import dataclass, field, fields, is_dataclass
 
-SCHEMA_VERSION = "1.1"  # 1.1: Pcb gains tracks/vias/arcs/pads (optional adds)  # stamped on every Schematic/Pcb/Library export
+# stamped on every Schematic/Pcb/Library export
+# 1.1: Pcb gains tracks/vias/arcs/pads (optional adds)
+# 1.2: Pcb gains board/zones/metadata; Library gains metadata/footprints
+#      (FootprintDef/FootprintPad); all optional adds.
+SCHEMA_VERSION = "1.2"
 
 # (designator, pin_number)
 PinRef = tuple[str, str]
@@ -157,6 +161,12 @@ class Pcb:
     vias: list[dict] = field(default_factory=list)
     arcs: list[dict] = field(default_factory=list)
     pads: list[dict] = field(default_factory=list)
+    # Schema 1.2 additive fields: board setup (layers/thickness/design rules,
+    # KiCad reader), copper zones, and reader-side metadata/warnings.
+    zones: list[dict] = field(default_factory=list)
+    board: dict = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
     schema_version: str = SCHEMA_VERSION
 
     def export(self) -> dict:
@@ -176,11 +186,45 @@ class SymbolDef:
     body_sexpr: object | None = None         # KiCad: raw symbol node for writer lib_cache
 
 
+# --- Footprint library model (schema 1.2) ---
+@dataclass
+class FootprintPad:
+    """One pad of a footprint DEFINITION (library frame: mm, +Y down)."""
+
+    number: str
+    x_mm: float
+    y_mm: float
+    size_x_mm: float
+    size_y_mm: float
+    shape: str = "rect"          # rect|roundrect|circle|oval|custom
+    pad_type: str = "smd"        # smd|thru_hole|np_thru_hole|connect
+    layers: list[str] = field(default_factory=list)
+    drill_mm: float | None = None
+    rotation: float = 0.0
+
+
+@dataclass
+class FootprintDef:
+    """A footprint library item (KiCad ``.kicad_mod`` / Altium ``.PcbLib`` entry)."""
+
+    name: str
+    pads: list[FootprintPad] = field(default_factory=list)
+    layer: str = "F.Cu"
+    attributes: list[str] = field(default_factory=list)   # smd|through_hole|...
+    models: list[str] = field(default_factory=list)       # 3D model paths as written
+    courtyard: bool = False       # has any *.Courtyard graphics
+    format_version: str | None = None   # KiCad (version ...) token, None = legacy/unknown
+    warnings: list[str] = field(default_factory=list)
+
+
 @dataclass
 class Library:
     source_path: str
     source_format: str
     symbols: list[SymbolDef]
+    footprints: list[FootprintDef] = field(default_factory=list)   # schema 1.2
+    warnings: list[str] = field(default_factory=list)              # schema 1.2
+    metadata: dict = field(default_factory=dict)                   # schema 1.2
     schema_version: str = SCHEMA_VERSION
 
     def export(self) -> dict:

@@ -33,9 +33,11 @@ _EXT_FORMAT = {
     ".schdoc": "altium_sch",
     ".schlib": "altium_schlib",
     ".pcbdoc": "altium_pcb",
+    ".pcblib": "altium_pcblib",
     ".kicad_sch": "kicad_sch",
     ".kicad_pcb": "kicad_pcb",
     ".kicad_sym": "kicad_sym",
+    ".kicad_mod": "kicad_mod",
     ".prjpcb": "altium_prj",
 }
 
@@ -73,25 +75,91 @@ def _require_path(value: str | None, what: str = "input file") -> Path:
     return Path(value)
 
 
-def _detect_format(path: Path) -> str:
-    """Detect the file format by extension, falling back to a magic-byte sniff."""
+def _sniff_ole(path: Path) -> str:
+    """Classify a bare OLE2/CFBF container by its storage/stream layout.
+
+    An unknown OLE file is NEVER assumed to be a schematic: an unrecognized
+    layout returns ``"unknown"`` so the caller fails loudly (exit 5) instead of
+    silently producing an empty import (the historic ``.PcbLib``-as-SchDoc trap).
+    """
+    try:
+        from ..readers import _cfbf  # lazy
+        streams = _cfbf.read_streams_qualified(path)
+    except Exception:
+        # A corrupt container is still *an OLE file*; route it to the Altium
+        # schematic reader so the structured ALTIUM_* parse error surfaces.
+        return "altium_sch"
+    names = set(streams)
+    tops = {n.split("/", 1)[0] for n in names}
+    if any(t.startswith("Board6") for t in tops):
+        return "altium_pcb"
+    if "Library" in tops and any(n.startswith("Library/") for n in names):
+        # PcbLib containers carry a Library storage plus per-footprint storages.
+        return "altium_pcblib"
+    header = streams.get("FileHeader", b"")
+    if header:
+        if b"Schematic Library" in header[:256]:
+            return "altium_schlib"
+        if b"Schematic Capture" in header[:256]:
+            return "altium_sch"
+        if b"PCB" in header[:256] and b"Library" in header[:256]:
+            return "altium_pcblib"
+        if b"PCB" in header[:256]:
+            return "altium_pcb"
+        # A FileHeader we cannot classify: most likely a schematic-family doc.
+        return "altium_sch"
+    return "unknown"
+
+
+def _detect_format_ex(path: Path) -> tuple[str, str]:
+    """Detect the file format; returns ``(format, detection_method)``.
+
+    ``detection_method`` is one of ``"extension"``, ``"content"``, ``"none"``.
+    """
     ext = path.suffix.lower()
     if ext in _EXT_FORMAT:
-        return _EXT_FORMAT[ext]
+        return _EXT_FORMAT[ext], "extension"
     try:
         head = path.open("rb").read(64)
     except OSError:
-        return "unknown"
+        return "unknown", "none"
     if head.startswith(_OLE_MAGIC):
-        return "altium_sch"  # bare OLE2: assume schematic doc
+        return _sniff_ole(path), "content"
     stripped = head.lstrip()
     if stripped.startswith(b"(kicad_symbol_lib"):
-        return "kicad_sym"
+        return "kicad_sym", "content"
     if stripped.startswith(b"(kicad_sch"):
-        return "kicad_sch"
+        return "kicad_sch", "content"
     if stripped.startswith(b"(kicad_pcb"):
-        return "kicad_pcb"
-    return "unknown"
+        return "kicad_pcb", "content"
+    if stripped.startswith(b"(footprint") or stripped.startswith(b"(module"):
+        return "kicad_mod", "content"
+    return "unknown", "none"
+
+
+def _detect_format(path: Path) -> str:
+    """Detect the file format by extension, falling back to a content sniff."""
+    return _detect_format_ex(path)[0]
+
+
+def _empty_import_warning(path: Path, fmt: str, counts: dict[str, int]) -> str | None:
+    """`EMPTY_IMPORT` warning text when a non-empty source normalized to nothing.
+
+    A parse that "succeeds" with zero objects on a non-trivial input file is the
+    classic silent-failure signature; surface it instead of exiting 0 quietly.
+    """
+    if any(counts.values()):
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size == 0:
+        return None
+    rendered = ", ".join(f"{k}=0" for k in counts)
+    return (f"EMPTY_IMPORT: {path.name} ({size} bytes, format {fmt}) "
+            f"normalized to nothing ({rendered}) — wrong/unsupported format? "
+            "(--strict makes this fatal)")
 
 
 def _load_schematic(path: Path):
@@ -125,6 +193,12 @@ def _load_schematic(path: Path):
     if fmt == "altium_pcb":
         raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"],
                         "ERROR: .PcbDoc is a PCB, not a schematic (use `read`)")
+    if fmt == "altium_pcblib":
+        raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"],
+                        "ERROR: .PcbLib is a footprint library, not a schematic (use `read`)")
+    if fmt == "kicad_mod":
+        raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"],
+                        "ERROR: .kicad_mod is a footprint, not a schematic (use `read`)")
     raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"], f"ERROR: unsupported/unknown format: {path}")
 
 

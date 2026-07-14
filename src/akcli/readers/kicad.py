@@ -543,17 +543,96 @@ def read_primitives(path: os.PathLike | str) -> NetPrimitives:
     return prims
 
 
+def _rot_ccw(x: float, y: float, deg: float) -> tuple[float, float]:
+    """Rotate a footprint-frame offset by ``deg`` CCW-on-screen (KiCad, +Y down)."""
+    import math
+    if not deg:
+        return x, y
+    r = math.radians(deg)
+    c, s = math.cos(r), math.sin(r)
+    return x * c + y * s, -x * s + y * c
+
+
+def _node_net_name(node, net_by_idx: dict[str, str]) -> str | None:
+    """Resolve a ``(net ...)`` child to a net NAME.
+
+    Two dialects: ``(net 2 "+3V3")`` (index + name, v6-v9 boards) and
+    ``(net "GND")`` (name only, KiCad 10 pads). A quoted single argument is a
+    name; an unquoted one is an index into the board's net table.
+    """
+    net_node = node.find("net")
+    if net_node is None or len(net_node.children or ()) < 2:
+        return None
+    if len(net_node.children) >= 3 and net_node.children[2].is_atom:
+        return net_node.children[2].value or None
+    arg = net_node.children[1]
+    if not arg.is_atom:
+        return None
+    if (arg.text or "").startswith('"'):
+        return arg.value or None
+    return net_by_idx.get(arg.value or "")
+
+
+def _pcb_pad(pad, ref: str, fx: float, fy: float, frot: float,
+             fp_layer: str | None, net_by_idx: dict[str, str]) -> dict:
+    """One footprint pad -> a board-frame pad dict (mm, +Y down)."""
+    at = pad.find("at")
+    lx, ly = _fnum(at, 1), _fnum(at, 2)
+    ax, ay = _rot_ccw(lx, ly, frot)
+    size = pad.find("size")
+    layers_node = pad.find("layers")
+    layers = [c.value for c in (layers_node.children or ())[1:]
+              if c.is_atom and c.value] if layers_node is not None else []
+    drill = pad.find("drill")
+    drill_mm = None
+    if drill is not None:
+        v = _av(drill, 1)
+        if v == "oval":
+            v = _av(drill, 2)
+        try:
+            drill_mm = float(v) if v is not None else None
+        except (TypeError, ValueError):
+            drill_mm = None
+    return {
+        "component": ref,
+        "number": _av(pad, 1) or "",
+        "pad_type": _av(pad, 2) or "smd",
+        "shape": _av(pad, 3) or "rect",
+        "at": (round(fx + ax, 6), round(fy + ay, 6)),
+        "size": (_fnum(size, 1), _fnum(size, 2)),
+        "rotation": _fnum(at, 3),   # absolute (KiCad stores fp rot folded in)
+        "layers": layers,
+        "footprint_layer": fp_layer,
+        "drill": drill_mm,
+        "net": _node_net_name(pad, net_by_idx),
+    }
+
+
 def read_pcb(path: os.PathLike | str) -> Pcb:
-    """Read a ``.kicad_pcb`` into a :class:`model.Pcb` (footprints + net names)."""
+    """Read a ``.kicad_pcb`` into a :class:`model.Pcb`.
+
+    Beyond footprints + net names (schema 1.0), this decodes — additively —
+    pad-level net bindings, tracks, vias, zones and the board setup
+    (schema 1.2). PCB-side geometry stays in **KiCad's native frame: mm,
+    +Y down** (``board["units"] == "mm"``), unlike the Altium PCB reader
+    which keeps mils; consumers must check the source_format.
+    """
     root = _parse_root(path, "kicad_pcb")
 
     nets: list[str] = []
+    net_by_idx: dict[str, str] = {}
     for net in root.find_all("net"):
-        name = _av(net, 2)
+        idx, name = _av(net, 1), _av(net, 2)
         if name:  # net 0 is the unconnected pseudo-net ("")
             nets.append(name)
+            if idx is not None:
+                net_by_idx[idx] = name
+
+    def _net_ref(node) -> str | None:
+        return _node_net_name(node, net_by_idx)
 
     footprints: list[MFootprint] = []
+    pads: list[dict] = []
     for fp in root.find_all("footprint"):
         fp_name = _av(fp, 1)
         props = _props(fp)
@@ -570,6 +649,7 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
                     value = txt
         layer = _av(fp.find("layer"), 1)
         at = fp.find("at")
+        fx, fy = (_fnum(at, 1), _fnum(at, 2)) if at is not None else (0.0, 0.0)
         rot = _fnum(at, 3) if at is not None else 0.0
         footprints.append(
             MFootprint(
@@ -580,10 +660,115 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
                 value=value,
             )
         )
+        for pad in fp.find_all("pad"):
+            pads.append(_pcb_pad(pad, ref or "", fx, fy, rot, layer, net_by_idx))
+
+    tracks: list[dict] = []
+    for seg in root.find_all("segment"):
+        start, end = seg.find("start"), seg.find("end")
+        tracks.append({
+            "start": (_fnum(start, 1), _fnum(start, 2)),
+            "end": (_fnum(end, 1), _fnum(end, 2)),
+            "width": _fnum(seg.find("width"), 1),
+            "layer": _av(seg.find("layer"), 1),
+            "net": _net_ref(seg),
+        })
+
+    vias: list[dict] = []
+    for via in root.find_all("via"):
+        kind = "through"
+        for c in (via.children or ())[1:]:
+            if c.is_atom and c.value in ("blind", "micro"):
+                kind = c.value
+                break
+        at = via.find("at")
+        layers_node = via.find("layers")
+        vlayers = [c.value for c in (layers_node.children or ())[1:]
+                   if c.is_atom and c.value] if layers_node is not None else []
+        vias.append({
+            "at": (_fnum(at, 1), _fnum(at, 2)),
+            "size": _fnum(via.find("size"), 1),
+            "drill": _fnum(via.find("drill"), 1),
+            "layers": vlayers,
+            "type": kind,
+            "net": _net_ref(via),
+        })
+
+    zones: list[dict] = []
+    for zone in root.find_all("zone"):
+        zlayers = []
+        lnode = zone.find("layer") or zone.find("layers")
+        if lnode is not None:
+            zlayers = [c.value for c in (lnode.children or ())[1:]
+                       if c.is_atom and c.value]
+        xs: list[float] = []
+        ys: list[float] = []
+        poly = zone.find("polygon")
+        if poly is not None:
+            pts = poly.find("pts")
+            for xy in (pts.find_all("xy") if pts is not None else []):
+                xs.append(_fnum(xy, 1))
+                ys.append(_fnum(xy, 2))
+        zones.append({
+            "net": _net_ref(zone),
+            "layers": zlayers,
+            "name": _av(zone.find("name"), 1),
+            "bbox": ((min(xs), min(ys)), (max(xs), max(ys))) if xs else None,
+        })
+
+    board: dict = {"units": "mm"}
+    general = root.find("general")
+    if general is not None:
+        board["thickness"] = _fnum(general.find("thickness"), 1)
+    layers_node = root.find("layers")
+    if layers_node is not None:
+        copper = []
+        all_layers = []
+        for entry in layers_node.children or ():
+            if not entry.is_list or len(entry.children) < 3:
+                continue
+            lname = entry.children[1].value
+            ltype = entry.children[2].value
+            all_layers.append({"name": lname, "type": ltype})
+            if ltype in ("signal", "power", "mixed") and lname and lname.endswith(".Cu"):
+                copper.append(lname)
+        board["layers"] = all_layers
+        board["copper_layers"] = copper
+    setup = root.find("setup")
+    if setup is not None:
+        setup_vals: dict = {}
+        for child in setup.children or ():
+            if not child.is_list or not child.tag:
+                continue
+            vals = [c.value for c in (child.children or ())[1:] if c.is_atom]
+            if len(vals) == 1:
+                setup_vals[child.tag] = vals[0]
+            elif vals:
+                setup_vals[child.tag] = vals
+        board["setup"] = setup_vals
+
+    # Edge.Cuts extent (board outline bbox) from gr_lines/gr_rects/gr_arcs.
+    exs: list[float] = []
+    eys: list[float] = []
+    for gr in list(root.find_all("gr_line")) + list(root.find_all("gr_rect")):
+        if _av(gr.find("layer"), 1) != "Edge.Cuts":
+            continue
+        for tag in ("start", "end"):
+            node = gr.find(tag)
+            if node is not None:
+                exs.append(_fnum(node, 1))
+                eys.append(_fnum(node, 2))
+    if exs:
+        board["outline_bbox"] = ((min(exs), min(eys)), (max(exs), max(eys)))
 
     return Pcb(
         source_path=str(path),
         source_format="kicad",
         nets=nets,
         footprints=footprints,
+        pads=pads,
+        tracks=tracks,
+        vias=vias,
+        zones=zones,
+        board=board,
     )

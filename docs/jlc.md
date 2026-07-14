@@ -157,7 +157,7 @@ simply omitted (or shows `(metadata unavailable)`) — it never breaks `jlc show
 Exit codes: `0` when found, `0` with a `no part … found` stderr notice when the
 C-number does not exist, `7` on a network/HTTP error.
 
-### `akcli jlc add <C-number> [--3d] [--out DIR] [--lib-name NAME] [--force] [--place ...]`
+### `akcli jlc add <C-number> [--3d] [--out DIR] [--lib-name NAME] [--footprint-lib NICKNAME] [--3d-path MODE] [--force] [--place ...]`
 
 Fetch a real LCSC/EasyEDA part and convert it into a KiCad library — **in-process**,
 via the vendored MIT [JLC2KiCadLib](https://github.com/TousstNicolas/JLC2KiCad_lib)
@@ -167,15 +167,27 @@ core (no external tool to install; networked).
 akcli jlc add C2040                       # symbol + footprint
 akcli jlc add C2040 --3d                  # + 3D STEP model
 akcli jlc add C2040 --out ./mylib --lib-name akcli
+akcli jlc add C2040 --footprint-lib proj_jlc --3d-path relative   # match your fp-lib-table
 akcli jlc add C25804 --place --designator R1 --at 2000 1000   # + one-op place.json
 ```
 
 Output layout under `--out` (default `./akcli-parts/<C-number>/`):
-`symbol/<lib-name>.kicad_sym`, `footprint/<name>.kicad_mod`, and with `--3d`
-`footprint/packages3d/<name>.step`. `--place` writes `place.json` (a one-op
+`symbol/<lib-name>.kicad_sym`, `<footprint-lib>/<name>.kicad_mod`, and with `--3d`
+`<footprint-lib>/packages3d/<name>.step`. `--place` writes `place.json` (a one-op
 `place_component` op-list with `lib_id` read from the produced `.kicad_sym` and
 the footprint id from the `.kicad_mod` stem) to apply with
 `akcli draw <target> --ops place.json --symbols <symbol lib> --apply`.
+
+**`--footprint-lib NICKNAME`** (default `footprint`) sets **both** the footprint output directory
+and the fp-lib-table nickname written into the symbol's Footprint field (`<nickname>:<name>`). The
+default `footprint` is the historic cause of KiCad's "footprint not found" — pass the nickname your
+project's `fp-lib-table` actually registers, or fix an existing library with
+`akcli library repair <project> --rename-footprint-lib footprint=<nickname> --apply`.
+**`--3d-path MODE`** picks how the footprint references the 3D model: `relative` (default; portable,
+resolves only next to the library), `absolute` (always resolves on this machine, not portable), or a
+`${VAR}` prefix (portable via a KiCad path variable). The trade-off is printed on stderr. A converted
+library is a CLAIM — verify pin mapping/dimensions against the datasheet, and cross-check the whole
+workspace with `akcli library audit <project>`.
 
 Exit codes: `0` success · `2` bad usage (bad C-number, `--place` without
 `--designator`/`--at`) · `4` part has no EasyEDA CAD data · `6` conversion

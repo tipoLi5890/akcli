@@ -115,7 +115,7 @@ def test_metadata_present():
     assert sch.metadata["component_count"] == 2
     assert sch.metadata["pin_count"] == 2
     assert sch.source_format == "altium"
-    assert sch.export()["schema_version"] == "1.1"
+    assert sch.export()["schema_version"] == "1.2"
 
 
 def test_read_primitives_round_trips_into_same_nets():

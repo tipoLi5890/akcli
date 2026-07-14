@@ -1,10 +1,12 @@
 # `akcli` CLI reference
 
 `akcli` is the command-line entry point of `akcli`. It reads
-Altium binary `.SchDoc`/`.SchLib`/`.PcbDoc` and KiCad `.kicad_sch`/`.kicad_sym`/`.kicad_pcb`, runs
-checks (including design-intent assertions), diffs revisions, draws KiCad schematics with a
-before/after net-connectivity diff, and provides 60 standards-cited engineering calculators
-(`akcli calc`) — with no Altium or KiCad install required.
+Altium binary `.SchDoc`/`.SchLib`/`.PcbDoc`/`.PcbLib` and KiCad
+`.kicad_sch`/`.kicad_sym`/`.kicad_pcb`/`.kicad_mod`, runs checks (including design-intent and
+design-contract assertions), diffs revisions, verifies schematic ↔ PCB equivalence, audits and
+repairs project library workspaces, gates manufacturing against versioned fab profiles, draws KiCad
+schematics with a before/after net-connectivity diff, and provides 60 standards-cited engineering
+calculators (`akcli calc`) — with no Altium or KiCad install required.
 
 > This reference is the contract for the CLI surface. It tracks the subcommands and flags defined in
 > `src/akcli/cli.py`.
@@ -31,9 +33,21 @@ diagnostics. This keeps `akcli ... --json | jq` clean.
 
 ## Subcommands
 
-### `akcli read <file> [--md]`
+### `akcli read <file> [--md] [--strict]`
 Parse an Altium or KiCad schematic/PCB/library into the normalized model and print it.
-- Input: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.PrjPcb`, `.kicad_sch`, `.kicad_sym`, `.kicad_pcb`.
+- Input: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.PcbLib`, `.PrjPcb`, `.kicad_sch`, `.kicad_sym`,
+  `.kicad_pcb`, `.kicad_mod`.
+- **Fail-loud format detection.** The extension picks the reader; a bare OLE2 container with an
+  unknown extension is classified by its **storage layout** (`Board6` → PcbDoc, `Library` → PcbLib,
+  `FileHeader` → SchDoc/SchLib) — never assumed to be a schematic. An unrecognized container exits
+  `5` instead of silently returning an empty model. The `--json` metadata carries `detected_format`,
+  `detection_method` (`extension`|`content`) and `object_counts`.
+- **`EMPTY_IMPORT`:** a non-empty source that normalizes to zero objects prints an `EMPTY_IMPORT`
+  warning (the classic silent-failure signature); `--strict` turns it into exit `1`.
+- A `.PcbLib` decodes each footprint storage into the `Library` model's `footprints`
+  (`FootprintDef`/`FootprintPad`: pad number/position/size/drill/shape/rotation, NPTH vs plated);
+  undecoded primitives (silkscreen graphics, text, 3D bodies) surface as `UNSUPPORTED_PRIMITIVE`
+  warnings, never dropped silently. `.kicad_mod`/`.pretty` read into the same model.
 - A KiCad root sheet **recurses into its `(sheet ...)` children** (paths relative to the parent
   file, cycle- and depth-guarded); every sheet instance contributes its components under the
   designator from the matching `(instances (path ...))` entry.
@@ -43,6 +57,11 @@ Parse an Altium or KiCad schematic/PCB/library into the normalized model and pri
 - A `.PcbDoc` decodes both the ASCII sections (nets/components/classes/rules) and the **binary
   copper sections** `Tracks6`/`Vias6`/`Arcs6`/`Pads6` into `tracks`/`vias`/`arcs`/`pads`
   (mils, Altium's native +Y-up frame); `Fills6`/`Regions6`/`Texts6`/`Polygons6` are skipped.
+- A `.kicad_pcb` decodes footprints, **pad-level net bindings** (both `(net N "name")` and KiCad 10
+  `(net "name")` dialects, absolute pad positions with the footprint rotation folded in), tracks,
+  vias (through/blind/micro), zones, and the board setup (`board`: copper layers, thickness, setup
+  values, Edge.Cuts outline bbox). KiCad geometry stays in its native **mm, +Y-down** frame
+  (`board.units == "mm"`), unlike the Altium PCB reader's mils — check `source_format`.
 - `--json` prints the full `Schematic`/`Pcb`/`Library` export with `schema_version`; `--md` prints
   a human Markdown summary.
 
@@ -107,9 +126,9 @@ unresolvable `lib_id` is `SYMBOL_NOT_FOUND` (exit `6`). `--json` emits the table
 Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print findings.
 - `-C/--config` supplies rails, MCU designator, the schematic grid, `[[erc_waiver]]`
   entries, and the checker-agnostic `[[waiver]]` table (below).
-- `--erc` / `--power` / `--bom` / `--nets` / `--layout` / `--intent` / `--libsync` select check
-  families (default: `erc`+`power`+`bom`+`nets`+`layout`; `layout` only runs on `.kicad_sch`;
-  `intent` and `libsync` are **opt-in only** — they never run by default).
+- `--erc` / `--power` / `--bom` / `--nets` / `--layout` / `--intent` / `--contract` / `--libsync`
+  select check families (default: `erc`+`power`+`bom`+`nets`+`layout`; `layout` only runs on
+  `.kicad_sch`; `intent`, `contract` and `libsync` are **opt-in only** — they never run by default).
 - `--nets` is **connectivity hygiene**: `NET_SINGLE_PIN` (a floating label or
   a power port driving nothing), `NET_OFF_GRID` (pins off the configured grid
   — wires that touch on screen without ever connecting), and, on `.kicad_sch`
@@ -165,6 +184,19 @@ Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print
     wildcards are **ignored when computing `INTENT_EXTRA_MEMBER`** — only
     literal members are subtracted, so a pin present solely via a wildcard match
     still surfaces as extra (a wildcard asserts existence, not a closed set).
+- `--contract FILE` asserts a **design-contract TOML** file against the built netlist — topology
+  and semantic rules ERC cannot express, each carrying datasheet `evidence`. Rule kinds per
+  `[[contract]]`: `require`/`forbid` (a pin on / off a named net), `require_same_net`/
+  `forbid_same_net` (pin-pair topology), `component` + `value` (exact, space/case-insensitive, or a
+  list of accepted values), and `nc` (a pin must not join a multi-pin net). Pin specs `REF.PIN`
+  resolve the pin **number** first, then the pin **name** (`U1.FB2`). A rule with `waived = true`
+  (plus `owner`/`reason`/optional `expires`) is an **approved exception**. The three outcomes are
+  never conflated: `CONTRACT_PASS` (info), `CONTRACT_FAIL` (at the rule's `severity`, default
+  error), and `CONTRACT_WAIVED` (note) — an expired exception raises `CONTRACT_EXCEPTION_EXPIRED`
+  (warning) instead of silently passing. A malformed file is `BAD_CONFIG` (exit `2`), a too-new
+  `protocol_version` is `PROTOCOL_MISMATCH` (exit `6`). Intent snapshots do net-membership
+  regression; contracts express policy — the two compose. See
+  [docs/design-integrity.md](design-integrity.md).
 - `--libsync [--symbols DIR ...]` checks the freshness of the embedded
   `lib_symbols` cache (`.kicad_sch` only). With `--symbols` sources it
   compares **pin signatures** (number/name/type/position/unit) against the
@@ -217,13 +249,22 @@ supplies extra symbol sources for the write pipeline (same semantics as
 `draw --symbols`).
 
 ### `akcli verify <file_a> <file_b> [--strict]`
-**Net-equivalence proof** on top of the diff engine — the one-command answer to
-"did the conversion keep the circuit?". PASS (exit `0`) iff the component set
-matches and every net's **pin membership** is identical; nets that merely
-changed display name are listed but do not fail (conversions rename unnamed
-nets). Component value/footprint drift is reported as a note — `--strict`
-turns it into a failure. `--json` carries the verdict plus the full diff
-report. Works across formats: `akcli verify board.SchDoc board.kicad_sch`.
+Two modes, dispatched by the **second** file's type:
+- **Schematic ↔ schematic** (`verify a.SchDoc b.kicad_sch`) — **net-equivalence proof** on top of
+  the diff engine, the one-command answer to "did the conversion keep the circuit?". PASS (exit `0`)
+  iff the component set matches and every net's **pin membership** is identical; nets that merely
+  changed display name are listed but do not fail (conversions rename unnamed nets). Component
+  value/footprint drift is reported as a note — `--strict` turns it into a failure.
+- **Schematic ↔ PCB** (`verify board.kicad_sch board.kicad_pcb`, second file `.kicad_pcb`) —
+  compares refdes presence, footprint/value assignment, and the pad-level **net partition** (net
+  names are untrusted; what must hold is that pins joined on the schematic are joined on the board
+  and vice versa). Findings, each located to the designator/pad: `SCHPCB_MISSING_ON_PCB` /
+  `SCHPCB_EXTRA_ON_PCB`, `SCHPCB_FOOTPRINT_MISMATCH`, `SCHPCB_PAD_MISSING`, `SCHPCB_NET_SPLIT`
+  (one schematic net across >1 board nets), `SCHPCB_NET_MERGE` (one board net shorting >1 schematic
+  nets), `SCHPCB_UNNETTED_PAD`. `#PWR`/`#FLG` pseudo-components are excluded; `--strict` also fails
+  on value mismatches. PASS (exit `0`) iff no ERROR-level finding.
+
+`--json` carries the verdict (`equivalent`, `mode`) plus the findings/diff report.
 
 ### `akcli new [<path>] [--paper SIZE] [--title T] [--force]`
 Bootstrap a minimal blank `.kicad_sch` (root `(uuid ...)`, `(paper ...)`, and an
@@ -332,7 +373,7 @@ target `.kicad_sch` (symbols from repeatable `--symbols` sources and the target'
 print what *would* change. Never writes. Includes the **Net changes** block (below);
 `--no-net-diff` skips it.
 
-### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets]`
+### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets] [--allow-open]`
 Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 18 ops + 9 macros (see
 `schemas/ops.schema.json`), including `delete_component` (with `cascade`) / `delete_object` /
 `move_component` / `rename_net`, hierarchical `add_sheet` (below), and multi-unit placement via
@@ -367,6 +408,10 @@ Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 18 ops + 9 ma
   unnamed nets are ordinary wiring edits and pass. It forces the diff even under `--no-net-diff`,
   and it fails **closed**: when the diff cannot be computed, the write is refused
   (`REFUSED: --strict-nets: net diff unavailable (...)`) rather than waved through.
+- **GUI-open guard.** `--apply` refuses with `TARGET_LOCKED` (exit `6`) when KiCad's `~<name>.lck`
+  lock file is present — a write under an open GUI is a losing race (the GUI's later save overwrites
+  it from memory). `--allow-open` is explicit risk acceptance, and a successful apply under an open
+  GUI prints a `File>Revert` reminder on stderr. (Same guard on `arrange`/`undo --apply`.)
 - A final status line states the outcome unambiguously:
   `status: dry-run — nothing written (re-run with --apply)`,
   `status: APPLIED — wrote board.kicad_sch (backup board.kicad_sch.bak; akcli undo reverts)`, or
@@ -469,10 +514,16 @@ high-confidence matches, `--fix-all` also writes low-confidence ones; `--csv OUT
 JLCPCB upload BOM CSV, `'-'` = stdout), **datasheet resolution/download**
 (`jlc datasheet <C-number|MPN|sch> [--fetch] [--out DIR]` — resolves szlcsc PDF links via the
 EasyEDA record, `%PDF`-magic-verified downloads, whole-BOM batch mode; files cache under
-`~/.cache/akcli/datasheets/`), and library conversion — the only **networked**
-subcommand family. Network failures exit `7` (`ERROR: NETWORK: ...`); transient errors are
-retried with backoff, and a stale cached response is served with a warning when retries are
-exhausted. See [docs/jlc.md](jlc.md) for the full reference.
+`~/.cache/akcli/datasheets/`), and library conversion (`jlc add C<num> [--3d]
+[--footprint-lib NICKNAME] [--3d-path relative|absolute|'${VAR}']` → KiCad symbol + footprint +
+optional STEP). `--footprint-lib` sets **both** the output directory and the fp-lib-table nickname
+written into the symbol's Footprint field — pass the nickname your project registers, or KiCad
+reports "footprint not found" (the field previously hardcoded `footprint:`). `--3d-path` picks the
+3D-model reference policy — `relative` (portable, resolves only next to the library), `absolute`
+(always resolves on this machine, not portable), or a `${VAR}` prefix — and prints the trade-off.
+This is the only **networked** subcommand family. Network failures exit `7`
+(`ERROR: NETWORK: ...`); transient errors are retried with backoff, and a stale cached response is
+served with a warning when retries are exhausted. See [docs/jlc.md](jlc.md) for the full reference.
 
 ### `akcli sim <sch> [--sim FILE] [--deck-only] [--out PATH] [--gnd NET] [--wave OUT.csv] [--sweep NAME=v1,v2,...] [--timeout S] [--exit-zero]`
 Simulate a schematic with **libngspice** and assert on the results. `akcli sim` renders the
@@ -520,6 +571,51 @@ capability is missing (unknown capability names exit `2`). `--json` emits
 `{checks: {name: {ok, detail, hint?}}, required, ok}`. The `akcli-setup` skill drives this
 command for setup/repair flows.
 
+### `akcli library <audit|repair|import-altium> ...`
+Project **library workspace**: the sym/fp-lib-table, the schematics, the registered libraries and
+their 3D models as one auditable object. See [docs/design-integrity.md](design-integrity.md).
+- `akcli library audit [<project>] [--sch FILE ...] [--exit-zero]` — cross-checks schematics ↔
+  `sym-lib-table`/`fp-lib-table` ↔ library contents ↔ 3D models (project dir or `.kicad_pro`;
+  default `.`). Findings: `FOOTPRINT_LIB_UNREGISTERED` (a Footprint nickname the fp-lib-table does
+  not register — the "cannot find footprint" trap), `FOOTPRINT_MISSING`, `SYMBOL_LIB_UNREGISTERED`/
+  `SYMBOL_MISSING`, `LIB_URI_UNRESOLVED`/`LIB_PATH_MISSING`, `MODEL_MISSING`/`MODEL_NOT_PORTABLE`,
+  `FOOTPRINT_LEGACY_FORMAT` (a pre-v6 footprint that parses via API but is invisible to the KiCad
+  GUI). Only the **project** tables are consulted; lint-style exit (`1` on ≥ WARNING).
+- `akcli library repair [<project>] [--rename-footprint-lib OLD=NEW] [--3d-path absolute|'${VAR}']
+  [--apply]` — productizes the two historically hand-`sed`-ed fixes as a plan: rewrite Footprint
+  nicknames `OLD:* → NEW:*` (lossless S-expression edit of registered `.kicad_sym` + schematics) and
+  rewrite bare-relative 3D-model paths. Dry-run by default; `--apply` writes atomically with a `.bak`
+  and re-audits.
+- `akcli library import-altium <part.PcbLib> [--out DIR] [--courtyard MM] [--apply]` — converts an
+  Altium `.PcbLib` into a `.pretty` library, pads **verbatim** (never recomputed). Transformations
+  are declared, not silent (filesystem-safe renames; an optional pad-bbox `--courtyard`); on
+  `--apply` it writes the `.kicad_mod` files plus a `provenance.json` (source SHA-256, converter
+  version, options, every warning). Dry-run by default.
+
+### `akcli fab <check|explain> ...`
+Manufacturing policy against a **versioned fab profile** (TOML carrying mandatory `[source]` urls —
+policy is source-controlled, never a builtin constant).
+- `akcli fab check <board.kicad_pcb> --profile FILE [--order FILE] [--exit-zero]` — checks the
+  deep-read board: via geometry vs the free-process envelope (`FAB_VIA_PAID_PROCESS`,
+  `FAB_VIA_TENTED_TOO_BIG`, `FAB_VIA_MIN_MARGIN`), via-in-pad (`FAB_VIA_IN_PAD`, with registered
+  `thermal_via` exceptions → `FAB_VIA_IN_PAD_EXCEPTION`; an expired one → `FAB_EXCEPTION_EXPIRED`),
+  blind/buried bans (`FAB_VIA_TYPE_FORBIDDEN`), stackup drift (`FAB_STACKUP_MISMATCH`), and cost
+  thresholds (`FAB_COST_*`: board size/area, drill density, fine multilayer traces). `--order`
+  validates the declared **order manifest** (delivery format, finish, via covering, … — pricing
+  inputs never guessed from the PCB): `ORDER_INCOMPLETE`, `ORDER_REVIEW_REQUIRED` (ENIG/panel/
+  multi-design), `ORDER_PROFILE_CONFLICT`. Lint-style exit.
+- `akcli fab explain <CODE> [--profile FILE]` — prints the rule behind a finding code, the fix
+  direction, and (with `--profile`) the profile's evidence sources.
+
+### `akcli release preflight --sch FILE [--pcb FILE] [--intent FILE] [--contract FILE] [--fab-profile FILE] [--order FILE] [--out FILE] [--allow-dirty]`
+Run **every applicable gate** and emit a traceable release manifest. Gates:
+`check` (ERC/power/BOM/nets), `intent`, `contract`, `library-audit`, `sch-pcb` (needs `--pcb`),
+`fab` (needs `--pcb` + `--fab-profile`), `order`, and `git` (clean worktree). A gate with no input
+is **skipped with a reason**, never silently green. `--out` writes the manifest JSON: input
+SHA-256s, the akcli version, the git revision and dirtiness, and each gate's findings. A dirty
+worktree fails the `git` gate unless `--allow-dirty` (which records the fact). Exit `0` only when
+every gate passed.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -530,7 +626,7 @@ command for setup/repair flows.
 | `3` | Parse error (corrupt OLE2 or S-expression). |
 | `4` | File not found. |
 | `5` | Unsupported format (incl. `ALTIUM_UNSUPPORTED` features). |
-| `6` | Op-list or verify failure (incl. `--strict-nets` refusal, `relink-symbols` gate refusal, `PROTOCOL_MISMATCH`). |
+| `6` | Op-list or verify failure (incl. `--strict-nets` refusal, `relink-symbols` gate refusal, `PROTOCOL_MISMATCH`, GUI-lock `TARGET_LOCKED`). |
 | `7` | Required external tool missing **or network failure** (`KICAD_CLI_MISSING`/`KICAD_CLI_TIMEOUT`, `jlc` `ERROR: NETWORK`, `BINFETCH_*`, `sim`'s `NGSPICE_MISSING`/`NGSPICE_FAILED`). |
 
 ## Structured errors
@@ -548,7 +644,7 @@ surface as:
 |---|---|
 | `3` (parse) | `ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`, `ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG` |
 | `5` (unsupported) | `ALTIUM_UNSUPPORTED` |
-| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH` |
+| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH`, `TARGET_LOCKED` |
 | `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG` |
 | `7` (tool/network) | `KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, `BINFETCH_DOWNLOAD`, `BINFETCH_CHECKSUM` (and `jlc`'s `ERROR: NETWORK: ...` line) |
 
@@ -560,8 +656,11 @@ Two related but distinct vocabularies:
   `NET_PIN_MIDSPAN_TOUCH`, `NET_LABEL_UNATTACHED`, `NET_WIRE_CORNER_ON_PIN`,
   `LAYOUT_POWER_ON_PIN`, `LAYOUT_WIRE_THROUGH_SYMBOL`, `LAYOUT_LABEL_OVER_WIRE`,
   `ERC_UNPLACED_UNIT`, `INTENT_PIN_UNKNOWN`, `INTENT_NET_NOT_FOUND`, `INTENT_MISSING_MEMBER`,
-  `INTENT_EXTRA_MEMBER`, `INTENT_NETS_SHORTED`, `LIB_EMBED_STALE`, `LIB_EMBED_OLD_FORMAT`, and
-  the connectivity-gate finding `DANGLING_BUS_ENTRY`.
+  `INTENT_EXTRA_MEMBER`, `INTENT_NETS_SHORTED`, `LIB_EMBED_STALE`, `LIB_EMBED_OLD_FORMAT`, the
+  connectivity-gate finding `DANGLING_BUS_ENTRY`, plus the design-integrity families
+  `CONTRACT_*` (`check --contract`), `SCHPCB_*` (`verify sch board.kicad_pcb`), the
+  `library audit` codes (`FOOTPRINT_LIB_UNREGISTERED`, `FOOTPRINT_MISSING`, `MODEL_MISSING`,
+  `FOOTPRINT_LEGACY_FORMAT`, …), and `FAB_*`/`ORDER_*` (`fab check`).
 
 ## Examples
 

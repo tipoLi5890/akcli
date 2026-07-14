@@ -5,9 +5,10 @@
 **akcli** (CLI command `akcli`, import package `akcli`) is a zero-dependency,
 **KiCad-native AI design agent** — a Python toolkit and Claude Code plugin that lets an LLM agent
 *author* a `.kicad_sch` from a JSON op-list (with net-diff safety rails and one-command undo), run
-ERC / design / intent / BOM checks, **simulate on KiCad's bundled ngspice**, source real parts and
-fetch datasheets, and **import Altium `.SchDoc` / `.SchLib` / `.PcbDoc`** — all with **no Altium or
-KiCad installed**.
+ERC / design / **intent / contract** / BOM checks, **verify schematic ↔ PCB equivalence**, **audit
+and repair the project library workspace**, **gate manufacturing against versioned fab profiles**,
+**simulate on KiCad's bundled ngspice**, source real parts and fetch datasheets, and **import Altium
+`.SchDoc` / `.SchLib` / `.PcbDoc` / `.PcbLib`** — all with **no Altium or KiCad installed**.
 
 KiCad is the writable target; Altium files are imported into the same normalized model for analysis
 (a Windows *live bridge* can also drive a running Altium instance). The result is a scriptable,
@@ -36,6 +37,12 @@ imported legacy schematic or a blank sheet, all the way to a simulated, part-sou
 - **One normalized model.** KiCad `.kicad_sch` and Altium binary `.SchDoc` both parse into the
   same `Schematic`/`Pcb`/`Library` model, so every check, diff, and report is format-agnostic —
   KiCad is the writable target, Altium is imported.
+- **Design integrity, end to end.** Beyond ERC: design **contracts** (require/forbid pin-net and
+  pin-pair topology, carrying datasheet evidence), schematic ↔ PCB **equivalence**, a project
+  **library workspace** audit/repair (the footprint-nickname and 3D-path traps that used to need
+  manual `sed`), versioned **fab profiles** (free-via envelope, tenting, cost thresholds), and a
+  **release preflight** that gates every check and writes a traceable manifest —
+  [docs/design-integrity.md](docs/design-integrity.md).
 - **Net inference you can trust.** A rebuilt net layer handles global same-name merges, junctions,
   T-junctions, and No-ERC markers — fixing the classic "same-named nets split into single-pin nets" bug.
 - **Read-only on Altium, safe writes on KiCad.** Altium files are never modified offline; KiCad writes
@@ -72,6 +79,8 @@ Run an electrical rule check and other design checks without opening any EDA too
 ```bash
 akcli check  main.SchDoc                          # ERC-lite + power + BOM + connectivity hygiene
 akcli check  board.kicad_sch --intent intent.json # assert a design-intent netlist snapshot
+akcli check  board.kicad_sch --contract board.contract.toml  # require/forbid pin-net topology rules
+akcli verify board.kicad_sch board.kicad_pcb      # schematic <-> PCB net/refdes/footprint equivalence
 akcli pinmap main.SchDoc -C akcli.toml # MCU pin -> net (+ optional expected table)
 akcli diff   v1.SchDoc v2.SchDoc                   # net-membership diff, not name-based
 ```
@@ -84,6 +93,29 @@ tunes the exit-severity gate (`never` always exits 0), and a checker-agnostic `[
 table drops or demotes findings by code/refs (with the count surfaced in the header). Design-intent
 files support per-net modes and `fnmatch` wildcard members; located findings carry `pos`/`anchors`
 in JSON/SARIF.
+
+## Design integrity: library, contracts, fab, release
+
+Beyond per-file ERC, `akcli` treats the whole design as one auditable object — the library
+workspace, the schematic ↔ PCB relationship, datasheet-backed topology, and manufacturing policy:
+
+```bash
+akcli library audit hardware/kicad/board            # sym/fp-lib-table <-> schematic <-> footprints <-> 3D
+akcli library repair hardware/kicad/board --rename-footprint-lib footprint=proj_jlc --apply
+akcli library import-altium vendor.PcbLib --out vendor.pretty --courtyard 0.25 --apply
+akcli check   board.kicad_sch --contract board.contract.toml   # require/forbid pin-net & pin-pair topology
+akcli fab     check board.kicad_pcb --profile jlc-4l-1oz.toml --order order.toml
+akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile jlc-4l-1oz.toml --out manifest.json
+```
+
+`library audit`/`repair` catch and fix the footprint-nickname and 3D-path traps that used to need
+manual `sed`; **contracts** express datasheet rules ERC can't, with owned, expiring exceptions;
+**fab profiles** are versioned, source-cited vendor policy (free-via envelope, tenting, via-in-pad,
+cost thresholds), and validate a declared order manifest instead of guessing it from the PCB; and
+**`release preflight`** runs every gate (check / intent / contract / library / sch-pcb / fab / order
+/ git) and writes a manifest binding input hashes, the git revision, and each gate's findings.
+KiCad writes refuse `TARGET_LOCKED` while the GUI holds the file open (`--allow-open` to override,
+then File→Revert). Full guide: [docs/design-integrity.md](docs/design-integrity.md).
 
 ## Simulate and assert
 
@@ -182,7 +214,12 @@ Supported Altium inputs: `.SchDoc` (schematic), `.SchLib` (symbol library — te
 libraries containing binary symbol records are refused with exit 5, *unsupported*), `.PcbDoc` (board —
 ASCII `Nets6`/`Components6`/`Classes6`/`Rules6` sections **plus the binary copper sections**
 `Tracks6`/`Vias6`/`Arcs6`/`Pads6`; `Fills6`/`Regions6`/`Texts6`/`Polygons6` are skipped, not
-mis-parsed). All Altium *file* access is **read-only** (the optional Windows live bridge drives a *running* Altium instance instead).
+mis-parsed), and **`.PcbLib`** (footprint library — each footprint's pads decoded into the
+`FootprintDef` model; undecoded graphics/text/3D surface as `UNSUPPORTED_PRIMITIVE` warnings, never
+dropped). Format detection is **fail-loud**: an unknown OLE2 container is classified by its storage
+layout and exits `5` rather than being read as an empty schematic, and `read --strict` turns an
+`EMPTY_IMPORT` (a non-empty source that normalizes to nothing) into exit `1`. All Altium *file*
+access is **read-only** (the optional Windows live bridge drives a *running* Altium instance instead).
 
 ## Use with AI coding agents
 
@@ -242,17 +279,20 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Roadmap
 
-Shipped today (v0.6.x): KiCad write/draw from an 18-op + 9-macro vocabulary (hierarchical
+Shipped today (v0.7.x): KiCad write/draw from an 18-op + 9-macro vocabulary (hierarchical
 `add_sheet`, net-diff safety rails, `new`/multi-level `undo`, output arbitrated against KiCad's own
-netlister), ERC/power/BOM/diff/pinmap/**intent** checks with waivers and SARIF, **`akcli sim`**
-(SPICE decks on KiCad's bundled ngspice, assertions, sweeps, datasheet-fitted models),
+netlister), ERC/power/BOM/diff/pinmap/**intent**/**contract** checks with waivers and SARIF,
+schematic ↔ PCB **`verify`**, a project **`library`** workspace (audit/repair/import-altium — Altium
+`.PcbLib` footprint import + deep `.kicad_pcb` reading), versioned **`fab`** profiles, and a
+**`release preflight`** gate (see [docs/design-integrity.md](docs/design-integrity.md)), **`akcli
+sim`** (SPICE decks on KiCad's bundled ngspice, assertions, sweeps, datasheet-fitted models),
 JLCPCB/LCSC part search + BOM purchasability + **datasheet fetch**, 60 standards-cited calculators,
 the `view` dashboard, and version-tolerant Altium/KiCad readers (KiCad hierarchy, Altium
 multi-sheet + binary copper). The forward plan (v0.8 → v1.0, with exit criteria) lives in
 **[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
 
 - Published JSON Schemas for `check`/`diff`/`pinmap` findings; machine-detectable lookup misses.
-- Full **ERC pin-type conflict matrix** and a schematic-vs-PCB sync check.
+- Full **ERC pin-type conflict matrix** (the schematic-vs-PCB sync check now ships as `akcli verify`).
 - Pure-stdlib **SVG schematic rendering** and a generated pinout book.
 - A GitHub **Action** gating schematic PRs (check + diff + intent + sim assertions).
 - *Optional, demand-driven:* the Altium track — binary `.SchLib` decoder, remaining `.PcbDoc`

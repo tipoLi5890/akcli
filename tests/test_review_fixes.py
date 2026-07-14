@@ -18,7 +18,7 @@ from akcli.errors import EXIT
 @pytest.mark.parametrize(
     "name,volts",
     [
-        ("V3V3", 3.3), ("V3V3_BNO", 3.3), ("V3V3_FSR", 3.3),  # the reported bug
+        ("V3V3", 3.3), ("V3V3_AUX", 3.3), ("V3V3_IO", 3.3),  # the reported bug
         ("3V3", 3.3), ("3V3_MCU", 3.3), ("1V8", 1.8),
         ("5V", 5.0), ("5V_USB", 5.0), ("3.3V", 3.3), ("12V", 12.0),
         ("V5", 5.0), ("V3.3", 3.3), ("+3V3", 3.3),
@@ -33,8 +33,8 @@ def test_implied_voltage(name, volts):
 def test_rail_matches_prefix():
     rails = {"V3V3"}
     assert _rails.rail_matches("V3V3", rails)
-    assert _rails.rail_matches("V3V3_BNO", rails)
-    assert _rails.rail_matches("V3V3-FSR", rails)
+    assert _rails.rail_matches("V3V3_AUX", rails)
+    assert _rails.rail_matches("V3V3-IO", rails)
     assert not _rails.rail_matches("V3V3X", rails)   # no separator -> not a match
     assert not _rails.rail_matches("V5", rails)
 

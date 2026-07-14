@@ -40,6 +40,8 @@ Two ground rules:
 | `draw`/`plan` refused to write | `akcli draw <target> --ops <ops.json>` (dry-run, read connectivity block) |
 | File will not parse at all | `akcli read <file> --debug` |
 | Unclear tool state | `akcli --version` (prints package **and** protocol version) |
+| Write refused by `TARGET_LOCKED` (KiCad GUI has the file open) | close the GUI, or `akcli draw <t> --ops <ops.json> --apply --allow-open` (then File>Revert in KiCad) |
+| KiCad says "footprint not found" | `akcli library audit <project>` |
 
 ## 1. Net-connectivity debugging
 
@@ -149,6 +151,11 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   `set_component_transform`/`set_component_parameters` → the designator does not exist in the
   target (check with `akcli component`); `PROTOCOL_MISMATCH` / `OP_UNSUPPORTED` → stop and
   report, do not retry blindly.
+- **`TARGET_LOCKED` is a PRE-write lock gate, not a connectivity gate.** It fires before ops
+  are even evaluated, when a KiCad GUI holds the target open (a `~<name>.lck` file next to it)
+  — it says nothing about whether the op-list itself is sound. `--allow-open` is explicit risk
+  acceptance that a concurrent GUI save could overwrite the edit; use it only after confirming
+  that is safe, and do File>Revert in KiCad afterwards so the GUI picks up the write.
 - `--dry-run` is accepted but **inert** — dry-run is already the default; only `--apply` changes
   behavior. Do not treat `--dry-run` as extra safety.
 - **Backup/rollback:** a successful `--apply` writes `<name>.kicad_sch.bak` next to the target
@@ -172,7 +179,7 @@ Exit-code table (frozen in `errors.py`):
 | 3 | parse error (corrupt OLE2 / S-expr, alloc guards) | suspect the file; report upstream |
 | 4 | file not found | fix the path |
 | 5 | unsupported format (`ALTIUM_UNSUPPORTED`, wrong input kind) | expected refusal — see below |
-| 6 | op-list / verify failure | fix ops or connectivity (§3) |
+| 6 | op-list / verify failure (also `TARGET_LOCKED` — GUI lock, see §3) | fix ops or connectivity (§3); or close the GUI / `--allow-open` |
 | 7 | external tool missing / network | install hint on stderr; `jlc` needs network, `sim` needs libngspice (`NGSPICE_MISSING`/`NGSPICE_FAILED`) |
 
 Known deliberate refusals (exit 5 — **unsupported, not corrupt**; do not file these as parse bugs):
@@ -181,7 +188,8 @@ tracks/arcs ARE decoded since post-v0.3.1 — an exit-5 there means an unknown r
 and feeding `.SchLib`/`.PcbDoc`/`.kicad_pcb` to schematic-only commands (`net`, `component`,
 `check`, `diff`, `pinmap`, `export`) — the stderr notice says to use `akcli read` instead, which
 does accept them. Exit 3 with `ALTIUM_ALLOC_GUARD` on a large file may be the DIFAT-spillover
-limit rather than corruption.
+limit rather than corruption. An unknown OLE2 container now deterministically exits 5 (format
+detection by storage layout) — it is no longer misread as an empty schematic.
 
 What to report upstream when akcli itself seems wrong: the one-line `ERROR: CODE: message` from
 stderr, the full traceback from re-running with `--debug`, the `akcli --version` output (package +

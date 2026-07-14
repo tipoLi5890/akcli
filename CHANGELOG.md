@@ -30,6 +30,85 @@ All notable changes to `akcli` are documented here. The format is based on
 
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
+## [Unreleased]
+
+### Added
+- **Altium `.PcbLib` reading** — `akcli read part.PcbLib` decodes footprint
+  storages into the new `FootprintDef`/`FootprintPad` library model (pads with
+  position/size/drill/shape/rotation, NPTH vs plated, per-type
+  `UNSUPPORTED_PRIMITIVE` warnings for undecoded graphics). Pad geometry is
+  cross-validated against KiCad's own Altium importer (43/43 pads on a real
+  vendor module, zero mismatches). `.kicad_mod` and `.pretty` read into the
+  same model.
+- **`akcli library` namespace** — the project library workspace as a
+  first-class object:
+  - `library audit` cross-checks schematics ↔ `sym-lib-table`/`fp-lib-table`
+    ↔ library contents ↔ 3D models: unregistered footprint nicknames (the
+    "cannot find footprint" trap), missing footprints/symbols, unresolvable
+    table URIs, missing/unportable 3D model paths, and legacy pre-v6
+    footprints that parse via API but are invisible to the KiCad GUI.
+  - `library repair` productizes the two historically hand-`sed`-ed fixes as
+    reviewable plans: `--rename-footprint-lib OLD=NEW` (Footprint-field
+    nickname rewrite via the lossless S-expression parser) and
+    `--3d-path absolute|'${VAR}'`; dry-run by default, `--apply` writes
+    atomically with `.bak` and re-audits.
+  - `library import-altium part.PcbLib` converts to a `.pretty` library —
+    pads verbatim (never recomputed), optional declared `--courtyard`,
+    filesystem-safe renames reported, and a `provenance.json` recording the
+    source SHA-256, converter version, options and every warning.
+- **Deep `.kicad_pcb` reading (schema 1.2)** — pad-level net bindings (both
+  `(net N "name")` and KiCad 10 `(net "name")` dialects), absolute pad
+  positions (rotation validated against `pcbnew` on a real 4-layer board),
+  tracks, vias (through/blind/micro), zones, board setup (copper layers,
+  thickness, setup values) and the Edge.Cuts outline bbox.
+- **Schematic ↔ PCB equivalence** — `akcli verify sch.kicad_sch
+  board.kicad_pcb` compares refdes presence, footprint/value assignment and
+  the pad-level net PARTITION (net names untrusted): `SCHPCB_NET_SPLIT`,
+  `SCHPCB_NET_MERGE`, `SCHPCB_PAD_MISSING` and friends, each located to the
+  designator/pad. `#PWR`/`#FLG` pseudo-components are excluded.
+- **Design contracts** — `akcli check --contract contract.toml` asserts
+  datasheet-backed topology rules ERC cannot express: require/forbid pin-net,
+  require/forbid same-net pin pairs, component values, NC pins — plus
+  approved exceptions with owner/reason/expiry. PASS, FAIL and
+  SKIPPED-BY-EXCEPTION are all explicit findings; an expired exception warns
+  instead of silently passing.
+- **Fab profiles** — `akcli fab check board.kicad_pcb --profile p.toml`
+  checks a versioned, evidence-carrying vendor policy (TOML with mandatory
+  `[source]` urls): free-via geometry boundaries, tenting drill cap,
+  via-in-pad (with registered `thermal_via` exceptions), blind/buried bans,
+  stackup drift, and cost thresholds (board size/area, drill density, fine
+  traces). `--order order.toml` validates the declared purchase intent
+  (delivery format, finish, via covering, …) — never guessed from the PCB.
+  `fab explain CODE` prints the rule, fix direction and profile sources.
+- **Release gate** — `akcli release preflight --sch … [--pcb --contract
+  --fab-profile --order --intent]` runs every applicable gate
+  (check/intent/contract/library-audit/sch-pcb/fab/order/git-clean), skips
+  explicitly with reasons, and writes a manifest binding input SHA-256s,
+  tool version, git revision/dirtiness and per-gate findings (`--out`).
+- **Fail-loud format detection** — `.PcbLib` is detected by extension; a
+  bare OLE2 container is classified by its storage layout (`Board6` → PcbDoc,
+  `Library` → PcbLib, `FileHeader` sniff for SchDoc/SchLib) instead of being
+  assumed a schematic; an unknown layout exits 5. `read` stamps
+  `detected_format`/`detection_method`/`object_counts` into the JSON
+  metadata, and a non-empty source normalizing to nothing raises an
+  `EMPTY_IMPORT` warning (`read --strict` makes it exit 1).
+- **GUI-open write guard** — `draw/arrange/undo --apply` refuse with
+  `TARGET_LOCKED` (exit 6) while KiCad's `~<name>.lck` is present;
+  `--allow-open` is explicit risk acceptance and successful applies under an
+  open GUI print a File>Revert reminder.
+- **`jlc add` library integration** — `--footprint-lib NICKNAME` controls
+  both the output directory and the nickname written into the symbol's
+  Footprint field (previously hardcoded `footprint:` — the #1 "cannot find
+  footprint" cause); `--3d-path relative|absolute|'${VAR}'` sets the 3D
+  model path policy, with the portability/usability trade-off stated on
+  stderr.
+
+### Changed
+- `schema_version` 1.1 → **1.2** (additive): `Pcb` gains
+  `zones`/`board`/`warnings`/`metadata`, `Library` gains
+  `footprints`/`warnings`/`metadata`, new `FootprintDef`/`FootprintPad`.
+- New frozen error code `TARGET_LOCKED` (exit 6).
+
 ## [0.7.0] - 2026-07-14
 
 ### Changed
@@ -848,7 +927,7 @@ Not yet published to PyPI; install from source (see `INSTALL.md`).
   RECORD-1 component): the owner keying was wrong, so the model-link footprint was never found; the
   RECORD-41 `Footprint` / `Supplier Footprint` parameter is the fallback. Removes false
   `BOM_MISSING_FOOTPRINT` (80/80 components resolved on the reference board).
-- **Rail voltage inference** no longer mis-fires on underscore-suffixed rails (`V3V3_BNO`, `V3V3_FSR`):
+- **Rail voltage inference** no longer mis-fires on underscore-suffixed rails (`V3V3_AUX`, `V3V3_IO`):
   the trailing word-boundary that `_` defeated is replaced; logic is now shared in `checks/_rails.py`,
   and configured `[[rail]]` names match `<rail>_suffix` too. Fixes false `ERC_NO_POWER`.
 - **`export --json`** now errors (exit 2) with guidance instead of emitting non-JSON at exit 0.

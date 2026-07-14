@@ -123,4 +123,4 @@ def test_read_decodes_binary_pads(tmp_path):
 
 def test_export_stamps_schema_version(tmp_path):
     pcb = altium_pcb.read(_write_pcb(tmp_path))
-    assert pcb.export()["schema_version"] == "1.1"
+    assert pcb.export()["schema_version"] == "1.2"

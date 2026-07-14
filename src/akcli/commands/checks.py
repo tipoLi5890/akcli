@@ -79,8 +79,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
     if getattr(args, "libsync", False):
         which.append("libsync")
     intent_file = getattr(args, "intent", None)
-    if not which and not intent_file:
-        # --intent alone is a pure intent assertion, like any other selector.
+    contract_file = getattr(args, "contract", None)
+    if not which and not intent_file and not contract_file:
+        # --intent/--contract alone are pure assertions, like any other selector.
         which = ["erc", "power", "bom", "nets"]
         if str(path).lower().endswith(".kicad_sch"):
             which.append("layout")
@@ -92,6 +93,10 @@ def _cmd_check(args: argparse.Namespace) -> int:
         from ..checks import intent as intent_mod
         spec = intent_mod.load(intent_file)   # BAD_CONFIG/PROTOCOL_MISMATCH via main
         findings.extend(intent_mod.run(sch, spec))
+    if contract_file:
+        from ..checks import contract as contract_mod
+        doc = contract_mod.load(contract_file)  # BAD_CONFIG/PROTOCOL_MISMATCH via main
+        findings.extend(contract_mod.run(sch, doc))
 
     findings, waived, demoted = _report.apply_waivers(findings, cfg.waivers)
 
@@ -143,15 +148,64 @@ def _cmd_diff(args: argparse.Namespace) -> int:
     return _findings_exit(findings, args)
 
 
-def _cmd_verify(args: argparse.Namespace) -> int:
-    """`verify <a> <b>` — net-equivalence proof between two schematics.
+def _cmd_verify_schpcb(args: argparse.Namespace, sch_path, pcb_path) -> int:
+    """`verify <sch> <board.kicad_pcb>` — schematic <-> PCB equivalence."""
+    from ..checks import schpcb
+    from ..readers import kicad as kreader
 
-    PASS means: same component set, and every net's pin membership is
-    identical (net *names* may differ — conversions rename unnamed nets).
-    With --strict, changed component values/footprints also fail.
+    sch = _load_schematic(sch_path)
+    pcb = kreader.read_pcb(str(pcb_path))
+    findings = schpcb.run(sch, pcb)
+    if not getattr(args, "strict", False):
+        findings = [f for f in findings if f.code != "SCHPCB_VALUE_MISMATCH"]
+    errors = [f for f in findings
+              if f.severity in (_report.Severity.ERROR, _report.Severity.CRITICAL)]
+    equivalent = not errors
+
+    if args.json:
+        _emit(_dumps({
+            "equivalent": equivalent,
+            "mode": "sch-pcb",
+            "schematic": str(sch_path),
+            "board": str(pcb_path),
+            "components": {"sch": len(sch.components), "pcb": len(pcb.footprints)},
+            "pads": len(pcb.pads),
+            "findings": [
+                {"code": f.code, "severity": f.severity.value,
+                 "message": f.message, "anchors": f.anchors}
+                for f in findings
+            ],
+        }))
+    else:
+        lines = [f"SCH-PCB EQUIVALENCE: {'PASS' if equivalent else 'FAIL'}",
+                 f"  components: {len(sch.components)} (sch) vs "
+                 f"{len(pcb.footprints)} (pcb)   pads: {len(pcb.pads)}"]
+        for f in findings:
+            lines.append(f"  {f.severity.value.upper():<8} {f.code}: {f.message}")
+        if not findings:
+            lines.append("  refdes, footprints and net partition all match")
+        _emit("\n".join(lines))
+    if getattr(args, "exit_zero", False):
+        return EXIT["OK"]
+    return EXIT["OK"] if equivalent else EXIT["FINDINGS"]
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    """`verify <a> <b>` — net-equivalence proof between two schematics,
+    or schematic <-> PCB equivalence when ``<b>`` is a ``.kicad_pcb``.
+
+    Schematic mode PASS means: same component set, and every net's pin
+    membership is identical (net *names* may differ — conversions rename
+    unnamed nets). With --strict, changed component values/footprints also
+    fail. PCB mode compares refdes/footprint assignment and the pad-level net
+    PARTITION (net names untrusted; --strict adds value mismatches).
     """
-    a = _load_schematic(_require_path(args.path, "first schematic"))
-    b = _load_schematic(_require_path(args.other, "second schematic"))
+    a_path = _require_path(args.path, "first schematic")
+    b_path = _require_path(args.other, "second file")
+    if str(b_path).lower().endswith(".kicad_pcb"):
+        return _cmd_verify_schpcb(args, a_path, b_path)
+    a = _load_schematic(a_path)
+    b = _load_schematic(b_path)
     from ..checks import diff as diffmod
     rep = diffmod.run(a, b)
 
@@ -385,6 +439,10 @@ def register(sub, common) -> None:
     p.add_argument("--intent", metavar="FILE",
                    help="assert a JSON design-intent file (see `akcli nets "
                         "--intent-snapshot`) against the built netlist")
+    p.add_argument("--contract", metavar="FILE",
+                   help="assert a TOML design-contract file (require/forbid "
+                        "pin-net, pin-pair topology, values, NC, approved "
+                        "exceptions with owner/expiry)")
     p.add_argument("--libsync", action="store_true",
                    help="check embedded lib_symbols freshness (pin-signature "
                         "drift vs --symbols sources; old-format heuristic "
@@ -409,12 +467,14 @@ def register(sub, common) -> None:
     p.set_defaults(handler=_cmd_diff)
 
     p = sub.add_parser("verify", parents=[common],
-                       help="net-equivalence proof between two schematics "
-                            "(e.g. Altium original vs converted KiCad)")
+                       help="net-equivalence proof: two schematics, or "
+                            "schematic vs .kicad_pcb (pad-net partition)")
     p.add_argument("path", nargs="?", help="schematic A (the reference)")
-    p.add_argument("other", nargs="?", help="schematic B (the candidate)")
+    p.add_argument("other", nargs="?",
+                   help="schematic B (the candidate) or a .kicad_pcb board")
     p.add_argument("--strict", action="store_true",
-                   help="also fail on component value/footprint differences")
+                   help="also fail on component value/footprint differences "
+                        "(sch-pcb mode: include value mismatches)")
     p.add_argument("--exit-zero", action="store_true", help="always exit 0")
     p.set_defaults(handler=_cmd_verify)
 

@@ -1,0 +1,32 @@
+# Design contract: topology/semantic rules ERC cannot express, with evidence.
+# Assert with:  akcli check board.kicad_sch --contract example.contract.toml
+protocol_version = 1
+
+[[contract]]
+id = "reg-feedback-node"
+evidence = ["ACME-REG datasheet, Table 7"]
+require = [ { pin = "U1.FB2", net = "VFB2" } ]
+forbid  = [ { pin = "U1.FB1", net = "V3V3" } ]
+
+[[contract]]
+id = "usb-c-flip-pair"
+evidence = ["datasheet §4.2"]
+require_same_net = [ ["J1.A6", "J1.B6"], ["J1.A7", "J1.B7"] ]
+forbid_same_net  = [ ["J1.A2", "J1.B11"] ]
+
+[[contract]]
+id = "feedback-resistor-value"
+component = "R7"
+value = "150k"
+
+[[contract]]
+id = "spare-gpio-nc"
+severity = "warning"
+nc = ["U1.GPIO3"]
+
+[[contract]]
+id = "thermal-via-exception"
+waived = true
+reason = "QFN exposed-pad thermal vias approved per layout guide"
+owner = "hw-lead"
+expires = "2027-01-01"

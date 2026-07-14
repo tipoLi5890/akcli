@@ -77,7 +77,17 @@ kicad-cli pcb export drill board.kicad_pcb -o fab/ --format excellon \
 kicad-cli pcb export pos board.kicad_pcb -o fab/cpl.csv --format csv --units mm \
   --side both --exclude-dnp
 akcli jlc bom board.kicad_sch --qty 10 --csv fab/bom.csv   # JLCPCB header, LCSC ids
+akcli fab check board.kicad_pcb --profile jlc-4l-1oz.toml --order order.toml
+akcli fab explain FAB_VIA_IN_PAD --profile jlc-4l-1oz.toml
 ```
+
+A fab profile (`--profile`) is a versioned vendor-capability snapshot — `[source]`
+URLs plus a `retrieved_at` date, see `examples/fab/jlc-4l-1oz.toml` — that turns this
+skill's static capability tables into a machine-checkable gate: `fab check` runs the
+board against it (and, with `--order`, against the declared purchase intent) and
+classifies findings by severity — direct rule violations are errors, cost-driving
+thresholds are warnings, boundary-exact values are notes. `fab explain <CODE>` prints
+the rule, the fix direction, and the evidence behind a specific finding code.
 
 CPL header rename before upload: `Ref→Designator, PosX→Mid X, PosY→Mid Y,
 Rot→Rotation, Side→Layer` (or use JLCPCB's Fabrication Toolkit KiCad plugin /
@@ -235,3 +245,6 @@ whenever pitch ≤0.5 mm.
 - These are layout/fab constraints; akcli's checks are schematic-level. Use
   the SMT table to gate component choice at schematic time, and put fab
   constraints into design notes handed to layout.
+- For hard, CI-grade gating on an actual board file, use `akcli fab check --profile`
+  (versioned and sourced, see above) rather than eyeballing these tables — the static
+  tables here are for quick schematic-time human reference only.

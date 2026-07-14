@@ -17,8 +17,8 @@ tolerance_pct = 5
 
 # Input file locations, resolved relative to this file's directory.
 [paths]
-schematic = "hardware/altium/insole/main.SchDoc"
-dts       = "firmware/boards/ebyte/e73_2g4m08s1e/e73_2g4m08s1e.dts"
+schematic = "hardware/altium/main.SchDoc"
+dts       = "firmware/boards/mcu/board.dts"
 pinout_md = "hardware/docs/pinout.md"
 
 # ERC waivers suppress a specific rule on a specific net, with a recorded reason. Each waiver is a
@@ -26,4 +26,4 @@ pinout_md = "hardware/docs/pinout.md"
 [[erc_waiver]]
 net    = "LED1_GPIO_RD"
 rule   = "driver_conflict"
-reason = "LED1 shares MCP73831 open-drain STAT (P0.25) by design; FW reads it as input"
+reason = "LED1 shares the charger's open-drain STAT output by design; FW reads it as input"

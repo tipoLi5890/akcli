@@ -1,0 +1,10 @@
+# Order manifest: DECLARED purchase intent — pricing inputs akcli must not
+# guess from the PCB. Required by `akcli fab check --order` / release gates.
+delivery_format = "single"     # single | panel (panel raises review findings)
+design_count = 1
+rush = false
+surface_finish = "HASL_LF"     # ENIG raises exposed-copper review findings
+via_covering = "tented"        # must match the profile's covering
+board_material = "FR4"
+copper_weight_oz = 1
+thickness_mm = 1.0

@@ -54,7 +54,7 @@ def test_read_json(capsys):
     assert main(["read", "--json", F(SHARED)]) == EXIT["OK"]
     out = capsys.readouterr().out
     doc = json.loads(out)
-    assert doc["schema_version"] == "1.1"
+    assert doc["schema_version"] == "1.2"
     assert doc["source_format"] == "altium"
     assert len(doc["components"]) == 4
     # net membership present

@@ -166,3 +166,40 @@ def test_kmt_model_offset_converted_to_mm():
     assert model.children[1].value == "$(V)/x.step"   # pre-quoting stripped
     off = model.find("offset").find("xyz")
     assert float(off.children[1].value) == 25.4       # inches -> mm
+
+
+# --------------------------------------------------------------------------- #
+# footprint-lib nickname + 3D path policy (the two per-import sed traps)
+# --------------------------------------------------------------------------- #
+def test_convert_footprint_lib_nickname_flows_into_symbol(tmp_path, offline_http):
+    """--footprint-lib must control BOTH the output dir and the symbol's
+    Footprint field — the hardcoded 'footprint:' nickname was the #1 real-world
+    'cannot find footprint' trap."""
+    res = jlc2kicad.convert("C25804", str(tmp_path / "out"),
+                            footprint_lib="proj_jlc")
+    assert res.error_code is None, res.message
+    mod = next(a for a in res.artifacts if a.endswith(".kicad_mod"))
+    assert Path(mod).parent.name == "proj_jlc"
+    sym = next(a for a in res.artifacts if a.endswith(".kicad_sym"))
+    text = Path(sym).read_text()
+    assert '"Footprint" "proj_jlc:' in text
+    assert '"footprint:' not in text
+
+
+def test_convert_rejects_bad_model_path(tmp_path):
+    res = jlc2kicad.convert("C25804", str(tmp_path / "out"),
+                            model_path="portable")
+    assert res.error_code == "CONVERT_FAILED"
+    assert "--3d-path" in res.message
+
+
+def test_absolutize_models_rewrites_bare_relative(tmp_path):
+    lib_dir = tmp_path / "out" / "proj_jlc"
+    lib_dir.mkdir(parents=True)
+    mod = lib_dir / "X.kicad_mod"
+    mod.write_text('(footprint "X"\n\t(model "packages3d/X.step"\n\t\t(offset (xyz 0 0 0))\n\t)\n)')
+    jlc2kicad._absolutize_models([str(mod)], tmp_path / "out", "proj_jlc")
+    text = mod.read_text()
+    expect = (tmp_path / "out").resolve() / "proj_jlc" / "packages3d" / "X.step"
+    assert f'(model "{expect.as_posix()}"' in text
+    assert '(model "packages3d/' not in text

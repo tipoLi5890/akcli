@@ -13,8 +13,9 @@ from pathlib import Path
 
 from ..errors import EXIT
 from ._shared import (
-    _detect_format,
+    _detect_format_ex,
     _draw_symbol_sources,
+    _empty_import_warning,
     _dumps,
     _emit,
     _ExitWith,
@@ -28,86 +29,107 @@ from ._shared import (
 )
 
 
+def _read_detect_meta(obj, path: Path, fmt: str, method: str,
+                      counts: dict[str, int], strict: bool) -> int:
+    """Stamp detection metadata on ``obj`` + surface EMPTY_IMPORT; return exit."""
+    meta = getattr(obj, "metadata", None)
+    if isinstance(meta, dict):
+        meta["detected_format"] = fmt
+        meta["detection_method"] = method
+        meta["object_counts"] = dict(counts)
+    warn = _empty_import_warning(path, fmt, counts)
+    if warn:
+        warnings = getattr(obj, "warnings", None)
+        if isinstance(warnings, list):
+            warnings.append(warn)
+        sys.stderr.write(f"warning: {warn}\n")
+        if strict:
+            return EXIT["FINDINGS"]
+    return EXIT["OK"]
+
+
 def _cmd_read(args: argparse.Namespace) -> int:
     path = _require_path(args.path)
-    fmt = _detect_format(path)
-    if fmt == "kicad_sch":
-        from ..readers import kicad
-        obj = kicad.read_sch(str(path))
+    fmt, method = _detect_format_ex(path)
+    strict = bool(getattr(args, "strict", False))
+
+    def _emit_schematic(obj) -> int:
+        counts = {"components": len(obj.components), "nets": len(obj.nets)}
+        code = _read_detect_meta(obj, path, fmt, method, counts, strict)
         if args.json:
             _emit(_dumps(obj.export()))
         elif getattr(args, "md", False):
             _emit(_schematic_md(obj))
         else:
             _emit(_schematic_text(obj))
-        return EXIT["OK"]
+        return code
+
+    def _emit_library(lib) -> int:
+        counts = {"symbols": len(lib.symbols)}
+        fps = getattr(lib, "footprints", None) or []
+        if fps or fmt in ("altium_pcblib", "kicad_mod"):
+            counts["footprints"] = len(fps)
+        code = _read_detect_meta(lib, path, fmt, method, counts, strict)
+        if args.json:
+            _emit(_dumps(lib.export()))
+        else:
+            out = [f"library: {lib.source_path}", f"symbols: {len(lib.symbols)}"]
+            for s in lib.symbols:
+                out.append(f"  {s.name} (pins={len(s.pins)})")
+            if fps:
+                out.append(f"footprints: {len(fps)}")
+                for f in fps:
+                    out.append(f"  {f.name} (pads={len(f.pads)})")
+            _emit("\n".join(out))
+        return code
+
+    def _emit_pcb(pcb) -> int:
+        counts = {"footprints": len(pcb.footprints), "nets": len(pcb.nets)}
+        code = _read_detect_meta(pcb, path, fmt, method, counts, strict)
+        if args.json:
+            _emit(_dumps(pcb.export()))
+        else:
+            out = [
+                f"pcb: {pcb.source_path}",
+                f"footprints: {len(pcb.footprints)}",
+                f"nets: {len(pcb.nets)}",
+            ]
+            for f in pcb.footprints:
+                out.append(f"  {f.designator}  {f.footprint_name or '-'}")
+            _emit("\n".join(out))
+        return code
+
+    if fmt == "kicad_sch":
+        from ..readers import kicad
+        return _emit_schematic(kicad.read_sch(str(path)))
 
     if fmt == "altium_sch":
         from ..readers import altium_sch
-        obj = altium_sch.read(str(path))
-        if args.json:
-            _emit(_dumps(obj.export()))
-        elif getattr(args, "md", False):
-            _emit(_schematic_md(obj))
-        else:
-            _emit(_schematic_text(obj))
-        return EXIT["OK"]
+        return _emit_schematic(altium_sch.read(str(path)))
 
     if fmt == "altium_schlib":
         from ..readers import altium_schlib
-        lib = altium_schlib.read(str(path))
-        if args.json:
-            _emit(_dumps(lib.export()))
-        else:
-            out = [f"library: {lib.source_path}", f"symbols: {len(lib.symbols)}"]
-            for s in lib.symbols:
-                out.append(f"  {s.name} (pins={len(s.pins)})")
-            _emit("\n".join(out))
-        return EXIT["OK"]
+        return _emit_library(altium_schlib.read(str(path)))
 
     if fmt == "kicad_sym":
         from ..readers import kicad_lib
-        lib = kicad_lib.read(str(path))
-        if args.json:
-            _emit(_dumps(lib.export()))
-        else:
-            out = [f"library: {lib.source_path}", f"symbols: {len(lib.symbols)}"]
-            for s in lib.symbols:
-                out.append(f"  {s.name} (pins={len(s.pins)})")
-            _emit("\n".join(out))
-        return EXIT["OK"]
+        return _emit_library(kicad_lib.read(str(path)))
+
+    if fmt == "kicad_mod":
+        from ..readers import footprint_lib
+        return _emit_library(footprint_lib.read_kicad_mod(str(path)))
+
+    if fmt == "altium_pcblib":
+        from ..readers import footprint_lib
+        return _emit_library(footprint_lib.read_pcblib(str(path)))
 
     if fmt == "altium_pcb":
         from ..readers import altium_pcb
-        pcb = altium_pcb.read(str(path))
-        if args.json:
-            _emit(_dumps(pcb.export()))
-        else:
-            out = [
-                f"pcb: {pcb.source_path}",
-                f"footprints: {len(pcb.footprints)}",
-                f"nets: {len(pcb.nets)}",
-            ]
-            for f in pcb.footprints:
-                out.append(f"  {f.designator}  {f.footprint_name or '-'}")
-            _emit("\n".join(out))
-        return EXIT["OK"]
+        return _emit_pcb(altium_pcb.read(str(path)))
 
     if fmt == "kicad_pcb":
         from ..readers import kicad
-        pcb = kicad.read_pcb(str(path))
-        if args.json:
-            _emit(_dumps(pcb.export()))
-        else:
-            out = [
-                f"pcb: {pcb.source_path}",
-                f"footprints: {len(pcb.footprints)}",
-                f"nets: {len(pcb.nets)}",
-            ]
-            for f in pcb.footprints:
-                out.append(f"  {f.designator}  {f.footprint_name or '-'}")
-            _emit("\n".join(out))
-        return EXIT["OK"]
+        return _emit_pcb(kicad.read_pcb(str(path)))
 
     raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"], f"ERROR: unsupported/unknown format: {path}")
 
@@ -318,8 +340,12 @@ def _cmd_export(args: argparse.Namespace) -> int:
 
 def register(sub, common) -> None:
     p = sub.add_parser("read", parents=[common], help="read + normalize a file")
-    p.add_argument("path", nargs="?", help="input file (.SchDoc/.SchLib/.PcbDoc)")
+    p.add_argument("path", nargs="?",
+                   help="input file (.SchDoc/.SchLib/.PcbDoc/.PcbLib/.kicad_*)")
     p.add_argument("--md", action="store_true", help="render a Markdown summary")
+    p.add_argument("--strict", action="store_true",
+                   help="exit 1 when a non-empty source normalizes to nothing "
+                        "(EMPTY_IMPORT)")
     p.set_defaults(handler=_cmd_read)
 
     p = sub.add_parser("net", parents=[common], help="query nets")

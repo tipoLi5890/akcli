@@ -45,13 +45,21 @@ Parses:
   Altium's native +Y-up frame, net indices resolved to names). Layouts were
   cross-validated item-by-item against KiCad's own Altium importer on real boards.
   `Fills6`/`Regions6`/`Texts6`/`Polygons6` are still skipped.
+- **`.PcbLib`** — decodes each footprint's pads (number, position, size, drill, shape,
+  rotation, NPTH vs plated) into the `FootprintDef` model. Undecoded primitives (silk,
+  text, 3D bodies) surface as `UNSUPPORTED_PRIMITIVE` warnings rather than failing the
+  read. Read-only, same as every other Altium input.
 
 Refused loudly with `ERROR: ALTIUM_UNSUPPORTED` and **exit 5** (unsupported, not
 corrupt): binary `.SchLib` symbol records, and an unknown record type inside a
 binary `.PcbDoc` copper section (truncated records exit 3, `ALTIUM_MALFORMED`).
 Corrupt containers exit **3** (`ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, ...). Also note:
 `net`/`component`/`check`/`diff`/`pinmap`/`export` accept schematics only — feeding
-them a `.SchLib` or `.PcbDoc` exits 5 with a note to use `read` instead.
+them a `.SchLib` or `.PcbDoc` exits 5 with a note to use `read` instead. An unknown
+OLE2 container is now classified by its storage layout and fails loudly (exit 5)
+instead of silently being read as an empty schematic. Separately, `akcli read --strict`
+turns a non-empty source that normalizes to zero objects (`EMPTY_IMPORT`) into an
+exit-1 failure rather than a quiet empty result.
 
 ## Getting designs OUT of Altium
 
@@ -162,6 +170,16 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
    **File » Import Wizard » KiCad Design Files** converts the `.kicad_sym`/`.kicad_mod`
    to a `.SchLib`/`.PcbLib`. That wizard is the supported route for any KiCad→AD
    library need; akcli itself never writes Altium files.
+
+   If the project has its **own** Altium `.PcbLib` footprint (not an LCSC-sourced part,
+   so `jlc add` doesn't apply), convert it directly:
+   ```bash
+   akcli library import-altium part.PcbLib --out vendor.pretty --courtyard 0.25 --apply
+   ```
+   Pads convert verbatim and are cross-validated against KiCad's own Altium importer;
+   the run writes a `provenance.json` alongside the output (source file SHA-256,
+   converter version, and every declared transformation — e.g. a synthesized courtyard).
+   Dry-run by default; `--apply` is required to write the files.
 3. **Draw into KiCad.** Author the op-list, then (see the akcli-circuit-design skill):
    ```bash
    akcli plan board.kicad_sch --ops ops.json

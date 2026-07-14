@@ -284,7 +284,11 @@ akcli draw board.kicad_sch --ops ldo.json --symbols "$SYMS/Regulator_Linear.kica
 
 Exit 6 means an op errored or connectivity found an ERROR/CRITICAL
 (`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `UNRESOLVED_LIB_ID`, ...): on
-`--apply` nothing was written. Use `--json` for machine output:
+`--apply` nothing was written. Another exit-6 cause is `TARGET_LOCKED`:
+`draw`/`arrange`/`undo --apply` refuse to write while the KiCad GUI holds the
+file open (a `~<name>.lck` lock file). After confirming it is safe, use
+`--apply --allow-open`, then File > Revert in KiCad to pick up the change. Use
+`--json` for machine output:
 `{applied, status, ops[], connectivity[], net_diff}`. On `OP_UNSUPPORTED`,
 `PROTOCOL_MISMATCH`, or geometry errors: stop and report, do not retry
 blindly. Do not pass `--dry-run` — it is accepted but inert; omitting
@@ -358,6 +362,15 @@ acceptance test. Matching is by pin membership, so renames don't false-fail;
 when other tools add pins). For key nets only, prefer a small hand-written
 intent file over a full snapshot — it asserts design intent, not incidental
 wiring.
+
+**Contracts → pin-level topology policy.** `akcli nets --intent-snapshot` asserts net
+*membership* — which pins share a net. `akcli check <file> --contract contract.toml`
+asserts a different, stricter layer: pin-level topology *policy* — require or forbid a
+specific pin on a specific net, require or forbid two pins ever sharing a net, expected
+component values, NC pins, and approved exceptions carrying an owner and expiry. For a
+hard invariant like "FB2 must never touch V3V3", a contract is more reliable than manual
+review (it is machine-checked on every run) and it composes with an intent snapshot —
+use intent for "this is what I wired" and a contract for "this must always/never be true".
 
 ## (8) Verify behavior with `akcli sim` before ordering
 

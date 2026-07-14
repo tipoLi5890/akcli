@@ -1404,6 +1404,11 @@ _HANDLERS = {
 # --------------------------------------------------------------------------- #
 # public entry point
 # --------------------------------------------------------------------------- #
+def gui_lock_path(path: Path) -> Path:
+    """KiCad's GUI lock-file for ``path`` (``~<name>.lck`` in the same dir)."""
+    return path.parent / f"~{path.name}.lck"
+
+
 def apply(
     oplist: dict,
     path: str,
@@ -1414,6 +1419,7 @@ def apply(
     backup_depth: int = _DEFAULT_BACKUP_DEPTH,
     tol_nm: int = 0,
     verify_out: list | None = None,
+    allow_open: bool = False,
 ) -> list[OpResult]:
     """Apply ``oplist`` to the ``.kicad_sch`` at ``path`` (SPEC §3.5).
 
@@ -1450,6 +1456,17 @@ def apply(
 
     # --- read + snapshot (optimistic lock) --------------------------------- #
     p = Path(path)
+
+    # GUI-open guard: KiCad drops ~<name>.lck next to an open document. A write
+    # under an open GUI is a losing race — the GUI's later save overwrites it
+    # from memory. Refuse by default; --allow-open is explicit risk acceptance.
+    if apply and not allow_open and gui_lock_path(p).exists():
+        fail("TARGET_LOCKED",
+             f"{p.name} appears open in the KiCad GUI (found "
+             f"{gui_lock_path(p).name}); close it first — or pass --allow-open "
+             "and File>Revert in KiCad afterwards, because a GUI save would "
+             "overwrite this edit")
+
     data = p.read_bytes()
     if len(data) > MAX_FILE_BYTES:
         fail("KICAD_SEXPR_TOOBIG", f"file exceeds {MAX_FILE_BYTES} bytes")

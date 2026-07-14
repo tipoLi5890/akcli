@@ -27,6 +27,13 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   wildcards), checker-agnostic `[[waiver]]` config + `--fail-on`, SARIF/JUnit output, structured
   `pos`/`anchors` on findings. Net inference is **arbitrated against `kicad-cli`'s own netlister**
   (a standing parity harness incl. rotation/mirror transforms, label scoping, buses, hierarchy).
+- **Design integrity** (post-0.7.0): design **contracts** (`check --contract` — require/forbid
+  pin-net & pin-pair topology, component values, NC pins, owned/expiring exceptions), schematic ↔
+  PCB **equivalence** (`verify sch board.kicad_pcb` — pad-net partition, refdes, footprint), the
+  **`library`** workspace (audit/repair/import-altium — fixes the footprint-nickname & 3D-path
+  traps, dry-run→apply), versioned **`fab`** profiles (`fab check`/`explain` — free-via envelope,
+  tenting, via-in-pad, cost thresholds, order manifest), and a **`release preflight`** gate emitting
+  a traceable manifest. Guide: [docs/design-integrity.md](docs/design-integrity.md).
 - **Simulation:** `akcli sim` — schematic → SPICE deck → KiCad's bundled libngspice in a
   crash-isolated, timeout-killed child; `sim.json` assertions (two-sided bounds, multi-analysis),
   `--sweep` corner matrices, `--deck-only` engine-free mode, floating-node detection with
@@ -36,13 +43,15 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   `--fix`, `jlc datasheet` PDF resolution/fetch (whole-BOM batch, `--resolve-mpn`).
 - **Calculators:** `akcli calc` — 60 standards-cited engineering calculators, engineering-notation
   inputs, `--ops` bridge into op-lists.
-- **Readers:** KiCad 7–10 S-expression (bounded, non-recursive, hierarchical); Altium binary
-  `.SchDoc` (multi-sheet + `.PrjPcb`), text-record `.SchLib`, `.PcbDoc` ASCII sections **plus
-  binary copper** (`Tracks6`/`Vias6`/`Arcs6`/`Pads6`, cross-validated against KiCad's importer).
+- **Readers:** KiCad 7–10 S-expression (bounded, non-recursive, hierarchical) incl. **deep
+  `.kicad_pcb`** (pad-net bindings, tracks/vias/zones, board setup); Altium binary `.SchDoc`
+  (multi-sheet + `.PrjPcb`), text-record `.SchLib`, `.PcbDoc` ASCII sections **plus binary copper**
+  (`Tracks6`/`Vias6`/`Arcs6`/`Pads6`, cross-validated against KiCad's importer), and **`.PcbLib`
+  footprint libraries** → `FootprintDef`/`FootprintPad` (also `.kicad_mod`/`.pretty`).
 - **Agent surface:** Claude Code / Codex plugin (`akcli`), 9 skills, 4 slash commands, `akcli view`
   dashboard (hub + calc + live watch with SSE, ERC markers, lint overlay, BOM panel), stable exit
   codes 0–7, `schema_version`-stamped JSON.
-- **Quality gates:** ~1 880 tests (parser fuzzing, round-trip netlist properties, live ngspice in
+- **Quality gates:** ~2 000 tests (parser fuzzing, round-trip netlist properties, live ngspice in
   CI, Windows/macOS/Linux × Python 3.11–3.14), ruff + mypy (parts/ + calc/), a
   **docs-conformance gate** (every documented command line and count claim is executed/asserted in
   CI), wheel-install smoke, tag-driven GitHub Releases.
@@ -119,8 +128,8 @@ artifacts.
 
 - [ ] Full ERC pin-type conflict matrix (KiCad-style N×N, unconnected `POWER_IN`, open-collector
       mixes) behind the existing typed-pins confidence demotion (M)
-- [ ] Schematic-vs-PCB sync check: `akcli diff sch.kicad_sch board.kicad_pcb` — net membership,
-      refdes presence, footprint assignment (M)
+- [x] Schematic-vs-PCB sync check — shipped as `akcli verify sch.kicad_sch board.kicad_pcb`:
+      pad-level net partition, refdes presence, footprint assignment (M)
 - [ ] Differential-pair / bus continuity checks (`_P`/`_N`, `D+`/`D-`, `D0..D7`) over the existing
       net model, configurable via `[check]` (M)
 - [ ] Golden-file regression corpus: frozen `check`/`net`/`diff --json` snapshots over real boards,

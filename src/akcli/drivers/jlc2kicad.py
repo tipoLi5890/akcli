@@ -51,17 +51,38 @@ def convert(
     *,
     with_3d: bool = False,
     lib_name: str = "akcli",
+    footprint_lib: str = "footprint",
+    model_path: str | None = None,
     force: bool = False,
 ) -> ConvertResult:
     """Convert LCSC part ``lcsc`` into a KiCad library under ``out_dir``.
 
     Layout (JLC2KiCadLib conventions): ``<out>/symbol/<lib_name>.kicad_sym``,
-    ``<out>/footprint/<name>.kicad_mod`` and, with ``with_3d``,
-    ``<out>/footprint/packages3d/<name>.step``.
+    ``<out>/<footprint_lib>/<name>.kicad_mod`` and, with ``with_3d``,
+    ``<out>/<footprint_lib>/packages3d/<name>.step``.
+
+    ``footprint_lib`` doubles as the **fp-lib-table nickname** written into the
+    symbol's Footprint field (``<footprint_lib>:<name>``) — pass the nickname
+    the target project actually registers, or KiCad will not find the package.
+
+    ``model_path`` controls how the 3D model is referenced from the footprint:
+    ``None``/``"relative"`` keeps the converter's bare relative path (portable
+    but resolvable only next to the library), ``"absolute"`` rewrites it to the
+    on-disk absolute path (always resolvable on this machine, not portable),
+    and a ``${VAR}``-style prefix writes ``${VAR}/packages3d/<name>.step``.
     """
     import json
 
     res = ConvertResult(lcsc=lcsc, out_dir=out_dir)
+
+    base_var = ""
+    if model_path and model_path not in ("relative", "absolute"):
+        if not model_path.startswith("$"):
+            res.error_code = "CONVERT_FAILED"
+            res.message = (f"bad --3d-path {model_path!r}: expected 'relative', "
+                           "'absolute', or a '${VAR}'-style prefix")
+            return res
+        base_var = model_path
 
     resp = _http.get(_SVGS_URL.format(lcsc=lcsc),
                      headers={"User-Agent": helper.get_user_agent()})
@@ -90,9 +111,9 @@ def convert(
         footprint_name, datasheet_link = create_footprint(
             footprint_component_uuid=footprint_uuid,
             component_id=lcsc,
-            footprint_lib="footprint",
+            footprint_lib=footprint_lib,
             output_dir=out_dir,
-            model_base_variable="",
+            model_base_variable=base_var,
             model_dir="packages3d",
             skip_existing=not force,
             models=["STEP"] if with_3d else [],
@@ -123,4 +144,27 @@ def convert(
     if not res.artifacts:
         res.error_code = "CONVERT_NO_ARTIFACTS"
         res.message = "conversion produced no library artifacts"
+        return res
+
+    if model_path == "absolute":
+        _absolutize_models(res.artifacts, root, footprint_lib)
     return res
+
+
+def _absolutize_models(artifacts: list[str], root: Path, footprint_lib: str) -> None:
+    """Rewrite bare-relative ``(model "packages3d/...")`` paths to absolute.
+
+    Bare relative 3D paths only resolve when KiCad's CWD happens to be the
+    library directory (footprint viewer/chooser: never). Absolute paths always
+    resolve on this machine at the cost of portability — the caller surfaces
+    that trade-off.
+    """
+    base = (root.resolve() / footprint_lib / "packages3d").as_posix()
+    for art in artifacts:
+        if not art.endswith(".kicad_mod"):
+            continue
+        p = Path(art)
+        text = p.read_text(encoding="utf-8")
+        patched = text.replace('(model "packages3d/', f'(model "{base}/')
+        if patched != text:
+            p.write_text(patched, encoding="utf-8")

@@ -49,8 +49,10 @@ akcli net  <file> [name] --json   # netlist: nets -> pin members, aliases, sourc
 akcli component <file> <REF>      # one component's pin -> net (e.g. U3)
 ```
 
-Inputs: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.kicad_sch`, `.kicad_sym`, `.kicad_pcb`.
+Inputs: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.PcbLib`, `.kicad_sch`, `.kicad_sym`, `.kicad_pcb`.
 `stdout` is data, `stderr` is logs — so `akcli ... --json | jq` stays clean.
+`akcli read --strict` turns a non-empty source that normalizes to zero objects
+(`EMPTY_IMPORT`) into exit 1 instead of a quiet empty result.
 
 ### (2) Analyze — check / diff / pinmap
 
@@ -67,6 +69,9 @@ akcli diff <file_a> <file_b>
 # MCU pin -> net table (MCU from config mcu_designator or --mcu). Optional cross-check.
 akcli pinmap <file> -C akcli.toml
 akcli pinmap <file> --mcu U3 --expected pins.csv     # expected = .csv or .json
+
+akcli verify sch.kicad_sch board.kicad_pcb --strict   # schematic <-> PCB net/refdes/footprint equivalence
+akcli check board.kicad_sch --contract contract.toml   # topology require/forbid rules ERC can't express
 ```
 
 `-C/--config akcli.toml` supplies `mcu_designator`, `[[rail]]` voltages, and
@@ -131,7 +136,9 @@ otherwise the write is rejected and the original file is untouched. **After appl
 
 `0` success / no findings · `1` check findings present (lint-style; `--exit-zero` forces 0) ·
 `2` usage/arg error · `3` parse error (corrupt OLE2/S-expr) · `4` file not found ·
-`5` unsupported format · `6` op-list / verify failure · `7` required external tool missing.
+`5` unsupported format · `6` op-list / verify failure (also covers `TARGET_LOCKED`, a
+KiCad GUI lock on the target — see `--allow-open` on `draw`/`arrange`/`undo`) ·
+`7` required external tool missing.
 
 ## Errors
 

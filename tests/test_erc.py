@@ -284,7 +284,7 @@ def test_ic_missing_ground_flagged_by_identity():
 
 
 def test_two_pin_u_part_is_not_an_ic():
-    # A "U"-designated 2-pin part (e.g. a piezo header U9) must not be flagged
+    # A "U"-designated 2-pin part (e.g. a buzzer or header U9) must not be flagged
     # for missing power/ground -- it is a header/jumper stub, not an IC.
     sch = _sch(
         [

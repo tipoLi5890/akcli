@@ -6,7 +6,7 @@
   "type": "object",
   "required": ["source_path", "source_format", "components", "nets", "schema_version"],
   "properties": {
-    "schema_version": { "const": "1.1" },
+    "schema_version": { "const": "1.2" },
     "source_path": { "type": "string" },
     "source_format": { "enum": ["altium", "kicad"] },
     "sheets": { "type": "array", "items": { "type": "string" } },

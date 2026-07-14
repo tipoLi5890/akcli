@@ -18,7 +18,7 @@ from akcli.report import Severity
 # --- synthetic markdown fixtures ---------------------------------------------
 
 MD_BILINGUAL = """\
-# Insole pinout
+# Board pinout
 
 Some prose before the table.
 
