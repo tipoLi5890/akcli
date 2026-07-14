@@ -1,6 +1,6 @@
 ---
 description: Emit the MCU pin->net map for a schematic with akcli, optionally cross-checked against an expected pinout/DTS table.
-argument-hint: <schematic> [--mcu U3] [--expected pins.csv|.json|pinout.md|board.dts] [-C altium-kicad-cli.toml]
+argument-hint: <schematic> [--mcu U3] [--expected pins.csv|.json|pinout.md|board.dts] [-C akcli.toml]
 ---
 
 Produce the MCU pin → net table for the schematic with `akcli pinmap` and report it.
@@ -12,7 +12,7 @@ Arguments: `$ARGUMENTS`
   authoritative; the expected table is advisory.
 - `-C/--config <toml>` supplies `mcu_designator` and paths.
 
-Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m altium_kicad_cli`):
+Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m akcli`):
 
 1. If the user supplied an **expected** source that is NOT already a `.csv`/`.json` pin→signal
    table — e.g. a Zephyr **`.dts`/.overlay** or a human **`pinout.md`** — first convert it to the

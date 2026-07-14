@@ -1,0 +1,40 @@
+; ============================================================================
+; altium_api.PrjScr  --  Altium Script Project wrapper for altium_api.pas
+;
+; Part of akcli (SPEC sec 3.7 drivers/altium_live). This is the
+; Altium "Script Project" (.PrjScr) that pairs with altium_api.pas so the
+; DelphiScript Run procedure can be invoked from the ScriptingSystem, e.g.:
+;
+;   "X2.EXE" -RScriptingSystem:RunScript(
+;       ProjectName="altium_api.PrjScr" | ProcName="altium_api>Run")
+;
+; (see README.md "Launching on Windows" for the full bridge invocation.)
+;
+; .PrjScr is a plain INI-style text file. Keep it next to altium_api.pas; the
+; DocumentPath below is relative to this project file.
+;
+; CLEAN-ROOM: independent reimplementation; no source copied. References only
+; Altium's public scripting-project format. See THIRD_PARTY_NOTICES.md.
+; Validated only on Windows + Altium Designer 22+.
+; ============================================================================
+
+[Design]
+Version=1.0
+HierarchyMode=0
+ChannelRoomLevelSeperator=:
+ParameterName=
+ParameterValue=
+GeneratedNamesMode=0
+
+[Document1]
+DocumentPath=altium_api.pas
+DocumentUniqueId=AKCLI-ALTIUM-API-0001
+AnnotateStartValue=1
+AnnotationSuffix=
+AnnotateScope=2
+DoLibraryUpdate=1
+DoDatabaseUpdate=1
+ClassGenCCAutoEnabled=1
+ClassGenCCAutoRoomEnabled=1
+ClassGenNCAutoScope=None
+BomDoc=

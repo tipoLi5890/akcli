@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from altium_kicad_cli import ops
-from altium_kicad_cli.errors import AkcliError
+from akcli import ops
+from akcli.errors import AkcliError
 
 
 def _doc(op_list):

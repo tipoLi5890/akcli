@@ -1,6 +1,6 @@
 ---
 description: Read a schematic and run akcli design checks (ERC-lite + power + BOM), then summarize findings — with an optional revision diff.
-argument-hint: <schematic> [against <old-schematic>] [-C altium-kicad-cli.toml]
+argument-hint: <schematic> [against <old-schematic>] [-C akcli.toml]
 ---
 
 Run a design review of the schematic with `akcli` and report the findings.
@@ -12,7 +12,7 @@ Arguments: `$ARGUMENTS`
 - An `-C/--config <toml>` token, if present, supplies rails / MCU designator / `[[erc_waiver]]`.
 
 Steps (use the Bash tool; `akcli` is on PATH when the plugin is installed, otherwise use
-`PYTHONPATH=src python3 -m altium_kicad_cli` or `bin/akcli`):
+`PYTHONPATH=src python3 -m akcli` or `bin/akcli`):
 
 1. Read context: `akcli read <schematic> --md` (and `akcli net <schematic> --json` if you need the
    netlist to explain a finding).

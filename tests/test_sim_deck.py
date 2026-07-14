@@ -17,9 +17,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.model import Component, Net, Pin, Schematic
-from altium_kicad_cli.report import Severity
+from akcli.errors import AkcliError
+from akcli.model import Component, Net, Pin, Schematic
+from akcli.report import Severity
 
 
 # --------------------------------------------------------------------------- #
@@ -78,11 +78,11 @@ def _resolve(comp, spec):
     return _Card(letter="R", value=_spice_value(comp.value or "1k"))
 
 
-_stub = types.ModuleType("altium_kicad_cli.sim.models")
+_stub = types.ModuleType("akcli.sim.models")
 _stub.resolve = _resolve
 _stub.spice_value = _spice_value
 
-from altium_kicad_cli.sim import deck  # noqa: E402
+from akcli.sim import deck  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -94,9 +94,9 @@ def _install_stub(monkeypatch):
     the isolation needed, and the real ``sim.models`` module (plus the package
     attribute) is restored for every other test file in the session.
     """
-    import altium_kicad_cli.sim as _sim
+    import akcli.sim as _sim
 
-    monkeypatch.setitem(sys.modules, "altium_kicad_cli.sim.models", _stub)
+    monkeypatch.setitem(sys.modules, "akcli.sim.models", _stub)
     monkeypatch.setattr(_sim, "models", _stub, raising=False)
 
 
@@ -212,7 +212,7 @@ def test_named_N1_and_unnamed_net_stay_distinct():
 def test_sanitize_non_ascii_becomes_ascii_underscore():
     # item 10: isalnum() would keep 'µ' (and upper-case it to Greek Mu); the
     # explicit ASCII regex maps every non-[A-Za-z0-9_] char to '_'.
-    from altium_kicad_cli.sim.deck import _sanitize
+    from akcli.sim.deck import _sanitize
     tok = _sanitize("Vµ_SENSE")
     assert tok.isascii()
     assert tok == "V__SENSE"

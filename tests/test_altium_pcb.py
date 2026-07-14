@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import _cfbf, altium_pcb
+from akcli.errors import AkcliError
+from akcli.readers import _cfbf, altium_pcb
 
 GEN = Path(__file__).resolve().parent / "fixtures" / "_gen"
 if str(GEN) not in sys.path:

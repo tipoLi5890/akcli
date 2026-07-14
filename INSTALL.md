@@ -1,14 +1,14 @@
-# Installing altium-kicad-cli
+# Installing akcli
 
-`altium-kicad-cli` is a **zero-runtime-dependency** Python package. It needs only **Python ≥ 3.11**
+`akcli` is a **zero-runtime-dependency** Python package. It needs only **Python ≥ 3.11**
 (for the stdlib `tomllib` module). There is nothing to compile and no EDA software to install.
 
-- import package: `altium_kicad_cli`
-- CLI command: `akcli` (long alias: `altium-kicad-cli`)
-- Claude Code plugin / marketplace name: `altium-kicad`
+- import package: `akcli`
+- CLI command: `akcli` (long alias: `akcli`)
+- Claude Code plugin / marketplace name: `akcli`
 
 > **Not on PyPI yet** — install from source with one of the options below. Once a release is published,
-> `pipx install altium-kicad-cli` / `pip install altium-kicad-cli` will also work.
+> `pipx install akcli` / `pip install akcli` will also work.
 
 ## Requirements
 
@@ -23,21 +23,21 @@
 Because there are no runtime dependencies, you can run straight from a checkout:
 
 ```bash
-git clone https://github.com/tipoLi5890/altium-kicad-cli
-cd altium-kicad-cli
+git clone https://github.com/tipoLi5890/akcli
+cd akcli
 ./bin/akcli --help                  # self-locating wrapper; finds Python ≥ 3.11 for you
 ```
 
 Add it to your PATH if you like:
 
 ```bash
-export PATH="$PWD/bin:$PATH"        # exposes both `akcli` and `altium-kicad-cli`
+export PATH="$PWD/bin:$PATH"        # exposes both `akcli` and `akcli`
 ```
 
 Or invoke the module directly with any Python ≥ 3.11:
 
 ```bash
-PYTHONPATH=src python3.12 -m altium_kicad_cli --help
+PYTHONPATH=src python3.12 -m akcli --help
 ```
 
 ## Option B — pipx from git (isolated, on your PATH)
@@ -45,51 +45,51 @@ PYTHONPATH=src python3.12 -m altium_kicad_cli --help
 `pipx` installs the CLI into an isolated environment and puts `akcli` on your PATH:
 
 ```bash
-pipx install git+https://github.com/tipoLi5890/altium-kicad-cli
+pipx install git+https://github.com/tipoLi5890/akcli
 akcli --version          # package + protocol version
-pipx upgrade altium-kicad-cli
-pipx uninstall altium-kicad-cli
+pipx upgrade akcli
+pipx uninstall akcli
 ```
 
 ## Option C — pip from git (into a venv)
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install git+https://github.com/tipoLi5890/altium-kicad-cli
+pip install git+https://github.com/tipoLi5890/akcli
 ```
 
 ## Use with AI coding agents
 
 `akcli` is a plain CLI, so any agent that can run shell commands drives it once it's on PATH (install it
-with one of the options above). The repo also ships **eight skills** under `skills/` that teach the agent
-how to drive `akcli`: `circuit-design` (read/analyze/draw basics), `circuit-debug` (connectivity & tool
-triage), `schematic-review` (severity-ranked design review), `schematic-authoring` (new circuits from an
-op-list), `altium-interop` (working with Altium Designer), `parts-sourcing` (JLC/LCSC parts),
-`jlcpcb-capabilities` (JLCPCB manufacturing limits), and `design-calc` (standards-cited engineering
+with one of the options above). The repo also ships **nine skills** under `skills/` that teach the agent
+how to drive `akcli`: `akcli-circuit-design` (read/analyze/draw basics), `akcli-circuit-debug` (connectivity & tool
+triage), `akcli-schematic-review` (severity-ranked design review), `akcli-schematic-authoring` (new circuits from an
+op-list), `akcli-altium-interop` (working with Altium Designer), `akcli-parts-sourcing` (JLC/LCSC parts),
+`akcli-jlcpcb-capabilities` (JLCPCB manufacturing limits), and `akcli-design-calc` (standards-cited engineering
 calculators via `akcli calc`). Codex
 and OpenCode **auto-discover** any skill folder you drop into their skills directory — no plugin or extra
 config. Run the `cp` commands below from a clone of this repo.
 
 ### Claude Code
 
-Install the plugin — it bundles all eight skills and the slash commands:
+Install the plugin — it bundles all nine skills and the slash commands:
 
 ```text
-/plugin marketplace add tipoLi5890/altium-kicad-cli
-/plugin install altium-kicad@altium-kicad
+/plugin marketplace add tipoLi5890/akcli
+/plugin install akcli@akcli
 ```
 
-You get the eight skills and `/altium-kicad:circuit-review`, `circuit-pinmap`,
+You get the nine skills and `/akcli:circuit-review`, `circuit-pinmap`,
 `circuit-draw`, and `circuit-diff`, all calling `akcli`.
 
 ### Codex
 
 `akcli` runs through Codex's built-in shell once it's on PATH. Install it as a **Codex plugin** —
-it bundles all eight skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
+it bundles all nine skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
 
 ```bash
-codex plugin marketplace add tipoLi5890/altium-kicad-cli   # or `add ./` from a clone
-codex plugin install altium-kicad@altium-kicad
+codex plugin marketplace add tipoLi5890/akcli   # or `add ./` from a clone
+codex plugin install akcli@akcli
 ```
 
 Or just drop the loose skill folders in (auto-discovered from `.agents/skills/`, no plugin needed):
@@ -122,13 +122,13 @@ for d in ~/.claude/skills ~/.agents/skills; do mkdir -p "$d" && cp -R skills/* "
 Paste this into a running Codex / OpenCode session (fix the path) and it sets itself up:
 
 ```text
-I cloned altium-kicad-cli at /ABS/PATH/altium-kicad-cli. Please:
-1. Put akcli on PATH: run `pipx install git+https://github.com/tipoLi5890/altium-kicad-cli`
-   (or add /ABS/PATH/altium-kicad-cli/bin to PATH); verify with `akcli --version`.
+I cloned akcli at /ABS/PATH/akcli. Please:
+1. Put akcli on PATH: run `pipx install git+https://github.com/tipoLi5890/akcli`
+   (or add /ABS/PATH/akcli/bin to PATH); verify with `akcli --version`.
 2. Install its bundled skills so you load them automatically: copy every folder under
-   /ABS/PATH/altium-kicad-cli/skills/ into your skills directory
+   /ABS/PATH/akcli/skills/ into your skills directory
    (Codex: ~/.agents/skills/ ; OpenCode: ~/.config/opencode/skills/).
-3. Read skills/circuit-design/SKILL.md first and use akcli for any Altium/KiCad schematic work.
+3. Read skills/akcli-circuit-design/SKILL.md first and use akcli for any Altium/KiCad schematic work.
 ```
 
 ### Project instructions (optional)
@@ -151,8 +151,8 @@ Dev and test tools are an optional extra (`pytest`, `jsonschema`, `build`, `twin
 dependency-free.
 
 ```bash
-git clone https://github.com/tipoLi5890/altium-kicad-cli
-cd altium-kicad-cli
+git clone https://github.com/tipoLi5890/akcli
+cd akcli
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
@@ -176,8 +176,15 @@ twine check dist/*
 
 ```bash
 akcli --version          # package version + protocol_version
-akcli --help             # list all subcommands
+akcli doctor             # full environment report with a remediation hint per missing item
 ```
+
+`akcli doctor` probes Python, the install itself, packaged schemas, `kicad-cli`,
+libngspice (for `akcli sim`) and config discovery — each the same way the
+features themselves discover them — and `--require kicad-cli,ngspice` turns it
+into a CI gate (exit 1 when a named capability is missing). Only Python is a
+hard requirement; everything else degrades gracefully. The bundled
+**akcli-setup** skill walks an agent through the per-OS repairs.
 
 If `akcli` reports it cannot find Python ≥ 3.11, install a newer interpreter (see Requirements) and
 re-run; the wrapper will pick it up. See [SECURITY.md](SECURITY.md) for the untrusted-input threat

@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.writers.lib_cache` (SPEC §3.5).
+"""Tests for :mod:`akcli.writers.lib_cache` (SPEC §3.5).
 
 Covers caching a plain symbol, dedup/idempotency, requalification of the parent
 name with unqualified child-unit names, full pin-electrical-type preservation,
@@ -16,11 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import model
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import kicad_lib, sexpr
-from altium_kicad_cli.readers.sexpr import SNode
-from altium_kicad_cli.writers import lib_cache
+from akcli import model
+from akcli.errors import AkcliError
+from akcli.readers import kicad_lib, sexpr
+from akcli.readers.sexpr import SNode
+from akcli.writers import lib_cache
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 DEVICE = FIX / "symbols" / "Device.kicad_sym"

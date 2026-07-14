@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from altium_kicad_cli.calc import CALCS, CalcError, compute
+from akcli.calc import CALCS, CalcError, compute
 
 
 def res(name, **kw):

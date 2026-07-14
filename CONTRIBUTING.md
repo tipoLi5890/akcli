@@ -1,6 +1,6 @@
-# Contributing to altium-kicad-cli
+# Contributing to akcli
 
-Thanks for your interest in improving `altium-kicad-cli`. This guide covers the dev
+Thanks for your interest in improving `akcli`. This guide covers the dev
 setup, the project's hard invariants, and how to get a change merged.
 
 By participating you agree to abide by the [Code of Conduct](CODE_OF_CONDUCT.md).
@@ -24,8 +24,8 @@ By participating you agree to abide by the [Code of Conduct](CODE_OF_CONDUCT.md)
 ## Dev setup
 
 ```bash
-git clone https://github.com/tipoLi5890/altium-kicad-cli
-cd altium-kicad-cli
+git clone https://github.com/tipoLi5890/akcli
+cd akcli
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest

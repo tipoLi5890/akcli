@@ -39,13 +39,13 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import config as config_mod
-from altium_kicad_cli import model, units
-from altium_kicad_cli.checks import nets as netcheck
-from altium_kicad_cli.readers import kicad as kreader
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.writers import geometry
-from altium_kicad_cli.writers import kicad as kw
+from akcli import config as config_mod
+from akcli import model, units
+from akcli.checks import nets as netcheck
+from akcli.readers import kicad as kreader
+from akcli.readers import sexpr
+from akcli.writers import geometry
+from akcli.writers import kicad as kw
 
 
 # --------------------------------------------------------------------------- #
@@ -392,7 +392,7 @@ def test_local_label_does_not_merge_across_sheets():
                            sheet=""),
         ],
     )
-    from altium_kicad_cli.netbuild import build_nets
+    from akcli.netbuild import build_nets
     nets = build_nets(prims, t_midspan_connects=False)
     assert sorted(sorted(n.members) for n in nets) == [
         [("R11", "1")], [("R21", "1")]]
@@ -589,7 +589,7 @@ def test_grid_config_parses_mil_and_mm(tmp_path):
 
 
 def test_grid_config_rejects_junk(tmp_path):
-    from altium_kicad_cli.errors import AkcliError
+    from akcli.errors import AkcliError
     p = tmp_path / config_mod.CONFIG_FILENAME
     p.write_text('[project]\ngrid = "fifty"\n')
     with pytest.raises(AkcliError):

@@ -17,9 +17,9 @@ import json
 import shutil
 from pathlib import Path
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
-from altium_kicad_cli.readers import kicad as kreader
+from akcli.cli import main
+from akcli.errors import EXIT
+from akcli.readers import kicad as kreader
 
 FIXTURES = Path(__file__).parent / "fixtures"
 V8 = FIXTURES / "kicad" / "board_v8.kicad_sch"
@@ -237,14 +237,14 @@ def test_backup_stack_survives_a_level_gap(tmp_path, capsys):
 
 def test_config_backup_depth_key_is_accepted(tmp_path):
     # The documented [project] backup_depth key must not brick config load.
-    from altium_kicad_cli.config import load_config
-    cfgf = tmp_path / "altium-kicad-cli.toml"
+    from akcli.config import load_config
+    cfgf = tmp_path / "akcli.toml"
     cfgf.write_text("[project]\nbackup_depth = 5\n")
     cfg = load_config(str(cfgf))
     assert cfg.backup_depth == 5
     cfgf.write_text("[project]\nbackup_depth = 0\n")
     import pytest
-    from altium_kicad_cli.errors import AkcliError
+    from akcli.errors import AkcliError
     with pytest.raises(AkcliError):
         load_config(str(cfgf))
 

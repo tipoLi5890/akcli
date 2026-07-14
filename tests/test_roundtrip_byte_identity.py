@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.readers.sexpr import SNode
-from altium_kicad_cli.writers import sexpr_writer
-from altium_kicad_cli.writers.sexpr_writer import serialize
+from akcli.readers import sexpr
+from akcli.readers.sexpr import SNode
+from akcli.writers import sexpr_writer
+from akcli.writers.sexpr_writer import serialize
 
 FIXTURES = Path(__file__).parent / "fixtures" / "kicad"
 

@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import cli
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.ops import expand_macros, op_template
-from altium_kicad_cli.readers import kicad as kreader
+from akcli import cli
+from akcli.errors import AkcliError
+from akcli.ops import expand_macros, op_template
+from akcli.readers import kicad as kreader
 
 FIXTURE = Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch"
 
@@ -134,7 +134,7 @@ def test_verify_strict_flags_value_changes(tmp_path, capsys):
 # ------------------------------------------------------------ nets check ----
 
 def test_check_nets_single_pin(tmp_path, capsys):
-    from altium_kicad_cli.checks import nets as netcheck
+    from akcli.checks import nets as netcheck
 
     work = tmp_path / "t.kicad_sch"
     shutil.copy(FIXTURE, work)
@@ -157,8 +157,8 @@ def test_check_nets_single_pin(tmp_path, capsys):
 def test_check_nets_off_grid_direct_model():
     # the draw pipeline snaps to grid, so off-grid inputs come from outside —
     # exercise the check on the model directly
-    from altium_kicad_cli import model
-    from altium_kicad_cli.checks import nets as netcheck
+    from akcli import model
+    from akcli.checks import nets as netcheck
 
     comp = model.Component(
         designator="U1", library_ref="X:Y", x_mil=1003.0, y_mil=1000.0,
@@ -223,7 +223,7 @@ def test_pullup_macro_end_to_end_netlist(tmp_path, capsys):
 
 
 def test_validator_accepts_unexpanded_macros():
-    from altium_kicad_cli.ops import validate_oplist
+    from akcli.ops import validate_oplist
     doc = _oplist([{"op": "place_pullup", "x_mil": 1, "y_mil": 2,
                     "net": "A", "rail_net": "B"}])
     assert validate_oplist(doc) == []

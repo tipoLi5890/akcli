@@ -15,8 +15,8 @@ import pytest
 
 jsonschema = pytest.importorskip("jsonschema")
 
-from altium_kicad_cli import cli  # noqa: E402
-from altium_kicad_cli.model import SCHEMA_VERSION  # noqa: E402
+from akcli import cli  # noqa: E402
+from akcli.model import SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((ROOT / "schemas" / "schematic.schema.json").read_text())
@@ -51,9 +51,9 @@ def test_schema_pins_model_schema_version():
 
 
 # ------------------------------------------------------- packaged mirror ----
-# Root schemas/ is canonical; src/altium_kicad_cli/schemas/ ships in wheels.
+# Root schemas/ is canonical; src/akcli/schemas/ ships in wheels.
 
-PACKAGED = ROOT / "src" / "altium_kicad_cli" / "schemas"
+PACKAGED = ROOT / "src" / "akcli" / "schemas"
 
 
 @pytest.mark.parametrize("name", ["ops.schema.json", "ops.capabilities.json"])
@@ -62,12 +62,12 @@ def test_packaged_schema_identical_to_root(name):
     packaged_text = (PACKAGED / name).read_text()
     assert packaged_text == root_text, (
         f"{name}: packaged mirror drifted from canonical schemas/{name} — "
-        f"copy the root file over src/altium_kicad_cli/schemas/{name}"
+        f"copy the root file over src/akcli/schemas/{name}"
     )
 
 
 def test_ops_loaders_use_packaged_or_root():
-    from altium_kicad_cli import ops
+    from akcli import ops
 
     assert ops.load_schema()["title"] == "AkcliOpList"
     assert ops.load_capabilities()["ops"]["place_component"]["kicad"] is True
@@ -80,7 +80,7 @@ OPS_VALIDATOR = jsonschema.Draft202012Validator(OPS_SCHEMA)
 
 
 def _all_op_names():
-    from altium_kicad_cli import ops
+    from akcli import ops
 
     return sorted(ops.OP_NAMES | ops.MACRO_OPS)
 
@@ -92,7 +92,7 @@ def test_op_template_validates_against_schema(name):
     This is the permanent anti-drift gate: any new op/macro (or field rename)
     that touches only one side of the code/schema pair fails here.
     """
-    from altium_kicad_cli import ops
+    from akcli import ops
 
     doc = {
         "protocol_version": ops.PROTOCOL_VERSION,

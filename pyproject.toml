@@ -4,9 +4,9 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "altium-kicad-cli"
-version = "0.6.0"
-description = "Read Altium binary .SchDoc and KiCad .kicad_sch with no EDA install; run ERC/design checks and draw KiCad. For AI coding agents."
+name = "akcli"
+version = "0.7.0"
+description = "AI-native KiCad schematic/PCB design agent: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc — no EDA install required."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
@@ -25,13 +25,12 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tipoLi5890/altium-kicad-cli"
-Repository = "https://github.com/tipoLi5890/altium-kicad-cli.git"
-Changelog = "https://github.com/tipoLi5890/altium-kicad-cli/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/tipoLi5890/akcli"
+Repository = "https://github.com/tipoLi5890/akcli.git"
+Changelog = "https://github.com/tipoLi5890/akcli/blob/main/CHANGELOG.md"
 
 [project.scripts]
-akcli = "altium_kicad_cli.cli:main"
-altium-kicad-cli = "altium_kicad_cli.cli:main"
+akcli = "akcli.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "jsonschema>=4", "build", "twine", "ruff>=0.15", "mypy>=1.10"]
@@ -40,28 +39,33 @@ dev = ["pytest>=8", "jsonschema>=4", "build", "twine", "ruff>=0.15", "mypy>=1.10
 where = ["src"]
 
 [tool.setuptools.package-data]
-"altium_kicad_cli.webui" = ["*.html"]
-"altium_kicad_cli.schemas" = ["*.json"]
+"akcli.webui" = ["*.html"]
+"akcli.schemas" = ["*.json"]
+# sim/builtin.lib is loaded at runtime via Path(__file__); it MUST ship in the
+# wheel or `akcli sim` with a builtin model breaks on a non-editable install.
+"akcli.sim" = ["*.lib"]
+# vendored MIT library — ship its license/provenance for compliance.
+"akcli._vendor.jlc2kicadlib" = ["LICENSE", "PROVENANCE.md"]
 
 [tool.ruff]
 # Vendored jlc2kicadlib is kept byte-close to upstream; never lint it.
-extend-exclude = ["src/altium_kicad_cli/_vendor"]
+extend-exclude = ["src/akcli/_vendor"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "W"]
 
 [tool.ruff.lint.per-file-ignores]
 # `l` is inductance throughout the calc domain, not an ambiguous name.
-"src/altium_kicad_cli/calc/electrical.py" = ["E741"]
-"src/altium_kicad_cli/calc/power.py" = ["E741"]
+"src/akcli/calc/electrical.py" = ["E741"]
+"src/akcli/calc/power.py" = ["E741"]
 # Grandfathered spare imports/f-strings; clean up at next functional touch
 # rather than churning otherwise-untouched modules for the lint gate.
-"src/altium_kicad_cli/calc/registry.py" = ["F401"]
-"src/altium_kicad_cli/calc/regulator.py" = ["F401"]
-"src/altium_kicad_cli/ops.py" = ["F401"]
-"src/altium_kicad_cli/parts/bom_jlc.py" = ["F401", "F541"]
+"src/akcli/calc/registry.py" = ["F401"]
+"src/akcli/calc/regulator.py" = ["F401"]
+"src/akcli/ops.py" = ["F401"]
+"src/akcli/parts/bom_jlc.py" = ["F401", "F541"]
 # Deliberate compact paired coordinate statements in the S-expression writer.
-"src/altium_kicad_cli/writers/kicad.py" = ["E702"]
+"src/akcli/writers/kicad.py" = ["E702"]
 # Tests favor readability: spare imports/locals and compact fuzz mutators are fine.
 "tests/**" = ["E702", "E741", "F401", "F841"]
 
@@ -70,7 +74,7 @@ select = ["E4", "E7", "E9", "F", "W"]
 # other package is untyped or partially typed; widen `files` module-by-module
 # as each is brought up to the same bar rather than gating the whole tree at
 # once.
-files = ["src/altium_kicad_cli/parts", "src/altium_kicad_cli/calc"]
+files = ["src/akcli/parts", "src/akcli/calc"]
 python_version = "3.11"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
@@ -87,5 +91,5 @@ follow_imports = "silent"
 # jlcsearch/EasyEDA JSON payloads are untyped `object`/`dict` by design (see
 # module docstrings) — the defensive `getattr`/duck-typed opener plumbing
 # isn't worth fighting the checker over for a first pass.
-module = "altium_kicad_cli.parts.*"
+module = "akcli.parts.*"
 disallow_untyped_calls = false

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from altium_kicad_cli.report import Finding, Severity, render
+from akcli.report import Finding, Severity, render
 
 
 def test_severity_enum():

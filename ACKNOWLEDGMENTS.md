@@ -1,6 +1,6 @@
 # Acknowledgments
 
-`altium-kicad-cli` is MIT-licensed and ships no third-party code: external tools run as
+`akcli` is MIT-licensed and ships no third-party code: external tools run as
 subprocesses and public services are queried over HTTP. Design *patterns* that informed the
 project are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -11,7 +11,7 @@ project are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 - **JLC2KiCadLib** — LCSC/EasyEDA → KiCad symbol/footprint/3D converter, by
   **TousstNicolas**. MIT. <https://github.com/TousstNicolas/JLC2KiCad_lib>.
-  Vendored (conversion core) into `src/altium_kicad_cli/_vendor/jlc2kicadlib/`;
+  Vendored (conversion core) into `src/akcli/_vendor/jlc2kicadlib/`;
   see `THIRD_PARTY_NOTICES.md` and the in-tree `PROVENANCE.md`.
 - **jlcsearch** (tscircuit) — MIT — search front end over the JLCPCB/LCSC catalog; used by
   `akcli jlc search` / `jlc show`. <https://github.com/tscircuit/jlcsearch>.

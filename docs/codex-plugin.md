@@ -1,7 +1,7 @@
 # Codex plugin (`.codex-plugin/`)
 
 This repo ships as an **OpenAI Codex plugin** in addition to a Claude Code plugin. A Codex
-plugin bundles the eight `akcli` skills (and the Python-version session hook) so Codex can
+plugin bundles the nine `akcli` skills (and the Python-version session hook) so Codex can
 discover, install, and load them as one unit — no manual copying of skill folders.
 
 Spec reference: <https://developers.openai.com/codex/plugins/build>
@@ -21,20 +21,20 @@ one set of skills serves Claude Code, Codex, and OpenCode.
 ## Plugin layout
 
 ```
-altium-kicad-cli/                 # ← plugin root
+akcli/                 # ← plugin root
 ├── .codex-plugin/
 │   └── plugin.json               # Codex manifest (this is what makes it a Codex plugin)
 ├── .agents/plugins/
 │   └── marketplace.json          # repo-scoped catalog for `codex plugin marketplace add`
 ├── skills/                       # 8 skills, shared with Claude & OpenCode
-│   ├── circuit-design/SKILL.md   #   core read/analyze/draw mechanics (start here)
-│   ├── schematic-authoring/SKILL.md
-│   ├── schematic-review/SKILL.md
-│   ├── circuit-debug/SKILL.md
-│   ├── altium-interop/SKILL.md
-│   ├── parts-sourcing/SKILL.md
-│   ├── jlcpcb-capabilities/SKILL.md
-│   └── design-calc/SKILL.md      #   standards-cited engineering calculators (akcli calc)
+│   ├── akcli-circuit-design/SKILL.md   #   core read/analyze/draw mechanics (start here)
+│   ├── akcli-schematic-authoring/SKILL.md
+│   ├── akcli-schematic-review/SKILL.md
+│   ├── akcli-circuit-debug/SKILL.md
+│   ├── akcli-altium-interop/SKILL.md
+│   ├── akcli-parts-sourcing/SKILL.md
+│   ├── akcli-jlcpcb-capabilities/SKILL.md
+│   └── akcli-design-calc/SKILL.md      #   standards-cited engineering calculators (akcli calc)
 ├── hooks/
 │   └── hooks.json                # SessionStart Python≥3.11 advisory (portable one-liner)
 ├── .claude-plugin/               # Claude Code manifest + marketplace (unchanged)
@@ -68,10 +68,10 @@ skills, which Codex loads on demand:
 
 | Claude command | Codex skill that covers it |
 |---|---|
-| `/circuit-review` | `schematic-review` |
-| `/circuit-diff` | `schematic-review` (revision-diff step) / `circuit-design` |
-| `/circuit-pinmap` | `schematic-review` (pinmap step) / `circuit-design` |
-| `/circuit-draw` | `schematic-authoring` |
+| `/circuit-review` | `akcli-schematic-review` |
+| `/circuit-diff` | `akcli-schematic-review` (revision-diff step) / `akcli-circuit-design` |
+| `/circuit-pinmap` | `akcli-schematic-review` (pinmap step) / `akcli-circuit-design` |
+| `/circuit-draw` | `akcli-schematic-authoring` |
 
 ## Install & test
 
@@ -82,15 +82,15 @@ that teach Codex to drive it, not the CLI itself.
 
 ```bash
 codex plugin marketplace add ./                 # run from the repo root; reads .agents/plugins/marketplace.json
-codex plugin marketplace list                   # confirm "altium-kicad" is listed
-codex plugin install altium-kicad@altium-kicad  # <plugin>@<marketplace>
+codex plugin marketplace list                   # confirm "akcli" is listed
+codex plugin install akcli@akcli  # <plugin>@<marketplace>
 ```
 
 **From GitHub (once pushed):**
 
 ```bash
-codex plugin marketplace add tipoLi5890/altium-kicad-cli
-codex plugin install altium-kicad@altium-kicad
+codex plugin marketplace add tipoLi5890/akcli
+codex plugin install akcli@akcli
 ```
 
 Enable/disable and per-plugin state live in `~/.codex/config.toml` (set `enabled = false` to
@@ -98,10 +98,10 @@ turn it off). Installed plugins cache under
 `~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`.
 
 Verify it loaded by asking Codex to run a task the skills own, e.g. *"Read `main.SchDoc` and
-summarize the rails"* — Codex should reach for the `circuit-design` skill and call `akcli`.
+summarize the rails"* — Codex should reach for the `akcli-circuit-design` skill and call `akcli`.
 
 ## Keeping the two manifests in sync
 
-`name` (`altium-kicad`) and `version` (`0.1.0`) are duplicated across
+`name` (`akcli`) and `version` (`0.7.0`) are duplicated across
 `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`. When you bump the version or
 edit shared metadata, update **both** so Claude Code and Codex agree.

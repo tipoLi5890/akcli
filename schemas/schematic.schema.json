@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://altium-kicad-cli/schemas/schematic.schema.json",
+  "$id": "https://akcli/schemas/schematic.schema.json",
   "title": "AkcliSchematic",
   "description": "Export shape of model.Schematic (origin top-left, +Y down, mils).",
   "type": "object",

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from altium_kicad_cli.parts import easyeda as _easyeda
-from altium_kicad_cli.parts import search as _search
+from akcli.parts import easyeda as _easyeda
+from akcli.parts import search as _search
 
 
 @pytest.fixture(autouse=True)

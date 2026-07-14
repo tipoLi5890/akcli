@@ -15,7 +15,7 @@ Arguments: `$ARGUMENTS`
 - `--apply` means actually write (default is a verify-only dry-run). `--symbols <path>` adds an
   extra `.kicad_sym` / template `.kicad_sch` symbol source (repeatable).
 
-Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m altium_kicad_cli`):
+Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m akcli`):
 
 1. **Build/validate the op-list.** If none was provided, author one as JSON per
    `schemas/ops.schema.json` (and `docs/op-list-authoring.md` if present). Document shape:

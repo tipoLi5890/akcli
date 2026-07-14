@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug! `altium-kicad-cli` is a zero-dependency
+        Thanks for taking the time to file a bug! `akcli` is a zero-dependency
         Python CLI that reads/analyzes/draws Altium and KiCad schematics.
 
         Please fill out the fields below. A **minimal sample file** and the **exact command

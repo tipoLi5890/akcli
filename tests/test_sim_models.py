@@ -1,6 +1,6 @@
 """Tests for the sim device-resolution ladder, datasheet fits and builtin lib.
 
-Covers :mod:`altium_kicad_cli.sim.models`:
+Covers :mod:`akcli.sim.models`:
 
 * :func:`spice_value` engineering-notation -> SPICE conversion (the M/MEG fix);
 * :func:`fit_diode` reproducing the live-session BAT54H numbers;
@@ -14,10 +14,10 @@ import math
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.model import Component, Pin
-from altium_kicad_cli.sim import models
-from altium_kicad_cli.sim.models import (
+from akcli.errors import AkcliError
+from akcli.model import Component, Pin
+from akcli.sim import models
+from akcli.sim.models import (
     DeviceCard,
     builtin_names,
     fit_diode,
@@ -279,7 +279,7 @@ def test_builtin_blocks_balanced_and_ascii(name):
 
 
 def test_builtin_lib_file_is_pure_ascii():
-    from altium_kicad_cli.sim.models import _BUILTIN_LIB
+    from akcli.sim.models import _BUILTIN_LIB
     _BUILTIN_LIB.read_text(encoding="ascii")  # raises if any non-ASCII byte
 
 

@@ -13,9 +13,9 @@ import json
 
 import pytest
 
-from altium_kicad_cli import cli
-from altium_kicad_cli.model import Component, Net, Pin, PinType, Schematic
-from altium_kicad_cli.sim import engine
+from akcli import cli
+from akcli.model import Component, Net, Pin, PinType, Schematic
+from akcli.sim import engine
 
 _BOARD = "tests/fixtures/kicad/board_v8.kicad_sch"
 _HAVE_NGSPICE = engine.available() is not None
@@ -115,7 +115,7 @@ def _synthetic_with_diode() -> Schematic:
 
 
 def test_sim_deck_only_unmodeled_warns_but_passes(capsys, monkeypatch):
-    from altium_kicad_cli.commands import sim as sim_cmd
+    from akcli.commands import sim as sim_cmd
     monkeypatch.setattr(sim_cmd, "_load_schematic", lambda _p: _synthetic_with_diode())
     # An unmodeled diode warns on stderr but never fails --deck-only.
     assert cli.main(["sim", "synthetic.kicad_sch", "--deck-only"]) == 0
@@ -126,7 +126,7 @@ def test_sim_deck_only_unmodeled_warns_but_passes(capsys, monkeypatch):
 
 
 def test_sim_deck_only_unmodeled_json_lists_it(capsys, monkeypatch):
-    from altium_kicad_cli.commands import sim as sim_cmd
+    from akcli.commands import sim as sim_cmd
     monkeypatch.setattr(sim_cmd, "_load_schematic", lambda _p: _synthetic_with_diode())
     assert cli.main(["sim", "synthetic.kicad_sch", "--deck-only", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
@@ -138,7 +138,7 @@ def test_sim_deck_only_unmodeled_json_lists_it(capsys, monkeypatch):
 # engine-missing (offline, monkeypatched)
 # --------------------------------------------------------------------------- #
 def test_sim_engine_missing_exit_7(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.sim import engine as engine_mod
+    from akcli.sim import engine as engine_mod
     monkeypatch.setattr(engine_mod, "available", lambda: None)
     sim = _write_sim(tmp_path, {
         "protocol_version": 1,
@@ -164,7 +164,7 @@ def test_sim_bad_spec_exits_2(tmp_path, capsys):
 # --------------------------------------------------------------------------- #
 def test_sim_engine_failure_exits_7_even_with_zero_asserts(tmp_path, capsys,
                                                             monkeypatch):
-    from altium_kicad_cli.sim import engine as engine_mod
+    from akcli.sim import engine as engine_mod
     monkeypatch.setattr(engine_mod, "available", lambda: "/fake/libngspice.dylib")
     monkeypatch.setattr(
         engine_mod, "run",
@@ -205,7 +205,7 @@ def _rectifier_sch() -> Schematic:
 
 
 def _rectifier_spec():
-    from altium_kicad_cli.sim import assertions
+    from akcli.sim import assertions
     return assertions.SimSpec(
         stimuli=[{"kind": "vsource", "name": "Vin", "node": "HP",
                   "value": "SIN(0 1 10k)"}],
@@ -216,7 +216,7 @@ def _rectifier_spec():
 
 
 def test_deck_diode_uses_pin_name_anode_cathode_order():
-    from altium_kicad_cli.sim import deck as deckmod
+    from akcli.sim import deck as deckmod
     d = deckmod.build(_rectifier_sch(), _rectifier_spec())
     # anode (pin2 -> HP) first, cathode (pin1 -> PEAK) second.
     assert "D4 HP PEAK DBAT" in d.text
@@ -252,7 +252,7 @@ def _native_diode_sch() -> Schematic:
 
 
 def _native_diode_spec():
-    from altium_kicad_cli.sim import assertions
+    from akcli.sim import assertions
     return assertions.SimSpec(
         stimuli=[{"kind": "vsource", "name": "Vin", "node": "HP",
                   "value": "SIN(0 1 10k)"}],
@@ -261,7 +261,7 @@ def _native_diode_spec():
 
 
 def test_deck_native_diode_sim_params_is_modeled():
-    from altium_kicad_cli.sim import deck as deckmod
+    from akcli.sim import deck as deckmod
     d = deckmod.build(_native_diode_sch(), _native_diode_spec())
     # element references a synthesized model name; the matching card is injected.
     assert "D4 HP PEAK AKCLI_D4" in d.text
@@ -274,7 +274,7 @@ def test_live_native_diode_sim_params_charges_positive(tmp_path):
     # The end-to-end proof of the round-trip fix: a bare Sim.Device=D + Sim.Params
     # simulates (the diode conducts, peak detector charges positive) instead of
     # emitting a modelless element ngspice rejects with 'circuit not parsed'.
-    from altium_kicad_cli.sim import deck as deckmod, engine as engine_mod
+    from akcli.sim import deck as deckmod, engine as engine_mod
     d = deckmod.build(_native_diode_sch(), _native_diode_spec())
     res = engine_mod.run(
         d.text, ["run", "meas tran vpk MAX v(PEAK)"],
@@ -289,7 +289,7 @@ def test_live_native_diode_sim_params_charges_positive(tmp_path):
 def test_live_half_wave_rectifier_charges_positive(tmp_path):
     # The end-to-end proof of item 1: correct anode/cathode order => the peak
     # detector charges POSITIVE. Reversed polarity would drive it negative.
-    from altium_kicad_cli.sim import deck as deckmod, engine as engine_mod
+    from akcli.sim import deck as deckmod, engine as engine_mod
     d = deckmod.build(_rectifier_sch(), _rectifier_spec())
     res = engine_mod.run(
         d.text, ["run", "meas tran vpk MAX v(PEAK)", "meas tran vmin MIN v(PEAK)"],
@@ -426,7 +426,7 @@ def test_sim_live_wave_path_with_spaces(tmp_path):
 # measured-value table: a two-sided window shows BOTH bounds (offline)
 # --------------------------------------------------------------------------- #
 def test_bound_desc_two_sided_window_shows_both_bounds():
-    from altium_kicad_cli.commands import sim as sim_cmd
+    from akcli.commands import sim as sim_cmd
     assert sim_cmd._bound_desc({"ge": 3.0, "le": 3.6}) == ">= 3 & <= 3.6"
     assert sim_cmd._bound_desc({"gt": 0.35}) == "> 0.35"
     assert sim_cmd._bound_desc({"approx": 1.65, "tol": 0.02}) == "~1.65 (tol 2%)"
@@ -435,8 +435,8 @@ def test_bound_desc_two_sided_window_shows_both_bounds():
 def test_measured_table_window_fail_shows_the_upper_half_too():
     # Value 3.8 fails the 'le 3.6' side; the table must not print only '>= 3'
     # next to a FAIL verdict (the earlier first-key-wins bug).
-    from altium_kicad_cli.commands import sim as sim_cmd
-    from altium_kicad_cli import report as _report
+    from akcli.commands import sim as sim_cmd
+    from akcli import report as _report
 
     class _Spec:
         asserts = [{"name": "v33", "meas": "MAX v(x)", "ge": 3.0, "le": 3.6}]

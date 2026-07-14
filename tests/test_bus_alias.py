@@ -28,7 +28,7 @@ from __future__ import annotations
 import uuid as _uuid
 from pathlib import Path
 
-from altium_kicad_cli.readers import kicad as kreader
+from akcli.readers import kicad as kreader
 
 _ROOT_UUID = "ba000000-0000-4000-8000-000000000000"
 _SHEET_UUID = "ba000000-0000-4000-8000-000000000999"

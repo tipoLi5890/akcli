@@ -1,14 +1,14 @@
 {
-  "name": "altium-kicad",
+  "name": "akcli",
   "owner": {
     "name": "Li, ching yu"
   },
-  "description": "Altium + KiCad EDA toolkit as a Claude Code plugin: read Altium .SchDoc and KiCad .kicad_sch with no EDA install, run ERC/design checks, draw KiCad.",
+  "description": "AI-native KiCad design agent (zero-dependency Python CLI + Claude Code plugin): author and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source real parts and fetch datasheets, and import Altium .SchDoc/.SchLib/.PcbDoc — no Altium or KiCad install required.",
   "plugins": [
     {
-      "name": "altium-kicad",
+      "name": "akcli",
       "source": "./",
-      "description": "Dual-format EDA toolkit + Claude Code plugin: read Altium binary .SchDoc and KiCad .kicad_sch with no EDA install, run ERC/design checks, draw KiCad. Built for AI coding agents."
+      "description": "AI-native KiCad design agent (zero-dependency Python CLI + Claude Code plugin): author and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source real parts and fetch datasheets, and import Altium .SchDoc/.SchLib/.PcbDoc — no Altium or KiCad install required."
     }
   ]
 }

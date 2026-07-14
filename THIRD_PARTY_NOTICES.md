@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-`altium-kicad-cli` is licensed under the MIT License (see [LICENSE](LICENSE)) and ships **zero bundled
+`akcli` is licensed under the MIT License (see [LICENSE](LICENSE)) and ships **zero bundled
 third-party source code**. It has **no runtime dependencies** (Python standard library only).
 
 This file records the **attribution chain** for projects that were used as **independent-design
@@ -100,7 +100,7 @@ SOFTWARE.
 
 ## Vendored third-party source — JLC2KiCadLib (MIT)
 
-`src/altium_kicad_cli/_vendor/jlc2kicadlib/` contains the conversion core of
+`src/akcli/_vendor/jlc2kicadlib/` contains the conversion core of
 **JLC2KiCadLib** by **TousstNicolas**, vendored under its MIT license
 (<https://github.com/TousstNicolas/JLC2KiCad_lib>, commit `48d36032…`; the
 upstream LICENSE is preserved verbatim in that directory and reproduced below,
@@ -140,7 +140,7 @@ SOFTWARE.
 
 ## Network services
 
-Beyond the vendored code above, `altium-kicad-cli` bundles no third-party
+Beyond the vendored code above, `akcli` bundles no third-party
 source. The `jlc` feature queries the following HTTP services over the network.
 
 ### jlcsearch (tscircuit) — MIT

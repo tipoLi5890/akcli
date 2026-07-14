@@ -1,4 +1,4 @@
-"""Test package for altium-kicad-cli.
+"""Test package for akcli.
 
 Ensures the in-repo ``src/`` layout is importable when the package has not been
 installed (editable). Harmless when it has been installed via ``pip install -e .``.

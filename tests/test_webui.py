@@ -22,10 +22,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.calc import CALCS
-from altium_kicad_cli.calc.opsmap import MAPPABLE
-from altium_kicad_cli.webui import page
-from altium_kicad_cli.webui.server import (
+from akcli.calc import CALCS
+from akcli.calc.opsmap import MAPPABLE
+from akcli.webui import page
+from akcli.webui.server import (
     Dash, _bind, _is_local_host, _make_handler, _origin_ok, _Server, _Watcher,
 )
 
@@ -198,7 +198,7 @@ def test_calc_ops_export(env):
     doc = json.loads(body)
     assert status == 200 and doc["protocol_version"] == 1
     assert [o["op"] for o in doc["ops"]] == ["place_led_indicator"]
-    from altium_kicad_cli.ops import expand_macros
+    from akcli.ops import expand_macros
     assert any(o.get("lib_id") == "Device:LED"
                for o in expand_macros(doc)["ops"])
 
@@ -276,7 +276,7 @@ def test_live_bom_offline_and_checked(env, calc_only_port, monkeypatch):
     assert not any(r.startswith("#") for t in refs for r in t)   # no #PWR
 
     # checked: catalog data via (monkeypatched) search layer
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     monkeypatch.setattr(
         parts_search, "get",
         lambda lcsc, **k: parts_search.Part(
@@ -302,7 +302,7 @@ DEVICE_SYM = (Path(__file__).parent / "fixtures" / "kicad" / "symbols"
 def _overlap_sch(tmp_path: Path) -> Path:
     """A .kicad_sch with two overlapping resistors — yields a positioned
     LAYOUT_SYMBOL_OVERLAP finding (pos in mils, root frame)."""
-    from altium_kicad_cli.writers import kicad as kw
+    from akcli.writers import kicad as kw
     tgt = tmp_path / "overlap.kicad_sch"
     tgt.write_text(
         '(kicad_sch (version 20231120) (generator "akcli") '
@@ -318,7 +318,7 @@ def _overlap_sch(tmp_path: Path) -> Path:
 
 
 def test_api_findings_offline_positions(tmp_path):
-    from altium_kicad_cli.checks import layout
+    from akcli.checks import layout
     tgt = _overlap_sch(tmp_path)
     sdir = tmp_path / "state"
     sdir.mkdir()
@@ -381,8 +381,8 @@ def test_live_bom_datasheet_links(env, monkeypatch):
     """?check=1 attaches a per-line datasheet link (pdf/page), tolerating
     per-line resolver failures; the offline path never resolves."""
     port, *_ = env
-    from altium_kicad_cli.parts import bom_jlc
-    from altium_kicad_cli.parts import datasheet as ds_mod
+    from akcli.parts import bom_jlc
+    from akcli.parts import datasheet as ds_mod
 
     def fake_check(sch, **k):
         return [
@@ -549,7 +549,7 @@ def test_export_svgs_failure_and_timeout(tmp_path, monkeypatch):
     # a hung kicad-cli: TimeoutExpired -> ([], []) + published banner state
     def hang(*a, **k):
         raise subprocess.TimeoutExpired(cmd="kicad-cli", timeout=60)
-    import altium_kicad_cli.webui.server as server_mod
+    import akcli.webui.server as server_mod
     monkeypatch.setattr(server_mod.subprocess, "run", hang)
     v0 = dash.state["version"]
     assert w._export_svgs(2) == ([], [])
@@ -685,8 +685,8 @@ def test_sse_unsubscribes_dropped_client():
 
 def test_live_bom_error_paths(env, monkeypatch):
     port, *_ = env
-    from altium_kicad_cli.parts import bom_jlc
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import bom_jlc
+    from akcli.parts import search as parts_search
 
     # network down -> 502 with a clean message (no traceback leak)
     def net_down(*a, **k):

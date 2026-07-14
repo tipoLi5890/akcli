@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions & discussion
-    url: https://github.com/tipoLi5890/altium-kicad-cli/discussions
+    url: https://github.com/tipoLi5890/akcli/discussions
     about: Ask usage questions, share ideas, or discuss the project. Please use Discussions instead of opening an issue for non-bugs.
   - name: Report a security vulnerability
-    url: https://github.com/tipoLi5890/altium-kicad-cli/security/policy
+    url: https://github.com/tipoLi5890/akcli/security/policy
     about: Please report security issues privately via the security policy — do not open a public issue.

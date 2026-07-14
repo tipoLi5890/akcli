@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.sim import assertions as sa
+from akcli.errors import AkcliError
+from akcli.sim import assertions as sa
 
 
 def _write(tmp_path, doc, name="sim.json") -> str:
@@ -539,7 +539,7 @@ def test_sim_schema_packaged_mirror_identical():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     a = (root / "schemas" / "sim.schema.json").read_text()
-    b = (root / "src" / "altium_kicad_cli" / "schemas" / "sim.schema.json").read_text()
+    b = (root / "src" / "akcli" / "schemas" / "sim.schema.json").read_text()
     assert a == b
 
 

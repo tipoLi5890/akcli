@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes to `altium-kicad-cli` are documented here. The format is based on
+All notable changes to `akcli` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Versioning policy
 
-`altium-kicad-cli` ships **three** version numbers; this section is their contract.
+`akcli` ships **three** version numbers; this section is their contract.
 
 - **Package version (SemVer `MAJOR.MINOR.PATCH`).** The single source of truth is
   `pyproject.toml`; `tools/sync_version.py` stamps it into `.claude-plugin/plugin.json`,
@@ -29,6 +29,75 @@ All notable changes to `altium-kicad-cli` are documented here. The format is bas
   **not** bump `protocol_version`.
 
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
+
+## [0.7.0] - 2026-07-14
+
+### Changed
+- **Renamed the project to `akcli`** — the distribution, the Python import
+  package (`altium_kicad_cli` → `akcli`), and the Claude Code / Codex plugin
+  name. The `akcli` CLI command is unchanged. Positioning is now stated
+  honestly: an **AI-native KiCad design agent** (KiCad is the writable target;
+  Altium `.SchDoc`/`.SchLib`/`.PcbDoc` are read/imported into the same model,
+  with an optional Windows live bridge to a running Altium instance) — not a
+  symmetric Altium↔KiCad converter. The config file is now `akcli.toml`; the
+  legacy `altium-kicad-cli.toml` is still read as a fallback. Import sites must
+  update `import altium_kicad_cli` → `import akcli`. Plugin/marketplace name and
+  the `/<plugin>:` command namespace are now `akcli` (install with
+  `akcli@akcli`).
+- **ROADMAP.md rewritten around the repositioning** — re-anchored from the stale
+  "v0.1.0" snapshot to v0.6.0 reality: an honest shipped-history table (the
+  planned "v0.5 Altium alive" arc was displaced by KiCad-native depth), ~8
+  silently-completed items acknowledged (net-diff delta, waivers, fuzzing,
+  kicad-cli parity, BOM pricing, SPICE→full sim, hierarchical write, watch→view),
+  forward milestones re-planned (v0.7 agent-contract completeness → v1.0), the
+  Altium-interop items demoted to a demand-driven optional track, and the
+  PyPI/MCP deferrals recorded as decisions. README roadmap sections (en/zh-Hant/
+  zh-Hans) synced.
+
+### Added
+- **`akcli doctor`** — one-shot environment report (python / akcli install /
+  packaged schemas / kicad-cli / ngspice / config, opt-in `--network` probe of
+  the jlc endpoint), each probed exactly the way the features discover them,
+  with a remediation hint per missing item. `--require kicad-cli,ngspice,...`
+  turns it into a CI gate (exit 1 on a missing capability).
+- **`akcli-setup` skill** (9 skills now) — probe-first environment setup and
+  repair: drives `akcli doctor`, per-OS remediation for kicad-cli/libngspice/
+  network/config, PEP 668 guidance, and a failure-mode quick table.
+- **JLCPCB manufacturing-handoff docs** — `docs/jlc.md` and the
+  `akcli-jlcpcb-capabilities` skill now cover producing all four order
+  artifacts from KiCad: headless `kicad-cli` Gerber/drill/CPL exports (flags
+  verified on KiCad 10) + `akcli jlc bom --csv` for the BOM, the CPL header
+  renames JLCPCB expects, and links to JLCPCB's own KiCad 8 GUI guides.
+
+### Changed
+- **README (en/zh-Hant/zh-Hans) restructured KiCad-first** — the body now leads
+  with authoring (op-list write → checks → sim → parts → calculators), reading
+  moves late, and "Read Altium files" became **"Import Altium designs"** with
+  the read-only wording clarified (file access read-only; the optional live
+  bridge drives a running instance). Highlights re-led with the agent-defining
+  bullets (AI-agent native, net-diff rails, sim).
+- **One kicad-cli discovery ladder** — `drivers.kicad_cli.find()` (KICAD_CLI
+  env → PATH → known bundle/install locations, Windows versions numerically
+  sorted) now backs the advisory ERC, the `view live` exporter, and
+  `akcli doctor`. Real fix: advisory ERC after `draw --apply` previously
+  probed PATH only and silently skipped on bundle-only installs (macOS).
+- **docs-conformance gate widened** to `INSTALL.md` and `ROADMAP.md` (it
+  immediately caught a stale historical calculator count); `INSTALL.md`'s
+  verify section now leads with `akcli doctor`.
+- **Every skill now carries the `akcli-` prefix** (`akcli-circuit-design`,
+  `akcli-design-calc`, ... `akcli-setup`) so loose-folder installs group
+  together and users can discover them by typing `akcli` — matching the
+  plugin's `/akcli:` command namespace.
+
+### Fixed
+- **`sim/builtin.lib` is now shipped in the wheel** — it is read at runtime via
+  `Path(__file__)`, but `package-data` declared only `webui/*.html` and
+  `schemas/*.json`, so a non-editable (pip) install had no builtin SPICE models
+  and `akcli sim` with a builtin comparator/555/phototransistor failed. Added
+  `akcli.sim = ["*.lib"]` (and the vendored JLC2KiCadLib `LICENSE`/`PROVENANCE`
+  for compliance); a fresh-wheel install now loads all three builtin subckts. A
+  packaging test asserts every `Path(__file__)`-loaded resource is declared.
+  (Pre-existing gap, surfaced by fresh-wheel verification during the rename.)
 
 ## [0.6.0] - 2026-07-13
 
@@ -85,7 +154,7 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
   positions coverage was extended: the `intent`, `bom`, and `libsync` checkers now attach structured
   `pos`/`anchors` to their findings (SARIF fingerprints stay byte-stable for genuinely positionless
   cases).
-- **CI: mypy beachhead extended to `src/altium_kicad_cli/calc/`** (added to `[tool.mypy] files` in
+- **CI: mypy beachhead extended to `src/akcli/calc/`** (added to `[tool.mypy] files` in
   `pyproject.toml` — enforced by the existing bare-`mypy` CI step) alongside `parts/`.
 - **CI: GitHub Actions bumped** to current major versions (`actions/checkout` v7, `setup-python` v6,
   `setup-node` v6, `upload-artifact` v7, `download-artifact` v8, `softprops/action-gh-release` v3),
@@ -280,7 +349,7 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
   (unplaced units of a multi-unit part, `.kicad_sch` only; waiver token
   `unplaced_unit`).
 - **Configurable schematic grid** — `[project] grid` in
-  `altium-kicad-cli.toml` (bare number = mils, or `"50mil"`/`"1.27mm"`/
+  `akcli.toml` (bare number = mils, or `"50mil"`/`"1.27mm"`/
   `"0.5mm"`; default 50 mil); `check --nets` compares in exact integer
   nanometres, so metric grids are first-class.
 - **Bus-entry connectivity gate** — wires may terminate on a bus entry's
@@ -313,7 +382,7 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
   job, and a wheel-smoke job (build → install into a fresh venv →
   `akcli --version && akcli ops list && akcli ops template add_wire`);
   the ops schema ships inside the wheel
-  (`altium_kicad_cli/schemas/`, repo-root `schemas/` stays canonical).
+  (`akcli/schemas/`, repo-root `schemas/` stays canonical).
 - **`akcli arrange <sch>`** — closes the layout loop: nudges **free**
   components (no wire endpoints or label anchors on any pin — moving
   anchored parts would strand their connectivity) until no symbol boxes
@@ -646,7 +715,7 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 - **`akcli jlc add` is back — in-process, zero-install:** LCSC → KiCad symbol/footprint/3D
   conversion now runs inside akcli via the vendored MIT conversion core of
   **JLC2KiCadLib** (TousstNicolas; license + provenance in
-  `src/altium_kicad_cli/_vendor/jlc2kicadlib/` and `THIRD_PARTY_NOTICES.md`). Upstream's two
+  `src/akcli/_vendor/jlc2kicadlib/` and `THIRD_PARTY_NOTICES.md`). Upstream's two
   dependencies are deliberately not vendored: `requests` is replaced by a stdlib shim and the
   GPLv3 `KicadModTree` by a clean-room `.kicad_mod` writer that emits the modern
   `(footprint ...)` dialect. `--place` emits a `place_component` op-list as before; no external
@@ -802,4 +871,4 @@ Not yet published to PyPI; install from source (see `INSTALL.md`).
 - Baselines at the first tagged release: package `0.1.0`, `schema_version = "1.0"`,
   `protocol_version = 1`.
 
-[Unreleased]: https://github.com/tipoLi5890/altium-kicad-cli/commits/main
+[0.7.0]: https://github.com/tipoLi5890/akcli/commits/main

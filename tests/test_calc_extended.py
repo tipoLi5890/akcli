@@ -12,9 +12,9 @@ import math
 
 import pytest
 
-from altium_kicad_cli import cli, ops
-from altium_kicad_cli.calc import CALCS, CalcError, compute
-from altium_kicad_cli.calc import opsmap
+from akcli import cli, ops
+from akcli.calc import CALCS, CalcError, compute
+from akcli.calc import opsmap
 
 
 def res(name, **kw):

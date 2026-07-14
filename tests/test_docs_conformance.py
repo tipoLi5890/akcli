@@ -1,7 +1,7 @@
 """Documentation-conformance gate — the anti-drift CI net.
 
-Two static gates over the human-facing docs (``README.md``, the two localized
-READMEs, ``docs/*.md`` and ``skills/*/SKILL.md``); neither runs a handler,
+Two static gates over the human-facing docs (``README.md``, ``INSTALL.md``,
+``ROADMAP.md``, the two localized READMEs, ``docs/*.md`` and ``skills/*/SKILL.md``); neither runs a handler,
 touches the network, or starts an engine:
 
 * **Fence gate.** Every fenced ``akcli …`` command line is shlex-split (angle
@@ -36,7 +36,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def _doc_files() -> list[Path]:
-    files = [_ROOT / "README.md"]
+    files = [_ROOT / "README.md", _ROOT / "INSTALL.md", _ROOT / "ROADMAP.md"]
     files += sorted((_ROOT / ".github").glob("README.zh-*.md"))
     files += sorted((_ROOT / "docs").glob("*.md"))
     files += sorted((_ROOT / "skills").glob("*/SKILL.md"))
@@ -132,7 +132,7 @@ def _fence_cases() -> list[tuple[str, int, str]]:
     "rel,lineno,raw", _fence_cases(), ids=lambda v: v if isinstance(v, str) else str(v)
 )
 def test_fenced_commands_are_valid(rel: str, lineno: int, raw: str) -> None:
-    from altium_kicad_cli.cli import build_parser
+    from akcli.cli import build_parser
 
     parser = build_parser()
     where = f"{rel}:{lineno}"
@@ -165,8 +165,8 @@ def test_fenced_commands_are_valid(rel: str, lineno: int, raw: str) -> None:
 # count gate
 # --------------------------------------------------------------------------- #
 def _registry_counts() -> dict[str, int]:
-    from altium_kicad_cli import ops
-    from altium_kicad_cli.calc import CALCS
+    from akcli import ops
+    from akcli.calc import CALCS
 
     return {
         "ops": len(ops.OP_NAMES),

@@ -101,7 +101,7 @@ label (the facing-pin pattern below).
 | `place_crystal` | `x_mil, y_mil, in_net, out_net` | crystal + two load caps to `gnd_net` (`designators`/`value`/`load_c`/`spacing_mil` optional) — ST AN2867 topology |
 
 `akcli ops list` prints them under the macro section; `akcli ops template
-place_divider` emits a skeleton. `akcli calc <design-calc> --ops` emits these
+place_divider` emits a skeleton. `akcli calc <akcli-design-calc> --ops` emits these
 macros directly (placeholder net names — edit them, then `akcli plan`), and
 the validator accepts un-expanded macro documents.
 
@@ -333,4 +333,4 @@ them exactly:
 ```
 
 More patterns (LDO block, decoupling, connector fanout, multi-unit gates) live
-in the `schematic-authoring` skill.
+in the `akcli-schematic-authoring` skill.

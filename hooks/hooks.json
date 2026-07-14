@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"import sys; sys.stderr.write('warn: altium-kicad needs Python>=3.11; akcli auto-selects a newer interpreter if present\\n') if sys.version_info < (3,11) else None\"; exit 0"
+            "command": "python3 -c \"import sys; sys.stderr.write('warn: akcli needs Python>=3.11; akcli auto-selects a newer interpreter if present\\n') if sys.version_info < (3,11) else None\"; exit 0"
           }
         ]
       }

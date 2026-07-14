@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli._vendor.jlc2kicadlib import _http, _kmt
-from altium_kicad_cli.drivers import jlc2kicad
-from altium_kicad_cli.readers import kicad_lib, sexpr
+from akcli._vendor.jlc2kicadlib import _http, _kmt
+from akcli.drivers import jlc2kicad
+from akcli.readers import kicad_lib, sexpr
 
 FIX = Path(__file__).parent / "fixtures" / "jlc"
 SVGS = FIX / "C25804_svgs.json"

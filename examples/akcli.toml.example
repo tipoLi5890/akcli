@@ -1,0 +1,29 @@
+# akcli.toml — reference configuration
+#
+# Copy to your project root as `akcli.toml`. `akcli` discovers it by walking up from the
+# current directory; override with `-C/--config <path>`. Paths are resolved relative to THIS file's
+# directory. Unknown keys are rejected with ERROR: BAD_CONFIG.
+
+[project]
+# Designator of the MCU whose pin->net mapping `akcli pinmap` reports.
+mcu_designator = "U3"
+
+# One [[rail]] table per power rail. `akcli power` enumerates rails and sanity-checks voltages;
+# `akcli check` uses rail names for net-name-based power/ground detection.
+[[rail]]
+name = "V3V3"
+voltage = 3.3
+tolerance_pct = 5
+
+# Input file locations, resolved relative to this file's directory.
+[paths]
+schematic = "hardware/altium/insole/main.SchDoc"
+dts       = "firmware/boards/ebyte/e73_2g4m08s1e/e73_2g4m08s1e.dts"
+pinout_md = "hardware/docs/pinout.md"
+
+# ERC waivers suppress a specific rule on a specific net, with a recorded reason. Each waiver is a
+# [[erc_waiver]] table. Waived findings are downgraded to NOTE and tagged with the reason.
+[[erc_waiver]]
+net    = "LED1_GPIO_RD"
+rule   = "driver_conflict"
+reason = "LED1 shares MCP73831 open-drain STAT (P0.25) by design; FW reads it as input"

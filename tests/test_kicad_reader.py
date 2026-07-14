@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.readers.kicad` (SPEC §3.4).
+"""Tests for :mod:`akcli.readers.kicad` (SPEC §3.4).
 
 Parses the synthetic KiCad 7 and KiCad 8 R-divider fixtures into the normalized
 model and asserts:
@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import model
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import kicad
+from akcli import model
+from akcli.errors import AkcliError
+from akcli.readers import kicad
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 V7 = FIX / "board_v7.kicad_sch"
@@ -244,7 +244,7 @@ def test_duplicate_designator_kept_as_distinct_component(tmp_path):
     assert [c.parameters["akcli_duplicate"] for c in dups] == ["R5@dup1"]
     assert any("duplicate designator 'R5'" in w for w in sch.warnings)
 
-    from altium_kicad_cli.checks import bom
+    from akcli.checks import bom
     codes = {f.code for f in bom.run(sch)}
     assert "BOM_DUPLICATE_DESIGNATOR" in codes
 
@@ -266,7 +266,7 @@ def test_multi_unit_placements_merge_without_warning(tmp_path):
     assert sorted(pin.number for pin in u1s[0].pins) == ["1", "2"]
     assert sch.warnings == []
 
-    from altium_kicad_cli.checks import bom
+    from akcli.checks import bom
     assert "BOM_DUPLICATE_DESIGNATOR" not in {f.code for f in bom.run(sch)}
 
 

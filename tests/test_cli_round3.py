@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
+from akcli.cli import main
+from akcli.errors import EXIT
 
 FIXTURES = Path(__file__).parent / "fixtures"
 V8 = FIXTURES / "kicad" / "board_v8.kicad_sch"
@@ -263,14 +263,14 @@ def test_relink_symbols_only_scopes_and_applies(tmp_path, capsys):
 # jlc bom --csv (offline: injected finder)
 # --------------------------------------------------------------------------- #
 def _catalog_part(lcsc: str):
-    from altium_kicad_cli.parts.search import Part
+    from akcli.parts.search import Part
     return Part(lcsc=lcsc, mpn="0402WGF1002TCE", description="10k 1% 0402",
                 package="0402", stock=5000, price=0.001, basic=True,
                 datasheet=None, category="Resistors", attributes={})
 
 
 def test_jlc_bom_csv_golden(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     monkeypatch.setattr(parts_search, "get", lambda lcsc, **k: _catalog_part(lcsc))
     monkeypatch.setattr(parts_search, "search", lambda q, **k: [])
 
@@ -297,7 +297,7 @@ def test_jlc_bom_csv_golden(tmp_path, capsys, monkeypatch):
 
 
 def test_jlc_bom_csv_stdout_is_pure_csv(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     monkeypatch.setattr(parts_search, "get", lambda lcsc, **k: _catalog_part(lcsc))
     monkeypatch.setattr(parts_search, "search", lambda q, **k: [])
     tgt = _copy_v8(tmp_path)

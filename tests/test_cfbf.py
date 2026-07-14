@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import ERROR_CODES, AkcliError
-from altium_kicad_cli.readers import _cfbf
-from altium_kicad_cli.readers.altium_records import parse_records
+from akcli.errors import ERROR_CODES, AkcliError
+from akcli.readers import _cfbf
+from akcli.readers.altium_records import parse_records
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 GEN = FIX / "_gen"

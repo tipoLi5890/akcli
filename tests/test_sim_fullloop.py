@@ -35,8 +35,8 @@ threshold, (2) a regenerative HIGH snap far faster than the RC alone, and
 (3) a release threshold shifted from the attack threshold by the ``R4/R5``
 ratio predicted by the non-inverting Schmitt relation.
 
-See :mod:`altium_kicad_cli.sim.deck`, :mod:`altium_kicad_cli.sim.models`
-(``resolve``/``builtin.lib``) and :mod:`altium_kicad_cli.sim.engine`.
+See :mod:`akcli.sim.deck`, :mod:`akcli.sim.models`
+(``resolve``/``builtin.lib``) and :mod:`akcli.sim.engine`.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.model import Component, Net, Pin, PinType, Schematic
-from altium_kicad_cli.sim import assertions, deck as deckmod, engine
+from akcli.model import Component, Net, Pin, PinType, Schematic
+from akcli.sim import assertions, deck as deckmod, engine
 
 _HAVE_NGSPICE = engine.available() is not None
 _needs_ngspice = pytest.mark.skipif(
@@ -88,7 +88,7 @@ def _loop_schematic() -> Schematic:
     """Build the closed-loop comparator channel as a KiCad-shaped schematic.
 
     Designators are numeric-suffixed (``R1``..``R6``, ``C1``) so the passive
-    prefix+value heuristic in :func:`altium_kicad_cli.sim.models.resolve` models
+    prefix+value heuristic in :func:`akcli.sim.models.resolve` models
     them; ``D1`` carries A/K pin names so its anode/cathode SPICE order is
     derived from the names; ``U1`` is the multi-pin comparator symbol whose
     terminal order is supplied by ``spec.models`` (see :func:`_loop_spec`).

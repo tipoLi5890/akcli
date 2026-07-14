@@ -1,262 +1,201 @@
 # Roadmap
 
-`altium-kicad-cli` (`akcli`) aims to be the **install-free, agent-native bridge between Altium and
-KiCad**: read anything either tool produces (binary `.SchDoc`/`.SchLib`/`.PcbDoc`, S-expression
-`.kicad_sch`/`.kicad_sym`/`.kicad_pcb`) with zero dependencies, verify everything with checks an
-agent can trust and a CI can gate on, draw KiCad schematics deterministically from a versioned
-op-list, and drive a running Altium Designer live on Windows — while never modifying an Altium file
-offline. Every output is typed, versioned, and machine-checkable, because the primary user is an AI
-coding agent shelling out from a pipeline.
+`akcli` is an **AI-native KiCad design agent**: an LLM (or a plain CI pipeline) authors and edits
+`.kicad_sch` from a versioned JSON op-list behind net-diff safety rails, verifies the result with
+checks it can gate on, simulates it on KiCad's bundled ngspice, sources real parts, and imports
+Altium `.SchDoc`/`.SchLib`/`.PcbDoc` into the same normalized model — all with zero dependencies
+and no EDA install. Every output is typed, versioned, and machine-checkable, because the primary
+user is an agent shelling out from a pipeline.
 
-## Where we are (v0.1.0)
+KiCad is the writable target. Altium is an **import source** (plus an optional, experimental
+Windows live bridge into a running Altium instance) — not a symmetric conversion peer. That
+repositioning (2026-07) reshaped this roadmap: the Altium-interop items that earlier milestones
+treated as release-critical now live in a demand-driven optional track.
 
-Shipped and working today:
+## Where we are (v0.7.0)
 
-- **Readers:** Altium `.SchDoc` (components, pins, wires, labels, power ports, footprint chain),
-  text-record `.SchLib`, ASCII `.PcbDoc` sections; KiCad 7/8 `.kicad_sch`/`.kicad_sym`/`.kicad_pcb`
-  via a lossless, bounded, non-recursive S-expression parser (byte-identity round-trip verified).
-- **Analysis:** shared net inference (`netbuild`), `check` (ERC-lite / power / BOM), membership-based
-  `diff`, `pinmap` with DTS / pinout.md expected tables, `export` (protel / kicad / csv).
-- **KiCad writing:** `plan` / `draw` from a `protocol_version 1` op-list — 13 ops, atomic apply with
-  backup, deterministic UUIDv5 idempotency, pure-Python connectivity gate, advisory `kicad-cli` ERC.
-- **Parts:** `jlc search` / `show` (JLCPCB/LCSC catalog lookup; library conversion was dropped when the upstream converters disappeared).
-- **Agent surface:** Claude Code plugin (circuit-design skill + 4 slash commands), stable exit codes
-  0–7, `stdout`-data/`stderr`-logs discipline, `schema_version`-stamped JSON.
+Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
+
+- **KiCad authoring:** `plan`/`draw` from a `protocol_version 1` op-list — **18 ops + 9 macros**
+  (incl. hierarchical `add_sheet`, `rename_net`, cascade delete, multi-unit placement, `mid()`
+  anchors), `akcli new` blank-sheet bootstrap, deterministic UUIDv5 idempotency, atomic apply with a
+  rotated backup stack (`undo --list`/`--steps`), a pure-Python connectivity gate, a before/after
+  **net-membership diff** on every run, and `--apply --strict-nets` refusing named-net
+  splits/merges. `relink-symbols` refreshes stale embedded libraries behind a net-equivalence gate.
+- **Verification:** ERC-lite / power / BOM / nets / geometry / layout / libsync checks,
+  **design-intent assertions** (`nets --intent-snapshot` → `check --intent`, per-net modes +
+  wildcards), checker-agnostic `[[waiver]]` config + `--fail-on`, SARIF/JUnit output, structured
+  `pos`/`anchors` on findings. Net inference is **arbitrated against `kicad-cli`'s own netlister**
+  (a standing parity harness incl. rotation/mirror transforms, label scoping, buses, hierarchy).
+- **Simulation:** `akcli sim` — schematic → SPICE deck → KiCad's bundled libngspice in a
+  crash-isolated, timeout-killed child; `sim.json` assertions (two-sided bounds, multi-analysis),
+  `--sweep` corner matrices, `--deck-only` engine-free mode, floating-node detection with
+  auto-`rshunt`, `fit-diode` datasheet fits written back to KiCad-native `Sim.*` fields.
+- **Parts & manufacturing:** `jlc search`/`show`/`add` (in-process LCSC → KiCad conversion),
+  `jlc bom` purchasability with qty tier pricing + JLCPCB order-CSV export + confidence-gated
+  `--fix`, `jlc datasheet` PDF resolution/fetch (whole-BOM batch, `--resolve-mpn`).
+- **Calculators:** `akcli calc` — 60 standards-cited engineering calculators, engineering-notation
+  inputs, `--ops` bridge into op-lists.
+- **Readers:** KiCad 7–10 S-expression (bounded, non-recursive, hierarchical); Altium binary
+  `.SchDoc` (multi-sheet + `.PrjPcb`), text-record `.SchLib`, `.PcbDoc` ASCII sections **plus
+  binary copper** (`Tracks6`/`Vias6`/`Arcs6`/`Pads6`, cross-validated against KiCad's importer).
+- **Agent surface:** Claude Code / Codex plugin (`akcli`), 9 skills, 4 slash commands, `akcli view`
+  dashboard (hub + calc + live watch with SSE, ERC markers, lint overlay, BOM panel), stable exit
+  codes 0–7, `schema_version`-stamped JSON.
+- **Quality gates:** ~1 880 tests (parser fuzzing, round-trip netlist properties, live ngspice in
+  CI, Windows/macOS/Linux × Python 3.11–3.14), ruff + mypy (parts/ + calc/), a
+  **docs-conformance gate** (every documented command line and count claim is executed/asserted in
+  CI), wheel-install smoke, tag-driven GitHub Releases.
 
 Honest limitations:
 
-- **The writer is flat-only**: it rejects any non-root `instances_path`
-  (`HIERARCHICAL_UNSUPPORTED`). *(Both READERS now follow hierarchy: KiCad `(sheet ...)` since
-  v0.2.0; Altium sheet symbols + `.PrjPcb` since post-v0.3.1.)*
-- **Binary Altium payloads: mostly parsed now.** Binary `.SchLib` symbol records are still
-  refused loudly (exit 5). *(Post-v0.3.1: `Tracks6`/`Vias6`/`Arcs6`/`Pads6` are decoded —
-  cross-validated against KiCad's own importer on real boards; `Fills6`/`Regions6`/`Texts6`/
-  `Polygons6` remain skipped.)*
-- **The Altium live driver is a preview:** the Python bridge is tested, but the DelphiScript half is
-  an unvalidated scaffold (no CJK text, parameters/footprints not applied, no CLI entry point), and
-  "ok" means *ops placed*, not *electrically verified*.
-- **No sheet ops in the writer.** *(v0.2.0 added `delete_component`/`delete_object`/`move_component` and multi-unit `place_component "unit"`.)*
-- **Agents parse some JSON blind:** `check`/`diff`/`pinmap` output has no published schema; `net`/
-  `component` misses exit 0 with only a stderr note. *(v0.2.0: `docs/cli-reference.md` re-synced to
-  the actual `plan`/`draw`/`jlc` surface.)*
-- Not yet tagged or published to PyPI; install from source.
+- **Binary `.SchLib` symbol records are refused loudly** (exit 5); only text-record libraries read.
+- **`.PcbDoc` `Fills6`/`Regions6`/`Texts6`/`Polygons6` are skipped**, not parsed.
+- **The Altium live bridge is an unvalidated scaffold** (Windows + Altium 22+; no CLI entry point,
+  no CJK text, parameters/footprints not applied). It is now an *optional track*, not a milestone.
+- **ERC is ERC-lite:** no full N×N pin-type conflict matrix yet; power checks are net-name +
+  power-port based by design.
+- **`check`/`diff`/`pinmap` findings have no published JSON Schema** (exports and op-lists do);
+  `net <file> NAME` / `component <file> REF` misses exit 0 with a stderr note only.
+- **Not on PyPI — by decision** (2026-07): distribution is GitHub Releases; the release workflow
+  already supports PyPI trusted publishing whenever that decision changes.
+- **MCP server: deferred by decision** — agents drive the plain CLI today.
 
 ## Guiding principles
 
-1. **Read-only Altium offline.** No code path ever writes an Altium file on disk. Altium writes
-   happen only through the live bridge into a running Altium Designer, one undo transaction per
-   op-list, with the user's project snapshotted first.
+1. **KiCad is the writable target; Altium files are never modified.** No code path writes an
+   Altium file on disk. The optional live bridge drives a *running* Altium Designer instead.
 2. **Verify everything.** Dry-run by default, `--apply` is explicit and atomic, every write is
-   re-read and connectivity-gated, and a "0 findings" report always carries its metadata caveats.
-   New write capabilities land together with their verification step.
+   re-read, connectivity-gated, and net-diffed; a "0 findings" report always carries its metadata
+   caveats. New write capabilities land together with their verification step — and where external
+   ground truth exists (`kicad-cli`, ngspice), akcli's own engines are arbitrated against it.
 3. **Zero runtime dependencies.** Python ≥ 3.11 stdlib only. Network code stays isolated under
-   `akcli jlc`; the external `kicad-cli` binary remains optional and advisory.
-4. **Agent-first.** Stable exit codes, one-line `ERROR: CODE:` failures, `schema_version`/
-   `protocol_version` contracts, published JSON Schemas, and docs that never drift from the code.
+   `akcli jlc`; `kicad-cli`/libngspice remain optional, discovered, and advisory.
+4. **Docs that cannot drift.** Every documented command, flag, and count is exercised against the
+   real CLI in CI (the docs-conformance gate). Agent-facing contracts (`schema_version`,
+   `protocol_version`, exit codes) change only with a changelog entry.
 
-## Milestones
+## Shipped milestones (what actually happened)
 
-### Now
+The original v0.2–v0.6 plan and reality diverged: the planned "v0.5 Altium alive / v0.6 ecosystem"
+arc was displaced by KiCad-native depth that proved more valuable in real design sessions. The
+honest history:
 
-#### v0.2 — Agent contract hardening
+| Version | Theme that actually shipped |
+|---|---|
+| v0.2.0 | Editing ops (delete/move/multi-unit), hierarchical KiCad read, agent-contract fixes |
+| v0.3.x | Altium multi-sheet + `.PrjPcb`, `expected` adapters, SARIF/JUnit, binary `.PcbDoc` copper |
+| v0.4.0 | the calculator pack (60 today) + akcli-design-calc skill, unified `view` dashboard, verify/undo, macro ops, nets check, `jlc bom` |
+| v0.5.0 | **Safety-rail release:** net-diff + `--strict-nets`, intent assertions, `mid()` anchors + new macros, `relink-symbols`, `jlc datasheet`, waivers + `--fail-on`, structured finding positions, cli decomposition, transform/netbuild parity fixes, `new` + multi-level undo, bus netlist semantics, ~55× netbuild speedup |
+| v0.6.0 | **Simulation release:** `akcli sim` (deck/engine/models/assertions/sweeps/fit-diode), docs-conformance gate, bus aliases, `--resolve-mpn`, mypy calc/, live ngspice in CI |
+| v0.7.0 | **Identity release:** project renamed to `akcli` (KiCad-first repositioning), `akcli doctor` + akcli-setup skill, `akcli-` prefix on all 9 skills, JLCPCB manufacturing-handoff docs, one kicad-cli discovery ladder, docs gate widened to INSTALL/ROADMAP, README restructured KiCad-first |
+| (pending) | Rename to `akcli` + KiCad-first repositioning; `sim/builtin.lib` packaging fix |
 
-Goal: every output an agent consumes is typed, discoverable, and honest — close the small sharp
-edges before building on them.
+## Milestones ahead
 
-- [ ] Fix `docs/cli-reference.md` drift (`plan`/`draw` take the target positionally with `--ops`;
-      document the whole `jlc` family, `read --md`, `--symbols`) and reference
-      `schemas/ops.capabilities.json` from `SKILL.md` (S)
-- [ ] Machine-detectable misses: `found: false` / distinct exit for `net <file> NAME` and
-      `component <file> REF` lookups; frozen `BRIDGE_BUSY` / `BRIDGE_TIMEOUT` error codes (S)
+### v0.8 — Agent contract completeness
+
+Goal: close the remaining gaps between "an agent can drive it" and "an agent can drive it blind" —
+every consumable output typed, every miss machine-detectable.
+
 - [ ] Publish `findings.schema.json`, `diff.schema.json`, `pinmap.schema.json`, and a draw-result
-      schema, `schema_version`-stamped like the existing exports (M)
-- [x] CFBF DIFAT spillover support (> 109 FAT sectors) so large `.PcbDoc`/`.SchDoc` containers open (S)
-- [x] Multi-unit symbol placement: `unit` field on `place_component` (drop the hard-coded
-      `(unit 1)`) (S) — *shipped in v0.2.0, with unit-true pin semantics across reader/writer/verifier*
-- [x] `akcli expected <file.dts|pinout.md> [-o expected.json]` subcommand wrapping the DTS /
-      pinout.md adapters for the `pinmap --expected` pipeline (S) — *shipped in v0.3.1*
-- [ ] `/circuit-parts` slash command wiring `jlc search → show → add --to kicad --place → plan →
-      draw` into one documented flow (S)
-- [ ] Honest flags and hints: make `draw --dry-run` explicit, add `--no-erc` to skip the advisory
-      `kicad-cli` run, append machine-readable remediation hints to `ERROR:` lines (S)
-- [ ] KiCad 9 read/write fixtures with byte-identity round-trip; adapt `kicad-cli` version gates (M)
+      schema, `schema_version`-stamped and mirrored into the package like the existing schemas (M)
+- [ ] Machine-detectable misses: `found: false` + distinct exit code for `net <file> NAME` and
+      `component <file> REF`; frozen `BRIDGE_BUSY`/`BRIDGE_TIMEOUT` codes (S)
+- [ ] `/circuit-parts` slash command wiring `jlc search → show → add → plan → draw` into one
+      documented flow (S)
+- [ ] PreToolUse hook in the plugin: run `validate_oplist` before any `draw`; warn on `--apply`
+      without a preceding `plan` (S)
+- [ ] Honest flags: `--no-erc` to skip the advisory `kicad-cli` run; machine-readable remediation
+      hints on `ERROR:` lines (S)
 
-**Exit criterion:** an agent can validate every `--json` output against a shipped schema, branch on
-exit/error codes instead of scraping stderr prose, and follow `docs/cli-reference.md` verbatim
-without hitting a nonexistent flag.
+**Exit criterion:** an agent can validate every `--json` output against a shipped schema and branch
+on exit/error codes instead of scraping stderr prose.
 
-#### v0.3 — Whole projects, deeper checks
+### v0.9 — Deeper verification
 
-Goal: real multi-sheet designs produce correct netlists on both sides, and `check` grows from
-ERC-lite into a tunable, CI-consumable rule engine.
+Goal: `check` grows from ERC-lite toward a tunable rule engine, and verification reaches across
+artifacts.
 
-- [x] Hierarchical KiCad **read**: recurse `(sheet)` nodes into a full multi-sheet netlist with
-      correct hierarchical-label scoping (M) — *shipped in v0.2.0 (per-instance namespaces,
-      twice-instantiated sheets, cycle/depth guards)*
-- [x] Altium multi-sheet: RECORD 15 `SheetSymbol` handler plus a `.PrjPcb` project reader (sheet
-      list, `PowerPortNamesTakePriority` and friends) (L) — *shipped post-v0.3.1; real-AD scale
-      validation of sheet-entry positions still pending*
-- [ ] Binary `.SchLib` symbol decoder (framed records with non-zero flag byte: pins + basic
-      graphics) so real vendor libraries read instead of exiting 5 (L)
 - [ ] Full ERC pin-type conflict matrix (KiCad-style N×N, unconnected `POWER_IN`, open-collector
-      mixes) behind the existing 20 %-typed-pins confidence demotion (M)
-- [ ] `[check]` section in `altium-kicad-cli.toml`: per-rule enable/severity, rail current capacity,
-      decoupling requirements, component+pin-level waivers (M)
-- [x] `check --format sarif|junit` output for GitHub code scanning and CI test reporters, built on
-      the v0.2 findings schema (M)
-- [ ] Golden-file regression corpus: frozen `check`/`net`/`diff --json` snapshots over real Altium +
-      KiCad boards, schema-validated in CI (M)
-
-**Exit criterion:** a hierarchical KiCad or Altium project yields the same net membership akcli
-would compute if the design were flattened by hand, and a false ERC finding can be tuned or waived
-in config rather than ignored.
-
-### Next
-
-#### v0.4 — Editing power and op-list authoring
-
-Goal: agents can *fix* a schematic, not just add to it — and authoring an op-list stops being
-hand-computed mil arithmetic.
-
-- [x] Editing ops: `delete_component` / `delete_object` (any node by uuid, covering wires/labels)
-      and a real `move_component` (x/y, properties travel along) (M) — *shipped in v0.2.0*
-- [x] Op-list authoring kit: `docs/op-list-authoring.md` + `akcli ops list` / `ops template <op>`
-      scaffolder (tables drift-guarded against `ops.schema.json`; capabilities matrix shown in
-      `ops list`) — next-free-grid-slot helper still open
-      placement helper (M)
-- [x] `akcli calc`: 56 offline engineering calculators (E-series/IEC 60063 combos, dividers,
-      LM317/FB worst-case, IPC-2221 track width + clearance, via parasitics, fusing, AWG,
-      microstrip/stripline/attenuators, buck/boost, NE555, op-amp, I²C pull-ups, crystal caps,
-      thermal, markings, galvanic) — every result cites its standard/datasheet source; numerics
-      cross-checked against KiCad pcb_calculator readings + published tables; `design-calc` skill (L)
-- [ ] PreToolUse hook in the plugin: run `validate_oplist` before any `draw` invocation and warn on
-      `--apply` without a preceding `plan` (S)
-- [ ] Post-apply connectivity **delta** verification: compute the expected net-membership delta from
-      the op-list, diff before/after reads, exit 6 on unexpected deltas (M)
-
-**Exit criterion:** an agent can misplace a component, then correct it with move/delete ops through
-`plan → draw --apply`, and the apply fails loudly if the write changed any net it should not have.
-
-#### v0.5 — Altium alive
-
-Goal: the Windows live driver graduates from scaffold to supported write path, with the same
-verify-everything posture the KiCad writer already has.
-
-- [ ] Wire the bridge into the CLI: `akcli draw <file>.SchDoc --live` / `plan --live`, using the
-      frozen bridge error codes from v0.2 (M)
-- [ ] Validate and deepen the DelphiScript half on Windows + Altium 22+: CJK/`\uXXXX` text, real
-      footprint/custom parameter setting, Port promotion for net-label scopes, wire-vertex fix (L)
-- [ ] Automatic post-apply live verification: re-export the Altium netlist (`export --format
-      protel` semantics) and stable_id-diff it against the intended ops (M)
-- [ ] Altium bus support: read `Bus`/`BusEntry` records into `netbuild`; implement `add_bus` /
-      `add_bus_entry` in the live driver so `ops.capabilities.json` has no false rows (M)
-- [x] Binary `.PcbDoc` geometry decoders: `Pads6`/`Vias6`/`Tracks6`/`Arcs6` — decoded and
-      cross-validated item-by-item against KiCad's own Altium importer on real boards
-      (778/778 tracks, 20/20 vias, 236/236 arcs, 48/48 pads); fills/regions/texts/polygons
-      remain deferred (L)
-
-**Exit criterion:** an op-list placed live into Altium Designer 22+ from `akcli draw --live` is
-automatically re-exported and net-diffed, and a bus-heavy `.SchDoc` reads with correct connectivity.
-
-#### v0.6 — Cross-validation and ecosystem
-
-Goal: akcli's own analysis is adversarially tested and cross-checked against ground truth, and the
-tool plugs natively into CI, MCP, and costing workflows.
-
-- [ ] `check --xnet`: export `kicad-cli`'s netlist, canonicalize to (designator, pin) membership,
-      diff against `netbuild`'s stable_id sets, report divergences as findings (M)
-- [ ] Parser fuzzing harness (CFBF, `altium_records`, sexpr) seeded from `tests/fixtures`, oracle
-      "AkcliError or clean parse, bounded time/memory", scheduled CI job (M)
-- [ ] Schematic-vs-PCB sync check: `akcli diff sch.kicad_sch board.kicad_pcb` comparing net
-      membership, refdes presence, footprint assignment (M)
-- [ ] Differential-pair and bus continuity checks (`_P`/`_N`, `D+`/`D-`, `D0..D7`) over the existing
+      mixes) behind the existing typed-pins confidence demotion (M)
+- [ ] Schematic-vs-PCB sync check: `akcli diff sch.kicad_sch board.kicad_pcb` — net membership,
+      refdes presence, footprint assignment (M)
+- [ ] Differential-pair / bus continuity checks (`_P`/`_N`, `D+`/`D-`, `D0..D7`) over the existing
       net model, configurable via `[check]` (M)
-- [ ] `akcli mcp`: stdio MCP server exposing read/net/check/diff/pinmap/plan as typed tools (draw
-      excluded or gated, mirroring `/circuit-draw`'s posture) (L)
+- [ ] Golden-file regression corpus: frozen `check`/`net`/`diff --json` snapshots over real boards,
+      schema-validated in CI (M)
 - [ ] GitHub Action: run `check` on changed `.kicad_sch`/`.SchDoc`, `diff` against the base ref,
-      post SARIF annotations surfacing the four metadata caveats (M)
-- [ ] `akcli bom --cost`: join the BOM against JLC/LCSC pricing (qty-aware tiers, Basic/Preferred
-      flags, unmatched-part findings) (M)
-- [ ] `export --format spice`: R/C/L cards from BOM values plus `.SUBCKT` stubs with explicit
-      unmapped-part caveats (M)
+      post SARIF annotations (M)
+- [ ] Sim deepening: behavioral model library growth (op-amps, MOSFETs), `SIM_UNDRIVEN_RAIL`-class
+      diagnostics expansion, waveform panel in the `view` dashboard (M)
 
-**Exit criterion:** a schematic PR can be gated end-to-end by the Action (check + diff + pinmap),
-and akcli's net inference is continuously proven against `kicad-cli` and fuzzed inputs.
+**Exit criterion:** a schematic PR can be gated end-to-end (check + diff + intent + sim
+assertions), and a false finding is tuned or waived in config rather than ignored.
 
-### Later
-
-#### v0.7 — Hierarchy everywhere, library bridge
-
-Goal: writing is no longer flat-only, and users' existing Altium libraries convert offline.
-
-- [ ] Hierarchical KiCad **write**: `add_sheet` / `add_sheet_pin` ops and non-root `instances_path`,
-      verified by the (v0.3) hierarchical reader (L)
-- [ ] Offline `.SchLib → .kicad_sym` conversion with a round-trip fidelity gate (re-read model
-      equivalence: pins, types, geometry within tolerance) — built on the v0.3 binary SchLib
-      decoder, no network, no external converters (L)
-
-**Exit criterion:** an agent can create a sub-sheet, place into it, and convert a vendor `.SchLib`
-to KiCad — all offline, all re-read-verified.
-
-#### v0.8 — See the circuit
+### v0.10 — See the circuit
 
 Goal: humans reviewing agent work get visuals and documents, not just JSON.
 
-- [ ] Pure-stdlib SVG/PNG schematic rendering from the normalized model (components, pin tips,
-      wires, junctions, labels) for before/after review of `draw` (L)
+- [ ] Pure-stdlib SVG schematic rendering from the normalized model (components, pin tips, wires,
+      junctions, labels) for install-free before/after review — today `view live` renders through
+      the optional `kicad-cli` (L)
 - [ ] `akcli doc <file> -o book.md`: pinout book composing per-IC/connector pin tables, rail
-      summary, and BOM (embedding symbols once SVG lands) (M)
-- [ ] `akcli watch`: re-run `check` and diff against the previous state on file change, one JSON
-      event per change, for live agent/human co-editing (M)
+      summary, and BOM (M)
 
-**Exit criterion:** `/circuit-draw` can show a human what it placed, and a design review can start
-from a generated pinout book instead of raw reads.
+**Exit criterion:** `/circuit-draw` can show a human what it placed without any EDA install, and a
+design review can start from a generated pinout book.
 
-#### v0.9 — Layout-aware verification
-
-Goal: verification extends from the schematic to copper.
-
-- [ ] Geometry DRC for `.kicad_pcb` (net-aware clearance, track width, annular ring) driven by
-      `[check]`, KiCad-only until the Altium binary decoders mature (L)
-
-**Exit criterion:** akcli flags a clearance violation in a `.kicad_pcb` that KiCad's own DRC also
-flags, with zero false positives on the golden corpus boards.
-
-#### v1.0 — Contracts frozen, released
+### v1.0 — Contracts frozen, released
 
 Goal: the public surface is stable enough to promise.
 
-- [ ] First tagged release published to PyPI (`pip install altium-kicad-cli`), plugin manifests
-      versioned per the CHANGELOG policy (S)
-- [ ] Contract freeze audit: `schema_version` / `protocol_version` review, doc-vs-code parity check
-      in CI, deprecation policy documented (S)
+- [ ] Contract freeze audit: `schema_version`/`protocol_version` review, deprecation policy
+      documented; extend the docs-conformance gate to the frozen contracts (S)
+- [ ] First PyPI release (`pip install akcli`) — **gated on reversing the standing "GitHub
+      Releases only" decision**; the tag-driven workflow already supports trusted publishing (S)
 
-**Exit criterion:** `pip install altium-kicad-cli && akcli --version` works, and every documented
-command, flag, exit code, and schema is covered by a test that fails on drift.
+**Exit criterion:** every documented command, flag, exit code, and schema is covered by a test
+that fails on drift — and installation is a one-liner on the chosen channel.
+
+### Optional track — Altium interop (demand-driven, currently frozen)
+
+These items were milestone-critical under the old "bridge" positioning; after the KiCad-first
+repositioning they proceed only if real usage pulls them:
+
+- [ ] Binary `.SchLib` symbol decoder (pins + basic graphics) so vendor libraries read instead of
+      exiting 5 (L) — prerequisite for offline `.SchLib → .kicad_sym` conversion with a fidelity gate (L)
+- [ ] `.PcbDoc` remaining binary sections: fills/regions/texts/polygons (L)
+- [ ] Altium `Bus`/`BusEntry` records into `netbuild` (M)
+- [ ] Live bridge graduation: `draw --live` CLI wiring, DelphiScript validation on Windows +
+      Altium 22+, automatic post-apply netlist re-export + diff (L)
+- [ ] Real-AD-scale validation of sheet-entry positions in multi-sheet `.PrjPcb` reads (M)
+
+### Deferred by decision
+
+- **MCP server** (`akcli mcp`) — the plain CLI + plugin skills serve agents today; revisit on demand.
+- **PyPI publishing** — see v1.0; the mechanism is built, the decision is deliberate.
 
 ## Theme tracks
 
-| Track | v0.2–v0.3 (now) | v0.4–v0.6 (next) | v0.7–v1.0 (later) |
+| Track | v0.8 | v0.9–v0.10 | v1.0 / optional |
 |---|---|---|---|
-| **Altium depth** | DIFAT spillover; binary `.SchLib` decoder; RECORD 15 + `.PrjPcb` multi-sheet | `draw --live` CLI; Windows DelphiScript validation; live post-apply verify; bus read/write; binary `.PcbDoc` geometry | `.SchLib → .kicad_sym` offline conversion |
-| **KiCad depth** | Multi-unit `unit` field; KiCad 9 fixtures; hierarchical read | delete/move ops; op-list authoring kit | hierarchical write (`add_sheet`); SVG rendering |
-| **Checks & verification** | ERC pin-type matrix; `[check]` config; golden-file corpus | post-apply delta verify; `--xnet` cross-validation; fuzzing; sch-vs-PCB sync; diff-pair/bus checks | `.kicad_pcb` geometry DRC |
-| **AI-agent experience** | not-found + bridge error codes; findings/diff/pinmap schemas; doc-drift fix; `akcli expected`; honest `--dry-run`/`--no-erc`/hints | PreToolUse op-list hook; `akcli mcp` server | `akcli watch`; contract freeze audit |
-| **Parts & manufacturing** | `/circuit-parts` command | `bom --cost` JLC pricing; SPICE export | pinout book (`akcli doc`) |
-| **Ecosystem & CI** | SARIF/JUnit output | GitHub Action for schematic PRs | PyPI release + tagged v1.0 |
+| **KiCad authoring & safety** | PreToolUse hook, honest flags | — | contract freeze |
+| **Verification & checks** | findings/diff/pinmap schemas | ERC matrix, sch-vs-PCB, diff-pairs, golden corpus, GitHub Action | frozen contracts in CI |
+| **Simulation** | — | behavioral models, waveform panel | — |
+| **Review UX** | — | stdlib SVG render, pinout book | — |
+| **Parts & manufacturing** | `/circuit-parts` command | — | — |
+| **Altium import** | — | — | optional track (SchLib decoder, PcbDoc sections, live bridge) |
 
 ## Non-goals
 
-- **Offline Altium writing.** akcli will never modify a `.SchDoc`/`.SchLib`/`.PcbDoc` on disk.
-  Altium writes go exclusively through the live bridge into a running Altium Designer, where the
-  user's own tool owns the file format and the undo stack.
-- **Replacing full EDA tools.** No interactive editor, no autorouter, no full autolayout — the
-  suggest-position helper stops at "next free grid slot". akcli reads, checks, and makes surgical,
-  verifiable edits; Altium and KiCad remain the design environments.
-- **Whole-design Altium-to-KiCad conversion.** Library-level conversion (v0.7) with a fidelity gate
-  is in scope; "convert my board" pixel-perfect translation of complete projects is not, and both
-  `plugin.json` and `SKILL.md` will keep saying so.
-- **Pixel-perfect visual fidelity.** The SVG renderer (v0.8) targets *reviewable* connectivity-true
-  drawings, not a reproduction of either tool's canvas.
-- **Becoming a dependency-heavy platform.** No third-party runtime packages, no vendored converters,
-  no always-on network features. `akcli jlc` stays the only networked surface.
+- **Offline Altium writing.** akcli never modifies a `.SchDoc`/`.SchLib`/`.PcbDoc` on disk. Altium
+  writes, if ever, go exclusively through the live bridge into a running Altium Designer.
+- **Symmetric Altium↔KiCad conversion.** Altium is an import source. Library-level conversion with
+  a fidelity gate stays in the optional track; "convert my whole board pixel-perfect" is out.
+- **Replacing full EDA tools.** No interactive editor, no autorouter, no autolayout — akcli reads,
+  checks, simulates, and makes surgical, verifiable edits; KiCad remains the design environment.
+- **Pixel-perfect visual fidelity.** The SVG renderer (v0.10) targets *reviewable*,
+  connectivity-true drawings, not a reproduction of either tool's canvas.
+- **Becoming a dependency-heavy platform.** No third-party runtime packages, no always-on network
+  features. `akcli jlc` stays the only networked surface.

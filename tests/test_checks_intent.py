@@ -12,10 +12,10 @@ import json
 
 import pytest
 
-from altium_kicad_cli.checks import intent
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.model import Component, Net, Pin, Schematic
-from altium_kicad_cli.report import Severity
+from akcli.checks import intent
+from akcli.errors import AkcliError
+from akcli.model import Component, Net, Pin, Schematic
+from akcli.report import Severity
 
 
 # ---------------------------------------------------------------------------

@@ -40,7 +40,7 @@ def test_build_system_declares_setuptools_77_floor(pyproject: dict):
 
 def test_core_project_metadata(pyproject: dict):
     proj = pyproject["project"]
-    assert proj["name"] == "altium-kicad-cli"
+    assert proj["name"] == "akcli"
     assert re.fullmatch(r"\d+\.\d+\.\d+", proj["version"])
     assert proj["license"] == "MIT"
     assert proj["requires-python"] == ">=3.11"
@@ -63,8 +63,33 @@ def test_dev_extra_has_the_tools_ci_uses(pyproject: dict):
 
 def test_package_data_declares_shipped_assets(pyproject: dict):
     data = pyproject["tool"]["setuptools"]["package-data"]
-    assert "*.html" in data["altium_kicad_cli.webui"]
-    assert "*.json" in data["altium_kicad_cli.schemas"]
+    assert "*.html" in data["akcli.webui"]
+    assert "*.json" in data["akcli.schemas"]
+    # sim/builtin.lib is read at runtime via Path(__file__); source-tree tests
+    # never notice it missing, only a non-editable wheel install does — so the
+    # declaration itself is the guard against a silently broken `akcli sim`.
+    assert "*.lib" in data["akcli.sim"]
+
+
+def test_runtime_resources_next_to_their_loaders_are_declared():
+    """Every non-.py file a package loads via ``Path(__file__)`` / resources
+    must be covered by a ``package-data`` glob, or a wheel ships without it."""
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    data = tomllib.loads((root / "pyproject.toml").read_text())[
+        "tool"]["setuptools"]["package-data"]
+
+    def covered(pkg: str, filename: str) -> bool:
+        globs = data.get(pkg, [])
+        suffix = "*" + Path(filename).suffix
+        return suffix in globs or filename in globs
+
+    # the loader-backed resources this suite knows about
+    assert covered("akcli.sim", "builtin.lib")
+    assert covered("akcli.webui", "hub.html")
+    assert covered("akcli.schemas", "ops.schema.json")
 
 
 def test_ruff_lint_gate_is_configured(pyproject: dict):
@@ -77,7 +102,7 @@ def test_ruff_lint_gate_is_configured(pyproject: dict):
 
 def test_console_script_entry_points_resolve(pyproject: dict):
     scripts = pyproject["project"]["scripts"]
-    assert set(scripts) == {"akcli", "altium-kicad-cli"}
+    assert set(scripts) == {"akcli", "akcli"}
     for target in scripts.values():
         modname, _, attr = target.partition(":")
         obj = importlib.import_module(modname)

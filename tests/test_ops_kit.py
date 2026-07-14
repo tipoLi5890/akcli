@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from altium_kicad_cli import cli, ops
+from akcli import cli, ops
 
 SCHEMA = json.loads(
     (Path(__file__).parent.parent / "schemas" / "ops.schema.json").read_text()

@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import cli
-from altium_kicad_cli.config import load_config
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.report import Finding, Severity, apply_waivers
+from akcli import cli
+from akcli.config import load_config
+from akcli.errors import AkcliError
+from akcli.report import Finding, Severity, apply_waivers
 
 FIX = Path(__file__).parent / "fixtures"
 SCH = FIX / "t_junction.SchDoc"
@@ -20,7 +20,7 @@ SCH = FIX / "t_junction.SchDoc"
 # config parsing
 # --------------------------------------------------------------------------- #
 def test_load_generic_waivers(tmp_path):
-    cfg_file = tmp_path / "altium-kicad-cli.toml"
+    cfg_file = tmp_path / "akcli.toml"
     cfg_file.write_text(
         '[[waiver]]\ncode = "BOM_MISSING_FOOTPRINT"\nrefs = "U*"\n'
         'severity = "off"\nreason = "no PCB yet"\n\n'
@@ -36,14 +36,14 @@ def test_load_generic_waivers(tmp_path):
 
 
 def test_waiver_requires_code(tmp_path):
-    cfg_file = tmp_path / "altium-kicad-cli.toml"
+    cfg_file = tmp_path / "akcli.toml"
     cfg_file.write_text('[[waiver]]\nseverity = "off"\n', encoding="utf-8")
     with pytest.raises(AkcliError):
         load_config(cfg_file)
 
 
 def test_waiver_bad_severity_rejected(tmp_path):
-    cfg_file = tmp_path / "altium-kicad-cli.toml"
+    cfg_file = tmp_path / "akcli.toml"
     cfg_file.write_text('[[waiver]]\ncode = "X"\nseverity = "bogus"\n', encoding="utf-8")
     with pytest.raises(AkcliError):
         load_config(cfg_file)
@@ -90,7 +90,7 @@ def test_apply_waivers_no_waivers_is_identity():
 # CLI: header accounting + exit semantics
 # --------------------------------------------------------------------------- #
 def _write_cfg(tmp_path: Path, body: str) -> Path:
-    p = tmp_path / "altium-kicad-cli.toml"
+    p = tmp_path / "akcli.toml"
     p.write_text(body, encoding="utf-8")
     return p
 

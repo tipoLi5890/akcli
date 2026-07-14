@@ -14,11 +14,11 @@ from __future__ import annotations
 import uuid as _uuid
 from pathlib import Path
 
-from altium_kicad_cli import ops
-from altium_kicad_cli.readers import kicad as kreader
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.report import Severity
-from altium_kicad_cli.writers import kicad as kw
+from akcli import ops
+from akcli.readers import kicad as kreader
+from akcli.readers import sexpr
+from akcli.report import Severity
+from akcli.writers import kicad as kw
 
 _LIB = """\
 (kicad_symbol_lib (version 20231120) (generator akcli_test)

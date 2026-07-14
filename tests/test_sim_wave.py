@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.sim import wave
+from akcli.errors import AkcliError
+from akcli.sim import wave
 
 # A VERBATIM two-vector transient wrdata sample: ngspice repeats the time
 # (scale) column before each vector, so every row is [t, v(out), t, v(in)].
@@ -148,13 +148,13 @@ def test_ac_scale_column_labelled_frequency(tmp_path):
 # rewrite_wrdata then collapses — proving the literal sample above is faithful.
 # --------------------------------------------------------------------------- #
 _HAVE_NGSPICE = __import__(
-    "altium_kicad_cli.sim.engine", fromlist=["available"]
+    "akcli.sim.engine", fromlist=["available"]
 ).available() is not None
 
 
 @pytest.mark.skipif(not _HAVE_NGSPICE, reason="libngspice not available")
 def test_live_wrdata_round_trip(tmp_path):
-    from altium_kicad_cli.sim import engine
+    from akcli.sim import engine
 
     deck = "\n".join([
         "* wave round-trip",

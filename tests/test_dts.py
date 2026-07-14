@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from altium_kicad_cli import model
-from altium_kicad_cli.adapters import dts
-from altium_kicad_cli.checks import pinmap
-from altium_kicad_cli.config import Config
-from altium_kicad_cli.report import Severity
+from akcli import model
+from akcli.adapters import dts
+from akcli.checks import pinmap
+from akcli.config import Config
+from akcli.report import Severity
 
 # --- synthetic devicetree fixtures -------------------------------------------
 

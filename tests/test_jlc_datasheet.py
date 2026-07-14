@@ -14,11 +14,11 @@ import json
 
 import pytest
 
-from altium_kicad_cli import model
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
-from altium_kicad_cli.parts import datasheet as ds
-from altium_kicad_cli.parts import easyeda
+from akcli import model
+from akcli.cli import main
+from akcli.errors import EXIT
+from akcli.parts import datasheet as ds
+from akcli.parts import easyeda
 
 PDF_URL = "https://atta.szlcsc.com/upload/public/pdf/source/x.pdf"
 PDF_BODY = b"%PDF-1.4\n%fake body\n%%EOF\n"
@@ -234,7 +234,7 @@ def test_cli_network_error_maps_to_exit_7(monkeypatch, capsys):
 
 
 def test_cli_mpn_path_uses_catalog_exact_match(monkeypatch, capsys):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
 
     class _P:
         def __init__(self, lcsc, mpn, stock=10, basic=True):
@@ -280,8 +280,8 @@ def test_cli_schematic_batch(monkeypatch, tmp_path, capsys):
 
 def test_resolve_mpn_only_rows_hit_miss_and_dedupe(monkeypatch):
     """--resolve-mpn helper: one search per distinct MPN, hit + miss rewrite."""
-    from altium_kicad_cli.commands.jlc import _resolve_mpn_only_rows
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.commands.jlc import _resolve_mpn_only_rows
+    from akcli.parts import search as parts_search
 
     class _P:
         def __init__(self, lcsc, mpn, stock=10, basic=True):
@@ -320,8 +320,8 @@ def test_resolve_mpn_only_rows_hit_miss_and_dedupe(monkeypatch):
 def test_resolve_mpn_only_rows_finds_exact_beyond_first_ten(monkeypatch):
     """A short generic MPN whose exact row ranks 11th must still be found:
     the exact-resolution search widens past the old limit=10 cap."""
-    from altium_kicad_cli.commands.jlc import _resolve_mpn_only_rows
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.commands.jlc import _resolve_mpn_only_rows
+    from akcli.parts import search as parts_search
 
     class _P:
         def __init__(self, lcsc, mpn, stock=10, basic=True):
@@ -347,7 +347,7 @@ def test_resolve_mpn_only_rows_finds_exact_beyond_first_ten(monkeypatch):
 
 
 def test_cli_schematic_resolve_mpn_hit_and_miss(monkeypatch, tmp_path, capsys):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
 
     class _P:
         def __init__(self, lcsc, mpn, stock=10, basic=True):
@@ -362,7 +362,7 @@ def test_cli_schematic_resolve_mpn_hit_and_miss(monkeypatch, tmp_path, capsys):
         ], nets=[])
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_text("(kicad_sch)")
-    monkeypatch.setattr("altium_kicad_cli.commands.jlc._load_schematic",
+    monkeypatch.setattr("akcli.commands.jlc._load_schematic",
                         lambda p: sch)
 
     def _search(q, limit=10, cache_dir=None):
@@ -389,14 +389,14 @@ def test_cli_schematic_resolve_mpn_hit_and_miss(monkeypatch, tmp_path, capsys):
 
 def test_cli_schematic_resolve_mpn_flag_off_keeps_old_behavior(
         monkeypatch, tmp_path, capsys):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
 
     sch = model.Schematic(
         source_path="<t>", source_format="kicad",
         components=[_comp("U1", {"MPN": "LM339"})], nets=[])
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_text("(kicad_sch)")
-    monkeypatch.setattr("altium_kicad_cli.commands.jlc._load_schematic",
+    monkeypatch.setattr("akcli.commands.jlc._load_schematic",
                         lambda p: sch)
 
     def _boom(*a, **kw):
@@ -414,14 +414,14 @@ def test_cli_schematic_resolve_mpn_flag_off_keeps_old_behavior(
 
 def test_resolve_mpn_only_rows_network_error_maps_to_exit_7(
         monkeypatch, tmp_path, capsys):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
 
     sch = model.Schematic(
         source_path="<t>", source_format="kicad",
         components=[_comp("U1", {"MPN": "LM339"})], nets=[])
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_text("(kicad_sch)")
-    monkeypatch.setattr("altium_kicad_cli.commands.jlc._load_schematic",
+    monkeypatch.setattr("akcli.commands.jlc._load_schematic",
                         lambda p: sch)
 
     def _net(q, limit=10, cache_dir=None):

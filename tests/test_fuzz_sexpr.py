@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import sexpr
+from akcli.errors import AkcliError
+from akcli.readers import sexpr
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "kicad"
            / "board_v8.kicad_sch").read_text(encoding="utf-8")

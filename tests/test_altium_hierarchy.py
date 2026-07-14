@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent / "fixtures" / "_gen"))
 import altium_fixture  # noqa: E402
 from altium_fixture import SchDocBuilder, write_schdoc  # noqa: E402
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import altium_prj, altium_sch
+from akcli.errors import AkcliError
+from akcli.readers import altium_prj, altium_sch
 
 
 def _child_sheet(port_name: str = "IN") -> SchDocBuilder:

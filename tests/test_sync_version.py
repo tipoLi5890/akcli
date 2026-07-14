@@ -22,9 +22,9 @@ def _make_repo(tmp_path: Path, *, version: str | None, plugin_version=None, mark
     (tmp_path / ".claude-plugin").mkdir(parents=True, exist_ok=True)
 
     if version is None:
-        proj = '[project]\nname = "altium-kicad-cli"\n'
+        proj = '[project]\nname = "akcli"\n'
     else:
-        proj = f'[project]\nname = "altium-kicad-cli"\nversion = "{version}"\n'
+        proj = f'[project]\nname = "akcli"\nversion = "{version}"\n'
     (tmp_path / "pyproject.toml").write_text(proj, encoding="utf-8")
 
     plugin: dict = {"name": "altium-kicad"}

@@ -11,9 +11,9 @@ import json
 
 import pytest
 
-from altium_kicad_cli import cli, model
-from altium_kicad_cli.parts import bom_jlc
-from altium_kicad_cli.parts.search import JlcNetworkError, Part
+from akcli import cli, model
+from akcli.parts import bom_jlc
+from akcli.parts.search import JlcNetworkError, Part
 
 
 def _part(lcsc="C1", mpn="X", stock=1000, basic=False, preferred=False, price=0.01):
@@ -130,7 +130,7 @@ def _write_sch(tmp_path, params_by_ref):
 
 
 def test_cli_exit_semantics(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     monkeypatch.setattr(parts_search, "get",
                         lambda lcsc, **k: _part(lcsc, stock=777))
     monkeypatch.setattr(parts_search, "search", lambda q, **k: [])
@@ -150,7 +150,7 @@ def test_cli_exit_semantics(tmp_path, capsys, monkeypatch):
 
 
 def test_cli_json_shape(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     monkeypatch.setattr(parts_search, "get",
                         lambda lcsc, **k: _part(lcsc, stock=42))
     monkeypatch.setattr(parts_search, "search", lambda q, **k: [])
@@ -167,7 +167,7 @@ def test_cli_json_shape(tmp_path, capsys, monkeypatch):
 
 
 def test_cli_network_error_exits_7(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     def boom(*a, **k):
         raise JlcNetworkError("could not reach jlcsearch: refused")
     monkeypatch.setattr(parts_search, "get", boom)
@@ -214,7 +214,7 @@ def test_totals_aggregation():
 
 
 def test_default_cache_dir_env(monkeypatch, tmp_path):
-    from altium_kicad_cli.parts.search import default_cache_dir
+    from akcli.parts.search import default_cache_dir
     monkeypatch.setenv("AKCLI_JLC_CACHE", str(tmp_path / "jc"))
     assert default_cache_dir() == tmp_path / "jc"
     monkeypatch.setenv("AKCLI_JLC_CACHE", "off")
@@ -305,7 +305,7 @@ def test_suggest_grades_confidence():
 
 
 def test_cli_fix_end_to_end(tmp_path, capsys, monkeypatch):
-    from altium_kicad_cli.parts import search as parts_search
+    from akcli.parts import search as parts_search
     # value "100n" appears in the description and the package matches the
     # footprint -> a HIGH-confidence suggestion, which the default --fix writes
     good = Part(lcsc="C1525", mpn="CL05B104KO5NNNC",

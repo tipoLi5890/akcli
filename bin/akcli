@@ -9,6 +9,6 @@ for c in python3.13 python3.12 python3.11 python3; do
     PY="$c"; break
   fi
 done
-[ -n "$PY" ] || { echo "akcli requires Python >=3.11 (none found). Install python@3.11+ or: pipx install altium-kicad-cli" >&2; exit 1; }
+[ -n "$PY" ] || { echo "akcli requires Python >=3.11 (none found). Install python@3.11+ or: pipx install akcli" >&2; exit 1; }
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PY" -m altium_kicad_cli "$@"
+exec "$PY" -m akcli "$@"

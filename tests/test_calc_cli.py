@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from altium_kicad_cli import cli
+from akcli import cli
 
 
 def test_calc_list(capsys):

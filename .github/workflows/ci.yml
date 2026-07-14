@@ -17,9 +17,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # Fast ruff lint gate — rule selection lives in [tool.ruff] in pyproject.toml.
   # Also runs the mypy beachhead (scope + rationale in [tool.mypy] there):
-  # src/altium_kicad_cli/parts is fully clean, so it is blocking. Widen `files`
+  # src/akcli/parts is fully clean, so it is blocking. Widen `files`
   # in pyproject.toml as further packages are brought up to the same bar; the
-  # next beachhead is src/altium_kicad_cli/calc.
+  # next beachhead is src/akcli/calc.
   # ---------------------------------------------------------------------------
   lint:
     name: ruff lint
@@ -35,7 +35,7 @@ jobs:
         run: ruff check src tests
       - name: Install mypy (dev extra)
         run: python -m pip install -e ".[dev]"
-      - name: mypy (src/altium_kicad_cli/parts beachhead)
+      - name: mypy (src/akcli/parts beachhead)
         run: mypy
 
   # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ jobs:
       - name: Discover libngspice for AKCLI_NGSPICE (only if auto-discovery misses)
         run: |
           set -euo pipefail
-          found="$(python -c 'from altium_kicad_cli.sim import engine; print(engine.available() or "")')"
+          found="$(python -c 'from akcli.sim import engine; print(engine.available() or "")')"
           if [ -n "$found" ]; then
             echo "sim engine auto-discovered libngspice at: $found"
           else
@@ -226,7 +226,7 @@ jobs:
         run: |
           set -euo pipefail
           python -c "
-          from altium_kicad_cli.sim import engine
+          from akcli.sim import engine
           lib = engine.available()
           print('libngspice:', lib)
           assert lib is not None, 'sim engine unavailable in CI: engine.available() returned None'

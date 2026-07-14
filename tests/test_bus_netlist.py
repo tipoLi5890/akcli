@@ -23,8 +23,8 @@ KiCad installed:
 
 from __future__ import annotations
 
-from altium_kicad_cli import model
-from altium_kicad_cli.netbuild import build_nets, expand_bus_vector
+from akcli import model
+from akcli.netbuild import build_nets, expand_bus_vector
 
 
 # --------------------------------------------------------------------------- #

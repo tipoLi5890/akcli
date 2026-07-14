@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.readers.kicad_lib` (SPEC §3.4).
+"""Tests for :mod:`akcli.readers.kicad_lib` (SPEC §3.4).
 
 Covers ``.kicad_sym`` parsing, pin-type / local-coordinate extraction, the
 ``C_Polarized`` ``(extends "C")`` inheritance case, ``resolve`` qualified vs
@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import model, units
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import kicad_lib, sexpr
+from akcli import model, units
+from akcli.errors import AkcliError
+from akcli.readers import kicad_lib, sexpr
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 DEVICE = FIX / "symbols" / "Device.kicad_sym"

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from altium_kicad_cli.checks import bom, intent, libsync
-from altium_kicad_cli.model import Component, Net, Pin, Schematic
-from altium_kicad_cli.report import Finding, Severity, anchor, render
+from akcli.checks import bom, intent, libsync
+from akcli.model import Component, Net, Pin, Schematic
+from akcli.report import Finding, Severity, anchor, render
 
 
 def test_anchor_helper_shape():

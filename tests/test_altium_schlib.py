@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.model import PinType
-from altium_kicad_cli.readers import altium_schlib
+from akcli.errors import AkcliError
+from akcli.model import PinType
+from akcli.readers import altium_schlib
 
 GEN = Path(__file__).resolve().parent / "fixtures" / "_gen"
 if str(GEN) not in sys.path:

@@ -51,7 +51,7 @@ DEVICE_SYM = (Path(__file__).parent / "fixtures" / "kicad" / "symbols"
 def _overlap_target(tmp_path: Path) -> Path:
     """A real .kicad_sch with two overlapping resistors so /api/findings
     returns a positioned LAYOUT_SYMBOL_OVERLAP the lint overlay can mark."""
-    from altium_kicad_cli.writers import kicad as kw
+    from akcli.writers import kicad as kw
     tgt = tmp_path / "t.kicad_sch"
     tgt.write_text(
         '(kicad_sch (version 20231120) (generator "akcli") '
@@ -69,8 +69,8 @@ def _overlap_target(tmp_path: Path) -> Path:
 def _stub_bom_network(monkeypatch) -> None:
     """Make ?check=1 offline: canned lines + a canned datasheet resolver so
     the BOM datasheet-link overlay renders without touching the network."""
-    from altium_kicad_cli.parts import bom_jlc
-    from altium_kicad_cli.parts import datasheet as ds_mod
+    from akcli.parts import bom_jlc
+    from akcli.parts import datasheet as ds_mod
     monkeypatch.setattr(bom_jlc, "check", lambda sch, **k: [
         bom_jlc.BomLine(refs=["R1", "R2"], value="10k", footprint="0603",
                         lcsc="C25804", status="ok")])
@@ -83,7 +83,7 @@ def _stub_bom_network(monkeypatch) -> None:
 
 @pytest.mark.skipif(_missing() is not None, reason=str(_missing()))
 def test_browser_ui(tmp_path, monkeypatch):
-    from altium_kicad_cli.webui.server import Dash, _make_handler
+    from akcli.webui.server import Dash, _make_handler
 
     _stub_bom_network(monkeypatch)
     sdir = tmp_path / "state"

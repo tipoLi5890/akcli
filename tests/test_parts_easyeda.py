@@ -13,7 +13,7 @@ import urllib.error
 
 import pytest
 
-from altium_kicad_cli.parts import easyeda as ee
+from akcli.parts import easyeda as ee
 
 
 # --- canned EasyEDA /components payloads -------------------------------------

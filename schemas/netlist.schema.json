@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://altium-kicad-cli/schemas/netlist.schema.json",
+  "$id": "https://akcli/schemas/netlist.schema.json",
   "title": "AkcliNetlist",
   "description": "Net membership + Altium net-naming rules. Net identity is membership-derived (stable_id = sha1 of sorted (designator,pin) members), NEVER coordinate-derived. Same-name labels/power ports across disjoint clusters MUST merge into one net (the STAT/LED1 fix); naming priority is power-port > net-label > auto; single-pin nets are gated by NetlistSinglePinNets.",
   "type": "object",

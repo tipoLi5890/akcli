@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.sim import engine
+from akcli.sim import engine
 
 _HAVE_NGSPICE = engine.available() is not None
 _needs_engine = pytest.mark.skipif(

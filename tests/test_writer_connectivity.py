@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.writers.connectivity` (SPEC §3.5).
+"""Tests for :mod:`akcli.writers.connectivity` (SPEC §3.5).
 
 The connectivity module is the **primary** post-write gate and MUST run with no
 KiCad installed (pure Python). These tests exercise:
@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.readers.sexpr import dumps, parse
-from altium_kicad_cli.report import Severity
-from altium_kicad_cli.writers import connectivity
+from akcli.readers import sexpr
+from akcli.readers.sexpr import dumps, parse
+from akcli.report import Severity
+from akcli.writers import connectivity
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 V8 = FIX / "board_v8.kicad_sch"

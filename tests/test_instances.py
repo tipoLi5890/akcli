@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.writers.instances` (SPEC §3.5).
+"""Tests for :mod:`akcli.writers.instances` (SPEC §3.5).
 
 Covers the four guarantees the module owes the writer:
 
@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.writers import instances
+from akcli.errors import AkcliError
+from akcli.readers import sexpr
+from akcli.writers import instances
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 V8 = FIX / "board_v8.kicad_sch"

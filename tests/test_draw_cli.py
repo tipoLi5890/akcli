@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
-from altium_kicad_cli.readers import sexpr
+from akcli.cli import main
+from akcli.errors import EXIT
+from akcli.readers import sexpr
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 V8 = FIX / "board_v8.kicad_sch"

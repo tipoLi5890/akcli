@@ -1,6 +1,6 @@
 # Security Policy
 
-`altium-kicad-cli` parses **untrusted binary and text input** (Altium `.SchDoc`/`.SchLib`/`.PcbDoc`
+`akcli` parses **untrusted binary and text input** (Altium `.SchDoc`/`.SchLib`/`.PcbDoc`
 OLE2 containers and KiCad S-expression files) and can **write** KiCad schematics. The threat model and
 the enforced safety limits below are first-class design requirements, not afterthoughts.
 
@@ -40,7 +40,7 @@ already has your filesystem privileges.
 
 ## Enforced safety limits (`safety.py`)
 
-All limits live in one module (`altium_kicad_cli.safety`) and are applied at every read/write boundary.
+All limits live in one module (`akcli.safety`) and are applied at every read/write boundary.
 A violation raises a **structured** `AkcliError` with a stable error code and a non-zero exit code — a
 raw traceback never reaches the agent unless `--debug` is passed.
 

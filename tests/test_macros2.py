@@ -21,12 +21,12 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import ops
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT, AkcliError
-from altium_kicad_cli.readers import kicad as kreader
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.writers import kicad as kwriter
+from akcli import ops
+from akcli.cli import main
+from akcli.errors import EXIT, AkcliError
+from akcli.readers import kicad as kreader
+from akcli.readers import sexpr
+from akcli.writers import kicad as kwriter
 
 _MIN_SYM = """\
 (kicad_symbol_lib (version 20231120) (generator akcli_test)

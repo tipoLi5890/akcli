@@ -14,9 +14,9 @@ import json
 
 import pytest
 
-from altium_kicad_cli import cli
-from altium_kicad_cli.model import Component, Net, Pin, PinType, Schematic
-from altium_kicad_cli.sim import engine
+from akcli import cli
+from akcli.model import Component, Net, Pin, PinType, Schematic
+from akcli.sim import engine
 
 _BOARD = "tests/fixtures/kicad/board_v8.kicad_sch"
 _HAVE_NGSPICE = engine.available() is not None
@@ -118,7 +118,7 @@ def test_sweep_ignored_component_value_warns(monkeypatch, tmp_path, capsys):
     # R1 resolves via Sim.Params, so a component-value --sweep on it changes
     # nothing — every corner is identical. That must raise SIM_SWEEP_IGNORED
     # rather than silently produce a byte-identical matrix.
-    from altium_kicad_cli.commands import sim as sim_cmd
+    from akcli.commands import sim as sim_cmd
 
     def _sch(_p):
         r1 = Component("R1", "Device:R", 0, 0, value="10k",
@@ -148,7 +148,7 @@ def test_sweep_surfaces_deck_build_warnings(monkeypatch, tmp_path, capsys):
     # prints SIM_FLOATING_NODE/SIM_RSHUNT_ADDED, so sweep mode must too (never
     # mask a mis-wire in sign-off mode). A temp sweep keeps it out of the
     # SIM_SWEEP_IGNORED path.
-    from altium_kicad_cli.commands import sim as sim_cmd
+    from akcli.commands import sim as sim_cmd
 
     def _sch(_p):
         r1 = Component("R1", "Device:R", 0, 0, value="10k",

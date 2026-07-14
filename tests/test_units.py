@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from altium_kicad_cli import units
+from akcli import units
 
 
 def test_locked_constants():

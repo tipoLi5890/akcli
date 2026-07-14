@@ -1,13 +1,11 @@
-The SPEC is written. Returning it as my final message.
-
-# altium-kicad-cli — Hardened Implementation SPEC (v1.0, FROZEN-on-merge)
+# akcli — Hardened Implementation SPEC (v1.0, FROZEN-on-merge)
 
 > Single source of truth for implementation agents. Resolves the original plan against 9 expert
 > reviews. Every CRITICAL/HIGH fix is incorporated. Where reviewers disagreed, the decision and
 > rationale are stated inline. Build each file from this document with **no further design decisions**.
 >
-> **Name cascade (LOCKED):** repo + PyPI dist = `altium-kicad-cli`; import package = `altium_kicad_cli`;
-> CLI = `akcli` (long alias `altium-kicad-cli`); plugin name = `altium-kicad`; marketplace name = `altium-kicad`.
+> **Name cascade (LOCKED):** repo + PyPI dist = `akcli`; import package = `akcli`;
+> CLI = `akcli`; plugin name = `akcli`; marketplace name = `akcli`.
 > Python ≥ 3.11, zero **runtime** deps (stdlib only, incl. `tomllib`). Dev/test deps allowed via an extra.
 
 ---
@@ -324,7 +322,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 ```jsonc
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://altium-kicad-cli/schemas/ops.schema.json",   // OWN namespace, no altium-mcp bytes
+  "$id": "https://akcli/schemas/ops.schema.json",   // OWN namespace, no altium-mcp bytes
   "title": "AkcliOpList",
   "type": "object",
   "required": ["protocol_version", "target_format", "ops"],
@@ -393,11 +391,11 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 
 ## 3. COMPLETE FILE MANIFEST
 
-> Path is relative to repo root `../altium-kicad-cli/`. "Tested by" names the test file (every module
+> Path is relative to repo root `../akcli/`. "Tested by" names the test file (every module
 > has a dedicated test; fixtures under `tests/fixtures/`). All readers/writers map exceptions to
 > `errors.py` codes — **a raw traceback never reaches the agent** (unless `--debug`).
 
-### 3.1 Foundation (`src/altium_kicad_cli/` core — authored & FROZEN first)
+### 3.1 Foundation (`src/akcli/` core — authored & FROZEN first)
 
 | File | Purpose | Public API (signatures) | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -406,12 +404,12 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, PROTOCOL_MISMATCH, PATH_OUTSIDE_ROOT, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, BAD_CONFIG`. Exit table: §8 | `test_errors.py` |
 | `safety.py` | hard limits + safe IO helpers used everywhere | `MAX_FILE_BYTES, MAX_SECTORS, MAX_RECORDS, MAX_DIR_ENTRIES, MAX_DECODED_BYTES, MAX_SEXPR_DEPTH, MAX_ATOM_BYTES, MAX_NODES`; `safe_path(base,cand)->Path`; `run_subprocess(argv,timeout,maxout)->CompletedProcess`; `atomic_write_with_backup(path,data,backup_dir)->None` | stdlib `os,subprocess,resource,signal,pathlib,shutil` | `safe_path`: realpath both, reject escapes/symlinks, never expand env from untrusted files; `run_subprocess`: `shell=False`, abs exe, `--` before paths, timeout, output cap; `atomic_write`: snapshot→temp-in-same-dir→fsync→`os.replace` | `test_safety.py`, `test_fuzz_safety.py` |
 | `units.py` | all coordinate conversions + grid + tolerance | `ALTIUM_SCH_MIL_PER_UNIT=10.0`; `MIL_PER_MM=1/0.0254`; `NM_PER_MIL=25400`; `NM_PER_MM=1_000_000`; `altium_to_mil(i,frac)->float`; `mil_to_nm(m)->int`; `nm_to_mm_str(nm)->str`; `snap_mil(m,grid=50)->float`; `approx_eq(a,b,tol_nm)->bool` | stdlib | `nm_to_mm_str` strips trailing zeros/dot (KiCad float style); integer-nm math only | `test_units.py` |
-| `config.py` | discover + parse + validate `altium-kicad-cli.toml` | `find_config(start:Path)->Path\|None`; `load_config(path)->Config`; `class Config` (`mcu_designator, rails:list, paths:dict, erc_waivers:list`) | `tomllib`, `errors`, `safety` | walk-up discovery from cwd; `--config` override; paths resolve relative to toml dir; reject unknown keys → `BAD_CONFIG`; schema in §3.11 | `test_config.py` |
+| `config.py` | discover + parse + validate `akcli.toml` | `find_config(start:Path)->Path\|None`; `load_config(path)->Config`; `class Config` (`mcu_designator, rails:list, paths:dict, erc_waivers:list`) | `tomllib`, `errors`, `safety` | walk-up discovery from cwd; `--config` override; paths resolve relative to toml dir; reject unknown keys → `BAD_CONFIG`; schema in §3.11 | `test_config.py` |
 | `report.py` | render findings + metadata caveats; text + `--json` | `render(findings,fmt,meta)->str`; `class Finding(code,severity,message,refs)`; `Severity` enum | `model`, `errors` | Always prints metadata header: passive-pin ratio, No-ERC suppressed count, unnamed-net count, frac-coord presence — so a vacuous pass is never read as clean | `test_report.py` |
 | `__main__.py` | `python -m` entry | `from .cli import main; raise SystemExit(main())` | `cli` | thin shim only | covered by `test_cli.py` |
 | `cli.py` | argparse dispatch, exit codes, global flags | `def main(argv=None)->int`; subcommands `read net component check diff pinmap expected ops calc plan draw export jlc` | everything | global `--version` (pkg + protocol), `-C/--config`, `-v/-vv/--quiet`, `--json`, `--no-color`, `--debug`; `draw` defaults `--dry-run`, needs `--apply` to write; stdout = data, stderr = logs | `test_cli.py` |
 
-### 3.2 Altium readers (`src/altium_kicad_cli/readers/`)
+### 3.2 Altium readers (`src/akcli/readers/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -422,13 +420,13 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `altium_pcb.py` | `.PcbDoc` → `Pcb` (ASCII sections + binary copper) | `read(path)->Pcb` | `_cfbf`, `altium_records`, `altium_pcb_bin`, `model` | ASCII `|KEY=VAL|` sections `Nets6`/`Components6`/`Classes6`/`Rules6` plus binary `Tracks6`/`Vias6`/`Arcs6`/`Pads6` via `altium_pcb_bin`. **Guard:** still refuse to ASCII-parse a Header-declared binary section; `Fills6/Regions6/Texts6/Polygons6` remain deferred | `test_altium_pcb.py` |
 | `altium_pcb_bin.py` | binary `.PcbDoc` section decoders | `parse_tracks/parse_vias/parse_arcs/parse_pads(buf,nets)->list[dict]`; `UNIT_MIL` | `errors` | Framing `u8 type + u32 LE len + payload`; coords 1/10000 mil → emit mils, native +Y-up frame; nets by index into `Nets6` order (0xFFFF→None). Track: layer u8@0, net u16@3, comp u16@7, x1/y1/x2/y2 s32@13.., w s32@29. Via: x/y@13/17, dia@21, hole@25, layers u8@29/30. Arc: center@13/17, r@21, angles f64@25/33 (deg), w@41. Pad: block-structured (name pascal block + 3 reserved + geometry ≥61B: size@21/25, hole@45, shape u8@49, rot f64@52). Unknown type→`ALTIUM_UNSUPPORTED`, truncation→`ALTIUM_MALFORMED`. Layouts cross-validated item-by-item vs KiCad's pcbnew importer on real boards (778/778 tracks, 20/20 vias, 236/236 arcs, 48/48 pads) | `test_altium_pcb_bin.py` |
 
-### 3.3 Net inference (`src/altium_kicad_cli/`)
+### 3.3 Net inference (`src/akcli/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
 | `netbuild.py` | format-agnostic net inference (the STAT fix) | `build_nets(prims:NetPrimitives)->list[Net]` | `model`, `units` | **Pipeline (LOCKED):** (1) exact-integer geometric union-find on wire segments (coords in fine-int from `_Frac`); (2) union each **junction(29)** point onto every segment it lies on; (3) **T-junction**: union every wire vertex lying on another wire's mid-span; (4) union pins/labels lying on a segment (`on_seg`, exact integer cross-product) — **pins connect at segment endpoints or junction-marked points only** (a bare mid-span touch does not connect: eeschema's rule, and Altium's editor inserts a junction record for every pin tap); labels connect anywhere along the wire; (5) **GLOBAL same-name merge:** group all label/power-port names per component, `name→set(roots)`, union every pair sharing any name — *this stitches the two STAT clusters and aliases STAT≡LED1_GPIO_RD*; (6) naming priority: power-port > net-label > auto, honor `power_priority`; keep all names as `aliases`, emit confidence<1 + a NOTE on multi-name nets; (7) **stable synthetic ids from sorted membership**, never `N$x_y`; (8) record `merge_reasons` for explainability; (9) multi-sheet: union by Port/SheetEntry name (net labels are sheet-local, power ports global) | `test_netbuild.py` (+ STAT/alias, junction, T-junction, NoERC, two-same-name-GND fixtures) |
 
-### 3.4 KiCad readers (`src/altium_kicad_cli/readers/`)
+### 3.4 KiCad readers (`src/akcli/readers/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -437,7 +435,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `altium_prj.py` | `.PrjPcb` project → top-sheet `Schematic` | `read(path)->Schematic`; `read_project(path)->dict` | `altium_sch`, `errors` | INI-ish parse (configparser, strict=False); document list (backslash paths resolved), `PowerPortNamesTakePriority` → `NetPrimitives.power_priority`; top sheet = the schematic no sheet symbol references | `test_altium_hierarchy.py` |
 | `kicad_lib.py` | `.kicad_sym` + inline `lib_symbols` → `Library` | `read(path)->Library`; `resolve(lib_id, sources)->SymbolDef`; `pin_offsets(sym)->list` | `sexpr`, `model` | Resolve `(extends ...)` (load base); keep `body_sexpr` for writer's lib_cache; pin offsets in symbol-local coords for world-coord computation | `test_kicad_lib.py` |
 
-### 3.5 KiCad writer (`src/altium_kicad_cli/writers/`)
+### 3.5 KiCad writer (`src/akcli/writers/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -448,7 +446,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `connectivity.py` | pure-Python ERC-lite — **primary** post-write gate | `verify(doc)->list[Finding]`; `auto_junctions(doc)->None` | `model`, `geometry`, `errors` | Exact-coincidence of every new wire endpoint vs pin/label/junction/port; auto-insert `(junction)` at 3+ way meets; honor `(no_connect)`; duplicate-UUID + unresolved-lib_id + invalid-instances-path checks. **Runs with no KiCad installed** | `test_writer_connectivity.py` |
 | `kicad.py` | op-list executor → surgical `.kicad_sch` edits | `apply(oplist:dict,path:str,apply:bool)->list[OpResult]` | all writers + `ops`,`safety`,`errors` | Per op: snap pin-ref endpoints to `pin_world`; emit per-pin `(pin "N" (uuid …))`; **atomic write w/ backup** (snapshot→temp→fsync→re-parse+connectivity verify on TEMP→`os.replace` only on pass); mtime/hash optimistic lock; reject op-list with higher major `protocol_version` → `PROTOCOL_MISMATCH`; `--dry-run` emits ops+verify, no write | `test_kicad_writer.py` |
 
-### 3.6 Checks (`src/altium_kicad_cli/checks/`)
+### 3.6 Checks (`src/akcli/checks/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -458,7 +456,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `diff.py` | net-level v1↔v2 diff | `run(a:Schematic,b:Schematic)->DiffReport` | `model` | **Match nets by membership** (Jaccard bipartite), NOT display name; components by **UniqueID** (Altium↔Altium) then `(value,footprint,pin-count)` signature, then refdes; report name-vs-membership changes separately; document low-confidence for cross-revision | `test_diff.py` |
 | `pinmap.py` | MCU pin→net + optional cross-check (GENERIC) | `run(sch,cfg,expected:dict\|None)->list[Finding]` | `model`, `config` | Generic only: emit MCU `pin→net`; cross-check against an **external expected pin→signal table** (CSV/JSON passed in). **No DTS/pinout parsing here** — that lives in `adapters/` (keeps engine reusable). Pin-name `Pn.mm` parser; schematic authoritative, expected-table advisory | `test_pinmap.py` |
 
-### 3.7 Drivers (`src/altium_kicad_cli/drivers/`)
+### 3.7 Drivers (`src/akcli/drivers/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -469,7 +467,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `altium_live/scripts/altium_api.PrjScr` | Altium script project wrapper | — | — | pairs with `.pas` | manual (Windows) |
 
 
-### 3.8 Vendored third-party source (`src/altium_kicad_cli/_vendor/`)
+### 3.8 Vendored third-party source (`src/akcli/_vendor/`)
 
 | Module | Purpose | Key surface | Notes | Tests |
 |---|---|---|---|---|
@@ -477,7 +475,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 | `jlc2kicadlib/_http.py` (ours) | stdlib drop-in for the `requests` slice the vendored code uses | `get(url,headers)->Response`, `codes.ok`, injectable `opener` | urllib-based, size-capped, never raises on HTTP errors (returns status) | idem |
 | `jlc2kicadlib/_kmt.py` (ours) | **clean-room** replacement for GPLv3 `KicadModTree` | `Footprint/Pad/Line/Arc/Circle/Polygon/Rect*/Text/Model/Translation/Vector2D`, `KicadFileHandler.writeFile` | Implemented from the public KiCad footprint file format (KicadModTree source neither copied nor consulted); emits the **KiCad-6 dialect** (`(layer)(width)` tails, version `20211014`) so output is readable by KiCad 6–10 AND Altium Designer's Import Wizard; `Model.at` legacy-inches → `(offset (xyz mm))` | idem |
 
-### 3.8b Engineering calculators (`src/altium_kicad_cli/calc/`)
+### 3.8b Engineering calculators (`src/akcli/calc/`)
 
 | File | Purpose | Public API | Reference basis | Tested by |
 |---|---|---|---|---|
@@ -503,7 +501,7 @@ Verification: `tests/test_calc.py` pins outputs to **KiCad pcb_calculator readin
 NE555 480 Hz, UM10204 966.7/3540 Ω, AN2867 19 pF). KiCad is a numerical cross-check only — GPL code
 neither copied nor consulted.
 
-### 3.9 Solestack adapter (`src/altium_kicad_cli/adapters/` — optional, in-repo, imports only public model)
+### 3.9 Solestack adapter (`src/akcli/adapters/` — optional, in-repo, imports only public model)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
@@ -514,16 +512,16 @@ neither copied nor consulted.
 
 | File | Purpose | Key contents | Tested by |
 |---|---|---|---|
-| `.claude-plugin/plugin.json` | plugin manifest (name `altium-kicad`) | §5.1 — no `version` during dev; no `skills`/`commands` arrays (default scan) | CI `claude plugin validate` |
+| `.claude-plugin/plugin.json` | plugin manifest (name `akcli`) | §5.1 — no `version` during dev; no `skills`/`commands` arrays (default scan) | CI `claude plugin validate` |
 | `.claude-plugin/marketplace.json` | self-marketplace (`source:"./"`) | §5.2 — required `owner.name` | CI `claude plugin validate . --strict` |
 | `bin/akcli` | self-locating zero-dep PATH wrapper | §5.3 — mode 100755 | `test -x bin/akcli` in CI; `akcli --help` smoke |
-| `bin/altium-kicad-cli` | long-alias bare command | relative symlink → `akcli` | CI smoke |
+| `bin/akcli` | long-alias bare command | relative symlink → `akcli` | CI smoke |
 | `hooks/hooks.json` | SessionStart Python-version warning | §5.4 — stderr only, exit 0 | `jq . hooks/hooks.json` in CI |
 | `pyproject.toml` | PyPI dist + console_scripts | §7 — setuptools backend, `packages.find where=["src"]`, EDA classifier | `python -m build && twine check dist/*` |
 | `tools/sync_version.py` | stamp plugin.json/marketplace.json from pyproject version | `main()`; CI fails on drift | `test_sync_version.py` |
 | `.gitattributes` | binary/text fixture rules | §6 — `tests/fixtures/** binary`, golden/`*.kicad_sch text eol=lf` | implicit (Windows CI) |
 | `.github/workflows/ci.yml` | CI matrix + validators | §6.4 | self |
-| `examples/altium-kicad-cli.toml.example` | tested reference config incl. `[[erc_waiver]]` for LED1/STAT | §3.11 | `test_config.py` |
+| `examples/akcli.toml.example` | tested reference config incl. `[[erc_waiver]]` for LED1/STAT | §3.11 | `test_config.py` |
 | `LICENSE` | MIT (repo) | — | — |
 | `THIRD_PARTY_NOTICES.md` | MIT attribution chain for altium-mcp **patterns** | credits flaco-source (2026) + coffeenmusic/Siddharth Ahuja (2025) | — |
 | `SECURITY.md` | untrusted-input threat model + enforced limits | — | — |
@@ -531,7 +529,7 @@ neither copied nor consulted.
 | `README.md`, `INSTALL.md` | docs + install UX | — | link-check (optional) |
 | `docs/config-schema.md`, `docs/cli-reference.md`, `docs/op-list-authoring.md`, `docs/op-capability-matrix.md` | contracts | — | — |
 
-### 3.11 Config schema (`altium-kicad-cli.toml`)
+### 3.11 Config schema (`akcli.toml`)
 
 ```toml
 [project]
@@ -572,7 +570,7 @@ reason = "LED1 shares MCP73831 open-drain STAT (P0.25) by design; FW reads it as
 these; they are the contract everyone codes against:
 `model.py, ops.py, errors.py, safety.py, units.py, config.py, report.py, __main__.py`,
 `schemas/{ops,ops.capabilities,schematic,netlist}.schema.json`,
-`.claude-plugin/{plugin,marketplace}.json, bin/akcli, bin/altium-kicad-cli, hooks/hooks.json, pyproject.toml,
+`.claude-plugin/{plugin,marketplace}.json, bin/akcli, bin/akcli, hooks/hooks.json, pyproject.toml,
 .gitattributes`, `tests/fixtures/_gen/{altium_fixture.py,ole_writer.py,cfbf_builder.py}`,
 `tests/fixtures/MANIFEST.sha256`.
 
@@ -592,7 +590,7 @@ After F is frozen, these groups proceed **in parallel** (each owns disjoint file
 | **ADP — Adapter** | `adapters/{dts,pinout_md}.py` + tests | F | F frozen |
 | **Docs** | `README.md, INSTALL.md, SECURITY.md, THIRD_PARTY_NOTICES.md, CHANGELOG.md, LICENSE, docs/*, tools/sync_version.py, .github/workflows/ci.yml, examples/*` | F (exact names) | F frozen |
 | **X — CLI glue** | `cli.py` (+ `test_cli.py`) | A, N, K, W, C, D | those groups expose stable APIs |
-| **S — Skill/commands** | `skills/circuit-design/SKILL.md, commands/circuit-{review,pinmap,draw,diff}.md` | X (CLI flags pinned in `docs/cli-reference.md`) | X ready |
+| **S — Skill/commands** | `skills/akcli-circuit-design/SKILL.md, commands/circuit-{review,pinmap,draw,diff}.md` | X (CLI flags pinned in `docs/cli-reference.md`) | X ready |
 
 **Dependency order (DAG):** `F → {A, N, D, ADP, Docs}`; `F → K`; `K → W`; `{A,N,K} → C`; `{A,N,K,W,C,D} → X`; `X → S`.
 
@@ -606,12 +604,12 @@ After F is frozen, these groups proceed **in parallel** (each owns disjoint file
 ### 5.1 `.claude-plugin/plugin.json`
 ```json
 {
-  "name": "altium-kicad",
-  "displayName": "Altium + KiCad EDA toolkit (read .SchDoc/.kicad_sch, ERC, draw KiCad)",
-  "description": "Read Altium binary .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch with no Altium or KiCad install, run ERC/power/pinmap/BOM/diff checks, and draw KiCad schematics. Zero-dependency Python CLI for AI coding agents. Not an Altium-to-KiCad converter.",
+  "name": "akcli",
+  "displayName": "akcli — AI-native KiCad design agent (+ Altium import)",
+  "description": "AI-native KiCad design agent (zero-dependency Python CLI + Claude Code plugin): author and edit .kicad_sch from JSON op-lists, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source parts, and import Altium .SchDoc/.SchLib/.PcbDoc — no Altium or KiCad install required.",
   "keywords": ["altium","kicad","schdoc","kicad-sch","eda","schematic","pcb","netlist","erc","claude-code","ai-agents"],
-  "repository": "https://github.com/tipoLi5890/altium-kicad-cli",
-  "homepage": "https://github.com/tipoLi5890/altium-kicad-cli",
+  "repository": "https://github.com/tipoLi5890/akcli",
+  "homepage": "https://github.com/tipoLi5890/akcli",
   "license": "MIT"
 }
 ```
@@ -622,20 +620,20 @@ After F is frozen, these groups proceed **in parallel** (each owns disjoint file
 ### 5.2 `.claude-plugin/marketplace.json`
 ```json
 {
-  "name": "altium-kicad",
+  "name": "akcli",
   "owner": { "name": "Li, ching yu" },
   "plugins": [
     {
-      "name": "altium-kicad",
+      "name": "akcli",
       "source": "./",
-      "description": "Dual-format EDA toolkit + Claude Code plugin: read Altium binary .SchDoc and KiCad .kicad_sch with no EDA install, run ERC/design checks, draw KiCad. Built for AI coding agents.",
+      "description": "AI-native KiCad design agent (zero-dependency Python CLI + Claude Code plugin): author and edit .kicad_sch from JSON op-lists, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source parts, and import Altium .SchDoc/.SchLib/.PcbDoc — no Altium or KiCad install required.",
       "keywords": ["altium","kicad","schdoc","kicad-sch","eda","schematic","pcb","netlist","erc","claude-code","ai-agents"]
     }
   ]
 }
 ```
 > Required `owner.name`. **No partial `skills`/`commands` arrays** (a typo would silently drop the default
-> scan). The `@`-token users type after install is the marketplace **name** (`altium-kicad`), not the repo.
+> scan). The `@`-token users type after install is the marketplace **name** (`akcli`), not the repo.
 
 ### 5.3 `bin/akcli` (mode 100755)
 ```bash
@@ -650,11 +648,11 @@ for c in python3.13 python3.12 python3.11 python3; do
     PY="$c"; break
   fi
 done
-[ -n "$PY" ] || { echo "akcli requires Python >=3.11 (none found). Install python@3.11+ or: pipx install altium-kicad-cli" >&2; exit 1; }
+[ -n "$PY" ] || { echo "akcli requires Python >=3.11 (none found). Install python@3.11+ or: pipx install akcli" >&2; exit 1; }
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PY" -m altium_kicad_cli "$@"
+exec "$PY" -m akcli "$@"
 ```
-`bin/altium-kicad-cli` = relative symlink → `akcli` (preserved in plugin cache).
+`bin/akcli` = relative symlink → `akcli` (preserved in plugin cache).
 
 ### 5.4 `hooks/hooks.json`
 ```json
@@ -665,7 +663,7 @@ exec "$PY" -m altium_kicad_cli "$@"
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"import sys; sys.stderr.write('warn: altium-kicad needs Python>=3.11; akcli auto-selects a newer interpreter if present\\n') if sys.version_info < (3,11) else None\"; exit 0"
+            "command": "python3 -c \"import sys; sys.stderr.write('warn: akcli needs Python>=3.11; akcli auto-selects a newer interpreter if present\\n') if sys.version_info < (3,11) else None\"; exit 0"
           }
         ]
       }
@@ -744,8 +742,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "altium-kicad-cli"
-description = "Read Altium binary .SchDoc and KiCad .kicad_sch with no EDA install; run ERC/design checks and draw KiCad. For AI coding agents."
+name = "akcli"
+description = "AI-native KiCad design agent: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc — no EDA install required."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
@@ -763,8 +761,7 @@ classifiers = [
 ]
 
 [project.scripts]
-akcli = "altium_kicad_cli.cli:main"   # doc-noqa (pyproject entry point, not a CLI command)
-altium-kicad-cli = "altium_kicad_cli.cli:main"
+akcli = "akcli.cli:main"   # doc-noqa (pyproject entry point, not a CLI command)
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "jsonschema>=4", "build", "twine"]

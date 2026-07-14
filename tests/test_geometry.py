@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import units
-from altium_kicad_cli.model import Component
-from altium_kicad_cli.readers import kicad, kicad_lib
-from altium_kicad_cli.writers import geometry as g
+from akcli import units
+from akcli.model import Component
+from akcli.readers import kicad, kicad_lib
+from akcli.writers import geometry as g
 
 FIXTURES = Path(__file__).parent / "fixtures" / "kicad"
 DEVICE_SYM = FIXTURES / "symbols" / "Device.kicad_sym"

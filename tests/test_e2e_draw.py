@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.drivers import kicad_cli
-from altium_kicad_cli.readers import kicad as kreader
-from altium_kicad_cli.writers import kicad as kw
+from akcli.drivers import kicad_cli
+from akcli.readers import kicad as kreader
+from akcli.writers import kicad as kw
 
 V8 = Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch"
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
@@ -94,7 +94,7 @@ def test_derived_symbol_cache_is_flattened(tmp_path):
     # derived name (an AP1117-style leftover base unit name inside the entry is
     # exactly the broken case). The fixture's own plain Device:C cache entry
     # legitimately keeps its C_0_1/C_1_1 names, so scope the check to the block.
-    from altium_kicad_cli.readers import sexpr
+    from akcli.readers import sexpr
 
     libsyms = sexpr.parse(text).find("lib_symbols")
     derived = next(

@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import ERROR_CODES, AkcliError
-from altium_kicad_cli.readers import sexpr
-from altium_kicad_cli.readers.sexpr import SNode, dumps, parse
-from altium_kicad_cli.safety import MAX_ATOM_BYTES, MAX_SEXPR_DEPTH
+from akcli.errors import ERROR_CODES, AkcliError
+from akcli.readers import sexpr
+from akcli.readers.sexpr import SNode, dumps, parse
+from akcli.safety import MAX_ATOM_BYTES, MAX_SEXPR_DEPTH
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 MALFORMED = FIX / "malformed"

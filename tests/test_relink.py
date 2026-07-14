@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.relink` (embedded lib_symbols re-embed).
+"""Tests for :mod:`akcli.relink` (embedded lib_symbols re-embed).
 
 Covers plan statuses (``up-to-date`` / ``replace`` / ``missing-lib``) against a
 tiny fake ``.kicad_sym`` library dir, the ``only`` filter, the default-lib-dir
@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import relink
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import kicad, sexpr
+from akcli import relink
+from akcli.errors import AkcliError
+from akcli.readers import kicad, sexpr
 
 # --------------------------------------------------------------------------- #
 # fixture text

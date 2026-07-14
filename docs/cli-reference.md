@@ -1,13 +1,13 @@
 # `akcli` CLI reference
 
-`akcli` (long alias `altium-kicad-cli`) is the command-line entry point of `altium-kicad-cli`. It reads
+`akcli` is the command-line entry point of `akcli`. It reads
 Altium binary `.SchDoc`/`.SchLib`/`.PcbDoc` and KiCad `.kicad_sch`/`.kicad_sym`/`.kicad_pcb`, runs
 checks (including design-intent assertions), diffs revisions, draws KiCad schematics with a
 before/after net-connectivity diff, and provides 60 standards-cited engineering calculators
 (`akcli calc`) — with no Altium or KiCad install required.
 
 > This reference is the contract for the CLI surface. It tracks the subcommands and flags defined in
-> `src/altium_kicad_cli/cli.py`.
+> `src/akcli/cli.py`.
 
 ```
 akcli [GLOBAL FLAGS] <subcommand> [ARGS...]   # doc-noqa (usage synopsis, not a runnable line)
@@ -22,7 +22,7 @@ diagnostics. This keeps `akcli ... --json | jq` clean.
 |---|---|
 | `--version` | Print package version **and** `protocol_version`, then exit. |
 | `-h`, `--help` | Show help for `akcli` or a subcommand, then exit. |
-| `-C`, `--config PATH` | Use this `altium-kicad-cli.toml` instead of walk-up discovery from the input file's directory. |
+| `-C`, `--config PATH` | Use this `akcli.toml` instead of walk-up discovery from the input file's directory. |
 | `-v`, `-vv` | Increase log verbosity (to stderr). `-v` info, `-vv` debug-level logs. |
 | `--quiet` | Suppress non-error logs on stderr. |
 | `--json` | Emit machine-readable JSON on stdout (carries `schema_version`). |
@@ -508,6 +508,18 @@ for `{name, model_card, sim_params, params, note}`. `--apply SCH --designator RE
 run** printing the op-list unless `--write`, which commits through the KiCad writer with a rotated
 `.bak`). This closes the datasheet → model loop with [`jlc datasheet`](jlc.md).
 
+### `akcli doctor [--network] [--require CAPS] [--json]`
+One-shot environment report. Probes — the same way the features themselves discover them —
+**python** (>= 3.11), the **akcli** install (version + mode), packaged **schemas**,
+**kicad-cli** (`KICAD_CLI` env → PATH → known install locations), **ngspice**
+(`AKCLI_NGSPICE` honored; KiCad's bundled libngspice found automatically), and **config**
+discovery. `--network` additionally probes the `jlc` endpoint (doctor is offline by default).
+Every missing item prints a remediation hint; only python is a hard requirement.
+`--require kicad-cli,ngspice,...` turns the report into a CI gate: exit `1` when a named
+capability is missing (unknown capability names exit `2`). `--json` emits
+`{checks: {name: {ok, detail, hint?}}, required, ok}`. The `akcli-setup` skill drives this
+command for setup/repair flows.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -529,7 +541,7 @@ Without `--debug`, failures print a single structured line, e.g.:
 ERROR: ALTIUM_FAT_CYCLE: FAT chain revisits sector 42 (cycle); aborting
 ```
 
-Error codes (frozen registry in `src/altium_kicad_cli/errors.py`), grouped by the exit code they
+Error codes (frozen registry in `src/akcli/errors.py`), grouped by the exit code they
 surface as:
 
 | Exit | Error codes |
@@ -556,9 +568,9 @@ Two related but distinct vocabularies:
 ```bash
 akcli read main.SchDoc --json | jq '.components | length'
 akcli net  board.kicad_sch --json > netlist.json
-akcli check main.SchDoc -C altium-kicad-cli.toml          # exit 1 if findings
+akcli check main.SchDoc -C akcli.toml          # exit 1 if findings
 akcli diff  v1.SchDoc v2.SchDoc
-akcli pinmap main.SchDoc -C altium-kicad-cli.toml --expected pins.csv
+akcli pinmap main.SchDoc -C akcli.toml --expected pins.csv
 akcli export main.SchDoc --format protel -o board.net
 akcli nets board.kicad_sch --intent-snapshot intent.json  # snapshot the netlist you meant
 akcli plan board.kicad_sch --ops ops.json --symbols Device.kicad_sym

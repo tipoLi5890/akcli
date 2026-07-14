@@ -4,7 +4,7 @@
 **libngspice** (the shared library that ships inside KiCad), reads back the
 `.meas` measurements, and compares each one against a pass/fail bound you
 declare in a `sim.json` file. The output is a measured-value table plus the same
-[`Finding`](../src/altium_kicad_cli/report.py) records `akcli check` emits, so a
+[`Finding`](../src/akcli/report.py) records `akcli check` emits, so a
 failed assertion is a normal non-zero exit you can gate CI on.
 
 Nothing here needs KiCad's GUI or a `.cir` you hand-wrote: the deck is generated
@@ -143,9 +143,9 @@ to tell whether a schematic edit actually changed what gets simulated.
 ## `sim.json` — the assertion spec
 
 The full format is validated both by
-[`sim/assertions.load()`](../src/altium_kicad_cli/sim/assertions.py) and by
+[`sim/assertions.load()`](../src/akcli/sim/assertions.py) and by
 [`schemas/sim.schema.json`](../schemas/sim.schema.json) (draft 2020-12,
-byte-identical mirror packaged under `src/altium_kicad_cli/schemas/`). Unknown
+byte-identical mirror packaged under `src/akcli/schemas/`). Unknown
 keys are rejected at every level.
 
 ```json
@@ -235,7 +235,7 @@ Each assert names exactly **one** measurement source and its bound(s).
 ## Model resolution
 
 Before the deck builder can emit an element line for a component, it asks
-[`sim/models.resolve(comp, spec)`](../src/altium_kicad_cli/sim/models.py) what
+[`sim/models.resolve(comp, spec)`](../src/akcli/sim/models.py) what
 SPICE primitive (if any) that component should become. The answer follows a
 strict **first-hit-wins ladder**:
 
@@ -477,7 +477,7 @@ This is the last leg of the full
 datasheet-to-model workflow: **source the part → grab its datasheet PDF → read
 off the forward-voltage table row → `fit-diode --apply --write`**. The first two
 legs are the parts commands — see [`docs/jlc.md` §`jlc datasheet`](jlc.md) and
-the **parts-sourcing** skill for pulling the datasheet, and the **design-calc**
+the **akcli-parts-sourcing** skill for pulling the datasheet, and the **akcli-design-calc**
 skill for the surrounding component-value math.
 
 ## `--sweep` — corner matrices
@@ -708,5 +708,5 @@ and the regulator were shunted — which auto-`rshunt` now does on its own.)
 - [`schemas/sim.schema.json`](../schemas/sim.schema.json) — the `sim.json` schema.
 - [`docs/jlc.md`](jlc.md) — `jlc datasheet` for pulling the PDF whose forward-voltage
   table row feeds `sim fit-diode`.
-- [`skills/circuit-debug/SKILL.md`](../skills/circuit-debug/SKILL.md) — using
+- [`skills/akcli-circuit-debug/SKILL.md`](../skills/akcli-circuit-debug/SKILL.md) — using
   `sim` as a hypothesis tester when debugging.

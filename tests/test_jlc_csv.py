@@ -12,9 +12,9 @@ from __future__ import annotations
 import csv
 import io
 
-from altium_kicad_cli import model
-from altium_kicad_cli.parts import bom_jlc
-from altium_kicad_cli.parts.search import Part
+from akcli import model
+from akcli.parts import bom_jlc
+from akcli.parts.search import Part
 
 
 def _line(**kw) -> bom_jlc.BomLine:

@@ -1,14 +1,14 @@
 # `akcli jlc` — JLCPCB / LCSC part search
 
 Search the JLCPCB / LCSC component catalog from the command line. This is the
-**only networked feature** in altium-kicad-cli; every other command is fully
+**only networked feature** in akcli; every other command is fully
 offline and zero-dependency.
 
 > **Needs network.** `jlc` calls the public **jlcsearch** service
 > (`https://jlcsearch.tscircuit.com`; override with `AKCLI_JLC_BASE_URL` for a
 > self-hosted instance or tests). All other `akcli` commands work with no
 > network and no Altium/KiCad install. Network code is import-isolated under
-> `altium_kicad_cli.parts` and loaded lazily, so it never touches the offline paths.
+> `akcli.parts` and loaded lazily, so it never touches the offline paths.
 
 ## Commands
 
@@ -213,10 +213,74 @@ The upstream `price` is a tiered structure; `attributes.price_tiers` keeps the
 full `[{qFrom, qTo, price}, …]` ladder while `price` surfaces the cheapest
 single-unit (lowest-`qFrom`) tier for quick comparison.
 
+## Manufacturing handoff — Gerber / drill / BOM / CPL from KiCad
+
+A JLCPCB PCBA order needs four artifacts from a finished layout: **Gerbers**,
+**drill files**, a **BOM**, and a **CPL** (centroid / component-placement)
+file. akcli produces the BOM leg directly (`jlc bom --csv`); the other three
+come out of KiCad — either headless via `kicad-cli` (agent/CI-friendly) or
+through pcbnew's GUI per JLCPCB's own guides:
+
+- [Generate Gerber and drill files in KiCad 8](https://jlcpcb.com/hk/help/article/generate-gerber-and-drill-files-in-kicad-8)
+- [Generate BOM and centroid files from KiCad 8](https://jlcpcb.com/hk/help/article/generate-bom-and-centroid-files-from-kicad-8)
+
+### Headless (kicad-cli — what an agent should run)
+
+Run DRC first, then export; flags verified against KiCad 10's `kicad-cli`:
+
+```bash
+kicad-cli pcb drc board.kicad_pcb --exit-code-violations        # gate on DRC
+kicad-cli pcb export gerbers board.kicad_pcb -o fab/ \
+  --layers F.Cu,B.Cu,F.Paste,B.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts \
+  --subtract-soldermask                                          # 4+ layers: add In1.Cu,In2.Cu
+kicad-cli pcb export drill board.kicad_pcb -o fab/ \
+  --format excellon --drill-origin absolute --excellon-units mm \
+  --excellon-zeros-format decimal --generate-map
+kicad-cli pcb export pos board.kicad_pcb -o fab/board-cpl.csv \
+  --format csv --units mm --side both --exclude-dnp   # CPL/centroid
+zip -r fab.zip fab/
+```
+
+The BOM comes from the schematic side, already in JLCPCB's upload shape:
+
+```bash
+akcli jlc bom board.kicad_sch --qty 10 --csv fab/bom.csv
+```
+
+### GUI equivalents (per the JLCPCB articles)
+
+*Gerbers*: **File → Fabrication Outputs → Gerbers (.gbr)** — select the copper,
+paste, silkscreen, mask and `Edge.Cuts` layers (plus `In*.Cu` on multilayer
+boards); check *Use Protel filename extensions*, *Subtract soldermask from
+silkscreen*, *Check zone fills before plotting*, *Tent vias*. *Drill*: from the
+same dialog, **Generate Drill Files** with *absolute* origin, *millimeters*,
+*decimal* zeros format (a drill map is recommended). *CPL*: **File →
+Fabrication Outputs → Component Placement (.pos/.csv)**. JLCPCB also publishes
+a **Fabrication Toolkit** plugin (KiCad Plugin Manager) that emits all four
+artifacts in one click.
+
+### JLCPCB file expectations
+
+| Artifact | Accepted | Column headers JLCPCB expects |
+|---|---|---|
+| BOM | `.csv`/`.xls`/`.xlsx` | `Comment, Designator, Footprint, LCSC Part #` — exactly what `jlc bom --csv` writes |
+| CPL | `.csv`/`.xls`/`.xlsx` | `Designator, Mid X, Mid Y, Layer, Rotation` |
+
+`kicad-cli pcb export pos --format csv` emits `Ref,Val,Package,PosX,PosY,Rot,Side`
+— rename the header row to JLCPCB's names (`Ref→Designator`, `PosX→Mid X`,
+`PosY→Mid Y`, `Rot→Rotation`, `Side→Layer`) or let the Fabrication Toolkit /
+JLCPCB's order-page column mapper handle it. Rotation mismatches on polarized
+parts (diodes, tantalums, connectors) are the classic PCBA defect: always review
+JLCPCB's component-placement preview before paying.
+
+Keep an `LCSC` parameter on every schematic component (see `jlc bom
+--suggest/--fix`) — it is what makes the BOM column exact instead of a
+value-guess, and JLCPCB's parts matching instant.
+
 ## Library use
 
 ```python
-from altium_kicad_cli.parts import search as jlc
+from akcli.parts import search as jlc
 
 parts = jlc.search("NE555", limit=10)        # list[Part]
 part  = jlc.get("C7593")                      # Part | None
@@ -228,7 +292,7 @@ parts = jlc.search("NE555", opener=my_fake_opener)
 parts = jlc.search("NE555", cache_dir="/tmp/akcli-cache", cache_ttl=3600)
 ```
 
-Network failures raise `altium_kicad_cli.parts.search.JlcNetworkError` (clean
+Network failures raise `akcli.parts.search.JlcNetworkError` (clean
 message, no traceback).
 
 ## Attribution

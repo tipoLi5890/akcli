@@ -1,4 +1,4 @@
-"""Offline unit tests for :mod:`altium_kicad_cli.drivers.altium_live.bridge` (SPEC §3.7).
+"""Offline unit tests for :mod:`akcli.drivers.altium_live.bridge` (SPEC §3.7).
 
 The bridge is the Python half of an optional Windows live driver, but it is designed
 to be exercised with **no Altium installed**: a fake "Altium" — a background thread
@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.drivers.altium_live import bridge
-from altium_kicad_cli.errors import AkcliError
+from akcli.drivers.altium_live import bridge
+from akcli.errors import AkcliError
 
 
 # --------------------------------------------------------------------------- #

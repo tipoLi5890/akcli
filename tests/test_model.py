@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from altium_kicad_cli.model import (
+from akcli.model import (
     ALTIUM_ELECTRICAL,
     KICAD_PINTYPE,
     SCHEMA_VERSION,

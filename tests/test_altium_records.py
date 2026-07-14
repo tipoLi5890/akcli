@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.model import PinType
-from altium_kicad_cli.readers import _cfbf
-from altium_kicad_cli.readers.altium_records import (
+from akcli.errors import AkcliError
+from akcli.model import PinType
+from akcli.readers import _cfbf
+from akcli.readers.altium_records import (
     RECORD_COMPONENT,
     RECORD_NET_LABEL,
     RECORD_PIN,
@@ -145,7 +145,7 @@ def test_empty_buffer_yields_no_records():
 
 
 def test_record_cap_enforced(monkeypatch):
-    from altium_kicad_cli import safety
+    from akcli import safety
 
     monkeypatch.setattr(safety, "MAX_RECORDS", 3)
     buf = b"".join(_frame({"RECORD": str(i)}) for i in range(10))

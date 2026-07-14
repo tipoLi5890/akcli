@@ -14,9 +14,9 @@ import os
 
 import pytest
 
-from altium_kicad_cli.checks import diff
-from altium_kicad_cli.model import Component, Net, Pin, PinType, Schematic
-from altium_kicad_cli.readers import altium_sch
+from akcli.checks import diff
+from akcli.model import Component, Net, Pin, PinType, Schematic
+from akcli.readers import altium_sch
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 

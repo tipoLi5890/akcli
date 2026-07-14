@@ -1,11 +1,11 @@
 {
-  "name": "altium-kicad",
+  "name": "akcli",
   "interface": {
     "displayName": "Altium + KiCad EDA Toolkit"
   },
   "plugins": [
     {
-      "name": "altium-kicad",
+      "name": "akcli",
       "source": {
         "source": "local",
         "path": "./"

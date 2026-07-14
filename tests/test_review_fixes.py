@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from altium_kicad_cli import cli, report
-from altium_kicad_cli.checks import _rails
-from altium_kicad_cli.errors import EXIT
+from akcli import cli, report
+from akcli.checks import _rails
+from akcli.errors import EXIT
 
 
 # --- #2 rail voltage inference: the underscore-suffix `\b` bug ----------------
@@ -41,7 +41,7 @@ def test_rail_matches_prefix():
 
 # --- #1 footprint falls back to the RECORD-41 parameter ----------------------
 def test_footprint_falls_back_to_parameter():
-    from altium_kicad_cli.readers import altium_sch as A
+    from akcli.readers import altium_sch as A
 
     recs = [
         {"RECORD": str(A.RECORD_COMPONENT)},  # idx 0
@@ -58,7 +58,7 @@ def test_footprint_falls_back_to_parameter():
 def test_footprint_model_link_wins_over_parameter():
     # Real model-link chain: component <- RECORD-44 (impl) <- RECORD-45 (model, ModelName).
     # The footprint must resolve back to the component index across BOTH hops.
-    from altium_kicad_cli.readers import altium_records as AR, altium_sch as A
+    from akcli.readers import altium_records as AR, altium_sch as A
 
     recs = [
         {"RECORD": str(AR.RECORD_COMPONENT)},                                      # idx0
@@ -76,7 +76,7 @@ def test_footprint_model_link_wins_over_parameter():
 def test_diff_and_component_json_have_schema_version(capsys):
     from pathlib import Path
 
-    from altium_kicad_cli.readers import kicad as kr
+    from akcli.readers import kicad as kr
 
     v8 = str(Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch")
 

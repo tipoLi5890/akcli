@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.checks.libsync`.
+"""Tests for :mod:`akcli.checks.libsync`.
 
 With sources: LIB_EMBED_STALE fires on pin-signature drift (moved pin, renamed
 pin number) but NOT on graphics-only drift; unreadable/missing sources are
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.checks import libsync
-from altium_kicad_cli.report import Severity
+from akcli.checks import libsync
+from akcli.report import Severity
 
 # --------------------------------------------------------------------------- #
 # fixture text (library block reused verbatim as the fresh embed)

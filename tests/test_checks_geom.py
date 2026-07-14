@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.checks.geom` — wire/pin/label attachment lint.
+"""Tests for :mod:`akcli.checks.geom` — wire/pin/label attachment lint.
 
 The module's contract is that it mirrors ``netbuild`` exactly (it is built from
 the same ``_q`` / ``_on_seg`` helpers), so alongside the finding assertions the
@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from altium_kicad_cli.checks import geom
-from altium_kicad_cli.readers import kicad
-from altium_kicad_cli.report import Finding, Severity
+from akcli.checks import geom
+from akcli.readers import kicad
+from akcli.report import Finding, Severity
 
 # Device:R with pin 1 at lib (0, 3.81) and pin 2 at (0, -3.81) — placed at
 # (25.4, 25.4) mm the world pin tips are (25.4, 21.59) and (25.4, 29.21).

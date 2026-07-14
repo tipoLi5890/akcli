@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.model import PinType
-from altium_kicad_cli.readers import altium_sch
+from akcli.model import PinType
+from akcli.readers import altium_sch
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 
@@ -119,7 +119,7 @@ def test_metadata_present():
 
 
 def test_read_primitives_round_trips_into_same_nets():
-    from altium_kicad_cli import netbuild
+    from akcli import netbuild
 
     prims = altium_sch.read_primitives(FIX / "shared_name_label.SchDoc")
     nets = netbuild.build_nets(prims)

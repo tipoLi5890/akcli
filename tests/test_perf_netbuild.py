@@ -3,7 +3,7 @@
 The netbuild geometric rules and the connectivity gate used to scan *every*
 segment for *every* query point — O(n·m), which measured at 8.4 s for a
 ~5000-segment sheet (and ``plan/draw`` runs netbuild twice for its net-diff, so
-big sheets paid it doubly). :class:`~altium_kicad_cli.netbuild.SegmentIndex`
+big sheets paid it doubly). :class:`~akcli.netbuild.SegmentIndex`
 buckets orthogonal segments so each query is O(log n + hits).
 
 Two things are pinned here:
@@ -23,15 +23,15 @@ from __future__ import annotations
 
 import time
 
-from altium_kicad_cli import model
-from altium_kicad_cli.netbuild import (
+from akcli import model
+from akcli.netbuild import (
     SegmentIndex,
     _on_seg,
     _on_seg_interior,
     build_nets,
 )
-from altium_kicad_cli.readers.sexpr import parse
-from altium_kicad_cli.writers import connectivity
+from akcli.readers.sexpr import parse
+from akcli.writers import connectivity
 
 ROOT_UUID = "8a000000-0000-4000-8000-000000000000"
 

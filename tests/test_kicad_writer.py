@@ -1,4 +1,4 @@
-"""Tests for :mod:`altium_kicad_cli.writers.kicad` — the op-list executor (SPEC §3.5).
+"""Tests for :mod:`akcli.writers.kicad` — the op-list executor (SPEC §3.5).
 
 Covers, against the synthetic KiCad-8 R-divider fixture (``board_v8.kicad_sch``):
 
@@ -22,11 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import kicad_lib, sexpr
-from altium_kicad_cli.report import Severity
-from altium_kicad_cli.writers import connectivity, geometry
-from altium_kicad_cli.writers import kicad as kw
+from akcli.errors import AkcliError
+from akcli.readers import kicad_lib, sexpr
+from akcli.report import Severity
+from akcli.writers import connectivity, geometry
+from akcli.writers import kicad as kw
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 V8 = FIX / "board_v8.kicad_sch"
@@ -199,7 +199,7 @@ def test_wire_pinref_snaps_to_pin_world(tmp_path):
     for w in doc.find_all("wire"):
         verts = set()
         for xy in w.find("pts").find_all("xy"):
-            from altium_kicad_cli import units
+            from akcli import units
             verts.add((units.mm_to_nm(float(xy.children[1].value)),
                        units.mm_to_nm(float(xy.children[2].value))))
         if verts == worlds:

@@ -16,9 +16,9 @@ import urllib.error
 
 import pytest
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
-from altium_kicad_cli.parts import search as ps
+from akcli.cli import main
+from akcli.errors import EXIT
+from akcli.parts import search as ps
 
 # --- canned jlcsearch payloads (shape from the real service) ----------------
 _NE555 = {
@@ -206,7 +206,7 @@ def test_network_guard_blocks_search_default_opener():
 
 
 def test_network_guard_blocks_easyeda_default_opener():
-    from altium_kicad_cli.parts import easyeda as ee
+    from akcli.parts import easyeda as ee
     with pytest.raises(RuntimeError, match="network disabled in tests"):
         ee.lookup("C7593")
 

@@ -13,10 +13,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from altium_kicad_cli.checks import layout
-from altium_kicad_cli.readers import kicad_lib
-from altium_kicad_cli.writers import geometry
-from altium_kicad_cli.writers import kicad as kw
+from akcli.checks import layout
+from akcli.readers import kicad_lib
+from akcli.writers import geometry
+from akcli.writers import kicad as kw
 
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
 

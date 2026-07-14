@@ -6,10 +6,10 @@ import os
 
 import pytest
 
-from altium_kicad_cli.checks import bom
-from altium_kicad_cli.model import Component, Schematic
-from altium_kicad_cli.readers import altium_sch
-from altium_kicad_cli.report import Finding, Severity
+from akcli.checks import bom
+from akcli.model import Component, Schematic
+from akcli.readers import altium_sch
+from akcli.report import Finding, Severity
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 

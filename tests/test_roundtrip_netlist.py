@@ -32,8 +32,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.readers import kicad as kreader
-from altium_kicad_cli.writers import kicad as kw
+from akcli.readers import kicad as kreader
+from akcli.writers import kicad as kw
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 DEVICE = FIX / "symbols" / "Device.kicad_sym"

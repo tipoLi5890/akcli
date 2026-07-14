@@ -15,9 +15,9 @@ import math
 
 import pytest
 
-from altium_kicad_cli.calc import CALCS, CalcError, compute
-from altium_kicad_cli.calc.eseries import SERIES, nearest, snap
-from altium_kicad_cli.calc.si import fmt_eng, parse_value
+from akcli.calc import CALCS, CalcError, compute
+from akcli.calc.eseries import SERIES, nearest, snap
+from akcli.calc.si import fmt_eng, parse_value
 
 
 def res(name, **kw):

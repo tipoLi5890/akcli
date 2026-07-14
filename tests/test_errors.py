@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from altium_kicad_cli.errors import (
+from akcli.errors import (
     ERROR_CODES,
     EXIT,
     AkcliError,

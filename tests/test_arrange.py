@@ -6,8 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
-from altium_kicad_cli import arrange, cli
-from altium_kicad_cli.readers import kicad as kreader
+from akcli import arrange, cli
+from akcli.readers import kicad as kreader
 
 FIXTURE = Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch"
 

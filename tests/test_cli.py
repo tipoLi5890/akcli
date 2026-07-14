@@ -1,6 +1,6 @@
 """End-to-end tests for the ``akcli`` CLI dispatch (``cli.py``).
 
-Drives :func:`altium_kicad_cli.cli.main` with explicit ``argv`` and asserts both
+Drives :func:`akcli.cli.main` with explicit ``argv`` and asserts both
 the exit code (per SPEC §8) and the stdout/stderr split (data vs logs).
 """
 
@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
+from akcli.cli import main
+from akcli.errors import EXIT
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -32,7 +32,7 @@ JUNC = "junction_cross.SchDoc"
 def test_version(capsys):
     assert main(["--version"]) == EXIT["OK"]
     out = capsys.readouterr().out
-    assert "altium-kicad-cli" in out
+    assert "akcli" in out
     assert "protocol" in out
 
 

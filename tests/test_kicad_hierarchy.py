@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import kicad as kreader
+from akcli.errors import AkcliError
+from akcli.readers import kicad as kreader
 
 ROOT_UUID = "aaaaaaaa-0000-4000-8000-000000000000"
 SHEET1_UUID = "bbbbbbbb-0000-4000-8000-000000000001"

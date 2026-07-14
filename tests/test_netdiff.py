@@ -10,8 +10,8 @@ coercion (PinRef tuples, is_named=False => unnamed).
 
 from __future__ import annotations
 
-from altium_kicad_cli import model
-from altium_kicad_cli.netdiff import NetView, diff, format_summary, has_risk
+from akcli import model
+from akcli.netdiff import NetView, diff, format_summary, has_risk
 
 
 # --- helpers -----------------------------------------------------------------

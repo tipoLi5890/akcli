@@ -11,8 +11,8 @@ Foundation (model.py) is imported but never edited.
 
 from __future__ import annotations
 
-from altium_kicad_cli import model
-from altium_kicad_cli.netbuild import build_nets
+from akcli import model
+from akcli.netbuild import build_nets
 
 
 # --- helpers -----------------------------------------------------------------

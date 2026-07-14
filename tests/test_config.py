@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from altium_kicad_cli import config
-from altium_kicad_cli.errors import AkcliError
+from akcli import config
+from akcli.errors import AkcliError
 
 _GOOD = """
 [project]

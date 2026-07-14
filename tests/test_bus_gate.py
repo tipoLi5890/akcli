@@ -23,10 +23,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from altium_kicad_cli.readers.sexpr import parse
-from altium_kicad_cli.report import Severity
-from altium_kicad_cli.writers import connectivity
-from altium_kicad_cli.writers import kicad as kw
+from akcli.readers.sexpr import parse
+from akcli.report import Severity
+from akcli.writers import connectivity
+from akcli.writers import kicad as kw
 
 V8 = Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch"
 ROOT_UUID = "8a000000-0000-4000-8000-000000000000"
@@ -181,7 +181,7 @@ def test_bus_entry_missing_size_checked_as_degenerate():
 # stage 2: the reader emits bus primitives (mil coordinates, both entry ends)
 # --------------------------------------------------------------------------- #
 def test_reader_emits_bus_primitives_from_authored_rip(tmp_path):
-    from altium_kicad_cli.readers import kicad as kreader
+    from akcli.readers import kicad as kreader
 
     tgt = _seed(tmp_path)
     results = kw.apply(_oplist(*_RIP_OPS), str(tgt), apply=True)
@@ -194,7 +194,7 @@ def test_reader_emits_bus_primitives_from_authored_rip(tmp_path):
 
 
 def test_reader_bus_entry_missing_size_is_degenerate(tmp_path):
-    from altium_kicad_cli.readers import kicad as kreader
+    from akcli.readers import kicad as kreader
 
     p = tmp_path / "deg.kicad_sch"
     p.write_text(

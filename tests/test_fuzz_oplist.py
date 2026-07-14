@@ -26,9 +26,9 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import ops
-from altium_kicad_cli.errors import ERROR_CODES, AkcliError
-from altium_kicad_cli.writers import kicad as kw
+from akcli import ops
+from akcli.errors import ERROR_CODES, AkcliError
+from akcli.writers import kicad as kw
 
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
 

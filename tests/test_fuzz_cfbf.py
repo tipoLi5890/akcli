@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import altium_sch
+from akcli.errors import AkcliError
+from akcli.readers import altium_sch
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "t_junction.SchDoc").read_bytes()
 

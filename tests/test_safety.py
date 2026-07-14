@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from altium_kicad_cli import safety
-from altium_kicad_cli.errors import AkcliError
+from akcli import safety
+from akcli.errors import AkcliError
 
 
 def test_limits_are_positive_ints():

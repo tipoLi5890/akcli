@@ -6,8 +6,8 @@ import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from altium_kicad_cli import cli, report
-from altium_kicad_cli.report import Finding, Severity
+from akcli import cli, report
+from akcli.report import Finding, Severity
 
 FIX = Path(__file__).parent / "fixtures"
 

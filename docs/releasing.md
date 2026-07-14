@@ -1,6 +1,6 @@
 # Releasing
 
-`altium-kicad-cli` releases are tag-driven: pushing a `vX.Y.Z` tag runs
+`akcli` releases are tag-driven: pushing a `vX.Y.Z` tag runs
 `.github/workflows/release.yml`, which builds the sdist + wheel, verifies the
 tag matches `pyproject.toml`, extracts that version's `CHANGELOG.md` section as
 the release notes, and creates a GitHub Release with the build artifacts

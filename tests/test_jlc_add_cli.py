@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from altium_kicad_cli import cli
-from altium_kicad_cli._vendor.jlc2kicadlib import _http
+from akcli import cli
+from akcli._vendor.jlc2kicadlib import _http
 
 FIX = Path(__file__).parent / "fixtures" / "jlc"
 

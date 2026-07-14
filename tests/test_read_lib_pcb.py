@@ -7,7 +7,7 @@ Four readers are wired into the ``read`` command:
 * Altium ``.SchLib`` symbol library     (:mod:`readers.altium_schlib`)
 * Altium ``.PcbDoc`` board              (:mod:`readers.altium_pcb`)
 
-These tests drive :func:`altium_kicad_cli.cli.main` end-to-end and assert both
+These tests drive :func:`akcli.cli.main` end-to-end and assert both
 the exit code and the stdout payload (text + JSON). The Altium fixtures are
 built at test time from the committed pure-stdlib generators (the same ones the
 reader unit tests use), so the already-wired ``.SchLib``/``.PcbDoc`` paths are
@@ -20,8 +20,8 @@ import json
 import sys
 from pathlib import Path
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
+from akcli.cli import main
+from akcli.errors import EXIT
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

@@ -16,9 +16,9 @@ import json
 import uuid
 from pathlib import Path
 
-from altium_kicad_cli.cli import main
-from altium_kicad_cli.errors import EXIT
-from altium_kicad_cli.readers import kicad as kreader
+from akcli.cli import main
+from akcli.errors import EXIT
+from akcli.readers import kicad as kreader
 
 # A minimal KiCad symbol library: R (2 passive pins), +5V / GND power ports, and
 # PWR_FLAG (a (power) symbol whose single pin is power_out). Symbol names are

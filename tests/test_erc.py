@@ -11,11 +11,11 @@ import os
 
 import pytest
 
-from altium_kicad_cli.checks import erc
-from altium_kicad_cli.config import Config
-from altium_kicad_cli.model import Component, Net, Pin, PinType, Schematic
-from altium_kicad_cli.readers import altium_sch
-from altium_kicad_cli.report import Finding, Severity
+from akcli.checks import erc
+from akcli.config import Config
+from akcli.model import Component, Net, Pin, PinType, Schematic
+from akcli.readers import altium_sch
+from akcli.report import Finding, Severity
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 

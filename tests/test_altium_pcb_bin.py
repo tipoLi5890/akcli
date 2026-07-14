@@ -16,8 +16,8 @@ import struct
 
 import pytest
 
-from altium_kicad_cli.errors import AkcliError
-from altium_kicad_cli.readers import altium_pcb_bin as B
+from akcli.errors import AkcliError
+from akcli.readers import altium_pcb_bin as B
 
 NETS = ["GND", "V3V3"]
 
@@ -110,7 +110,7 @@ def test_out_of_range_net_index_is_none():
 @pytest.mark.skipif(not os.environ.get("AKCLI_PCBDOC_SAMPLE"),
                     reason="set AKCLI_PCBDOC_SAMPLE to a real binary .PcbDoc")
 def test_real_board_decodes():
-    from altium_kicad_cli.readers import altium_pcb
+    from akcli.readers import altium_pcb
 
     pcb = altium_pcb.read(os.environ["AKCLI_PCBDOC_SAMPLE"])
     assert pcb.pads, "no pads decoded from the real board"
