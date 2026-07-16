@@ -15,10 +15,15 @@ therefore:
   the component share a net with a detected power net and with a detected ground
   net — never by pin type;
 * gates the genuinely type-dependent rules (**driver conflict**, **floating
-  input**) behind a **type-confidence** = the fraction of pins that carry a real
+  input**, the **pin-type conflict matrix**, **undriven POWER_IN**) behind a
+  **type-confidence** = the fraction of pins that carry a real
   (non-Passive, non-Unspecified) electrical type. When that confidence is low /
   degenerate the findings are **downgraded to low-severity NOTEs** that state why,
-  so a mostly-Passive board never emits garbage;
+  so a mostly-Passive board never emits garbage. The matrix
+  (``_CONFLICT_MATRIX``) covers the high-signal cells of KiCad's default
+  pin-conflict matrix (open-collector/open-emitter/tri-state vs push-pull and
+  power drivers); ``ERC_POWER_IN_UNDRIVEN`` flags a supply pin on a net that is
+  neither a name-recognized rail nor driven by any ``POWER_OUT``;
 * flags **single-pin nets** as likely-dangling — but honors **No-ERC** markers
   (a designer-blessed point: a geo-match of the pin tip against
   ``sch.no_erc_points`` within grid tolerance) and config ``erc_waivers``;
@@ -55,6 +60,8 @@ ERC_NO_POWER = "ERC_NO_POWER"                  # IC shares no detected power net
 ERC_NO_GROUND = "ERC_NO_GROUND"                # IC shares no detected ground net
 ERC_NET_ALIAS = "ERC_NET_ALIAS"                # one net carries multiple names
 ERC_UNPLACED_UNIT = "ERC_UNPLACED_UNIT"        # multi-unit part with units never placed
+ERC_PIN_CONFLICT = "ERC_PIN_CONFLICT"          # pin-type matrix conflict on one net
+ERC_POWER_IN_UNDRIVEN = "ERC_POWER_IN_UNDRIVEN"  # POWER_IN on a non-rail, driverless net
 
 # Waiver ``rule`` token -> finding code (config ``[[erc_waiver]].rule``).
 _RULE_TO_CODE: dict[str, str] = {
@@ -65,6 +72,8 @@ _RULE_TO_CODE: dict[str, str] = {
     "no_ground": ERC_NO_GROUND,
     "net_alias": ERC_NET_ALIAS,
     "unplaced_unit": ERC_UNPLACED_UNIT,
+    "pin_conflict": ERC_PIN_CONFLICT,
+    "power_in_undriven": ERC_POWER_IN_UNDRIVEN,
 }
 
 # --- rail-name heuristics (shared shape with power.py; net-NAME based) --------
@@ -101,6 +110,24 @@ _DRIVING_TYPES: frozenset[PinType] = frozenset(
         PinType.OPEN_COLLECTOR, PinType.OPEN_EMITTER,
     }
 )
+
+# --- pin-type conflict matrix (TYPE-gated) ------------------------------------
+# Modeled on KiCad's default ERC pin-conflict matrix, restricted to the
+# high-signal cells; severities follow this module's convention (matrix "error"
+# cells surface as WARNING like driver_conflict, softer cells as NOTE — the
+# --fail-on gate decides what blocks). Same-type pairs of push-pull drivers are
+# ERC_DRIVER_CONFLICT's job and are deliberately absent here. UNSPECIFIED-vs-
+# anything is deliberately NOT flagged: real imports are full of unspecified
+# pins and the type-confidence header already reports that.
+_CONFLICT_MATRIX: dict[frozenset[PinType], Severity] = {
+    frozenset({PinType.OPEN_COLLECTOR, PinType.OUTPUT}): Severity.WARNING,
+    frozenset({PinType.OPEN_COLLECTOR, PinType.POWER_OUT}): Severity.WARNING,
+    frozenset({PinType.OPEN_EMITTER, PinType.OUTPUT}): Severity.WARNING,
+    frozenset({PinType.OPEN_EMITTER, PinType.POWER_OUT}): Severity.WARNING,
+    frozenset({PinType.TRI_STATE, PinType.POWER_OUT}): Severity.WARNING,
+    frozenset({PinType.TRI_STATE, PinType.OUTPUT}): Severity.NOTE,
+    frozenset({PinType.OPEN_COLLECTOR, PinType.OPEN_EMITTER}): Severity.NOTE,
+}
 
 # Below this fraction of typed pins, type-based rules are demoted to NOTE.
 _TYPE_CONFIDENCE_MIN = 0.2
@@ -331,6 +358,44 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                 )
             )
 
+        # (c2) pin-type conflict matrix (TYPE-gated): one finding per net per
+        #      conflicting type pair, listing every pin of the two types.
+        if not waivers.waives(ERC_PIN_CONFLICT, norm_names):
+            typed_pins = [
+                (ref, pin) for ref, pin in member_pins
+                if pin is not None
+                and pin.electrical_type in _INFORMATIVE_TYPES
+                and not _no_erc_suppressed(pin)
+            ]
+            present = {p.electrical_type for _r, p in typed_pins}
+            for pair, base_sev in sorted(
+                    _CONFLICT_MATRIX.items(),
+                    key=lambda kv: sorted(t.value for t in kv[0])):
+                if not pair <= present:
+                    continue
+                involved = [(r, p) for r, p in typed_pins
+                            if p.electrical_type in pair]
+                refs = [f"{d}.{n}" for (d, n), _p in involved]
+                names_pretty = " + ".join(sorted(t.value for t in pair))
+                sev = Severity.NOTE if low_conf else base_sev
+                first_pin = involved[0][1]
+                findings.append(
+                    Finding(
+                        ERC_PIN_CONFLICT,
+                        sev,
+                        f"net {label} mixes {names_pretty} pins "
+                        f"({', '.join(refs)}) — pin-type conflict"
+                        + _conf_suffix(low_conf, conf),
+                        refs=[*refs, label],
+                        pos=(first_pin.x_mil, first_pin.y_mil),
+                        anchors=[anchor("pin", r,
+                                        (p.x_mil, p.y_mil) if p else None)
+                                 for r, p in [(f"{d}.{n}", p)
+                                              for (d, n), p in involved]]
+                        + [anchor("net", label)],
+                    )
+                )
+
         # (d) floating input (TYPE-gated): an INPUT on a multi-pin, non-rail net
         #     with no driver. Single-pin inputs are covered by the dangling rule.
         if len(net.members) >= 2 and id(net) not in pg_ids:
@@ -356,6 +421,42 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                             refs=[ref_str],
                             pos=pos,
                             anchors=[anchor("pin", ref_str, pos), anchor("net", label)],
+                        )
+                    )
+
+        # (d2) undriven POWER_IN (TYPE-gated): a POWER_IN pin on a multi-pin net
+        #      that is neither a recognized rail (by name/config) nor driven by
+        #      any POWER_OUT — a supply pin wired to something that isn't a
+        #      supply. Name-recognized rails are trusted (this module's
+        #      net-name-first philosophy), so a plain "VDD label, no regulator
+        #      symbol" board stays quiet.
+        if len(net.members) >= 2 and id(net) not in pg_ids:
+            has_power_driver = any(
+                pin is not None and pin.electrical_type is PinType.POWER_OUT
+                for _ref, pin in member_pins
+            )
+            if (not has_power_driver
+                    and not waivers.waives(ERC_POWER_IN_UNDRIVEN, norm_names)):
+                for ref, pin in member_pins:
+                    if pin is None or pin.electrical_type is not PinType.POWER_IN:
+                        continue
+                    if _no_erc_suppressed(pin):
+                        continue
+                    ref_str = f"{ref[0]}.{ref[1]}"
+                    pname = f" ({pin.name})" if pin.name else ""
+                    pos = (pin.x_mil, pin.y_mil)
+                    findings.append(
+                        Finding(
+                            ERC_POWER_IN_UNDRIVEN,
+                            Severity.NOTE if low_conf else Severity.WARNING,
+                            f"{ref_str}{pname} is a POWER_IN pin on net {label}, "
+                            "which is neither a recognized power/ground rail nor "
+                            "driven by any POWER_OUT pin"
+                            + _conf_suffix(low_conf, conf),
+                            refs=[ref_str],
+                            pos=pos,
+                            anchors=[anchor("pin", ref_str, pos),
+                                     anchor("net", label)],
                         )
                     )
 

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/pinmap.schema.json",
+  "title": "AkcliPinmap",
+  "description": "akcli pinmap --json: the standard findings envelope. Each PINMAP finding is one 'MCU pin -> net' row (refs carry the 'REF.PIN' anchor); PINMAP_* codes report misses/mismatches against an --expected table. The metadata header must be read before trusting an empty findings list. Consumers must tolerate additive growth.",
+  "type": "object",
+  "required": ["schema_version", "metadata", "findings"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "passive_pin_ratio": {"type": "number"},
+        "no_erc_suppressed": {"type": "integer"},
+        "unnamed_net_count": {"type": "integer"},
+        "component_count": {"type": "integer"},
+        "pin_count": {"type": "integer"},
+        "undesignated_count": {"type": "integer"}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": {"type": "string"},
+          "severity": {
+            "type": "string",
+            "enum": ["info", "note", "warning", "error", "critical"]
+          },
+          "message": {"type": "string"},
+          "refs": {"type": "array", "items": {"type": "string"}},
+          "pos": {"type": "object"},
+          "anchors": {"type": "object"}
+        }
+      }
+    }
+  }
+}

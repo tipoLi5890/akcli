@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ._shared import _dumps, _emit
+from ._shared import _dumps, _emit, _stamp
 
 # Capabilities a CI gate may demand via --require.
 _REQUIRABLE = ("python", "kicad-cli", "ngspice", "config", "network")
@@ -133,13 +133,13 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     missing_required = [r for r in required if not checks[r][0]]
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "checks": {k: {"ok": ok, "detail": detail,
                            **({"hint": hint} if hint else {})}
                        for k, (ok, detail, hint) in checks.items()},
             "required": required,
             "ok": not missing_required,
-        }))
+        })))
     else:
         _emit("# akcli doctor")
         for name, (ok, detail, hint) in checks.items():

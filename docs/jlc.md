@@ -31,6 +31,10 @@ Exit codes: `0` on results **and** on a clean no-results path (a `no parts found
 notice goes to stderr); `7` on a network/HTTP error (a single
 `ERROR: NETWORK: …` line goes to stderr — never a traceback).
 
+Note: unlike most `akcli` commands, a `jlc` network error does not emit the
+`--json` error envelope on stdout — only the plain `ERROR: NETWORK: …` line on
+stderr.
+
 ### `akcli jlc bom <sch> [--qty N] [--min-stock N] [--suggest] [--fix|--fix-all] [--csv OUT.csv] [--json]`
 
 Check a schematic's **BOM against the live catalog** — every BOM line is
@@ -71,6 +75,8 @@ writes only high-confidence C-numbers back into the schematic's LCSC
 parameters — in the SAME parameter key when one existed (correcting a wrong
 id in place) — through the draw pipeline (`.bak`, `akcli undo` reverts),
 then re-checks; withheld low-confidence suggestions are counted on stderr.
+Like `plan`/`draw`/`arrange`, the fix is recorded in the workspace write
+journal — `akcli log` shows a `jlc-bom-fix` entry.
 `--fix-all` also writes the low-confidence ones. Suggestions are heuristics:
 **verify the datasheet before building.**
 
@@ -207,6 +213,10 @@ EasyEDA/LCSC and can be wrong (pin mapping, land pattern, 3D origin). Verify
 against the datasheet before wiring the part in.
 
 ## Part fields (JSON)
+
+`jlc bom`/`datasheet`/`show`/`add` wrap their `--json` output with a top-level
+`schema_version` field; `jlc search --json` is a bare array of part objects
+(no wrapper).
 
 | field | meaning |
 |---|---|

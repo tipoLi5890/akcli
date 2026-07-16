@@ -21,6 +21,7 @@ from ._shared import (
     _ExitWith,
     _load_schematic,
     _require_path,
+    _stamp,
 )
 
 
@@ -192,6 +193,14 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
                                     sources=[], verify_out=findings,
                                     backup_dir=path.parent)
             code = _draw_exit(results, findings)
+            # Every write goes through the journal — `akcli log` must never be
+            # blind to a BOM auto-fix (same provenance as plan/draw/arrange).
+            from .. import journal as _journal
+            _journal.record(
+                path, "jlc-bom-fix",
+                "applied" if code == EXIT["OK"] else "refused",
+                op_count=len(ops),
+                backup=(f"{path.name}.bak" if code == EXIT["OK"] else None))
             if code != EXIT["OK"]:
                 return code
             fixed = [ln for ln in lines if ln.suggestion]
@@ -213,7 +222,7 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
     if csv_out:
         text = bom_jlc.to_jlc_csv(lines)
         if csv_out == "-":
-            sys.stdout.write(text)          # CSV replaces the table: stdout = data
+            _emit(text)          # CSV replaces the table: stdout = data
         else:
             Path(csv_out).write_text(text, encoding="utf-8")
             sys.stderr.write(f"wrote JLCPCB BOM CSV: {csv_out}\n")
@@ -221,8 +230,8 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
     if csv_out == "-":
         pass
     elif args.json:
-        _emit(_dumps({"qty": qty, "lines": [ln.to_dict() for ln in lines],
-                      "totals": agg}))
+        _emit(_dumps(_stamp({"qty": qty, "lines": [ln.to_dict() for ln in lines],
+                             "totals": agg})))
     else:
         rows = [("REFS", "QTY", "NEED", "VALUE", "PART", "STATUS",
                  "STOCK", "UNIT", "EXT", "B", "NOTE")]
@@ -379,10 +388,10 @@ def _cmd_jlc_datasheet(args: argparse.Namespace) -> int:
     no_lcsc = sum(1 for r in rows if r.status == "no-lcsc")
 
     if args.json:
-        _emit(_dumps({"rows": [r.to_dict() for r in rows], "ok": ok,
-                      "page_link": page_link, "problems": problems,
-                      "no_lcsc": no_lcsc,
-                      "out_dir": str(out_dir) if out_dir else None}))
+        _emit(_dumps(_stamp({"rows": [r.to_dict() for r in rows], "ok": ok,
+                             "page_link": page_link, "problems": problems,
+                             "no_lcsc": no_lcsc,
+                             "out_dir": str(out_dir) if out_dir else None})))
     else:
         for r in rows:
             name = " ".join(x for x in (r.lcsc, r.mpn) if x) or "?"
@@ -420,7 +429,7 @@ def _cmd_jlc_show(args: argparse.Namespace) -> int:
     info = _enrich(part.lcsc or lcsc) if getattr(args, "easyeda", False) else None
 
     if args.json:
-        payload = part.to_dict()
+        payload = _stamp(part.to_dict())
         if getattr(args, "easyeda", False):
             payload["easyeda"] = info.to_dict() if info is not None else None
         _emit(_dumps(payload))
@@ -571,7 +580,7 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
             )
 
     if args.json:
-        payload = result.to_dict()
+        payload = _stamp(result.to_dict())
         payload["note"] = _VERIFY_CAVEAT
         if place:
             payload["place"] = place_doc

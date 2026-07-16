@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..errors import EXIT
+from ..errors import EXIT, AkcliError
 from ._shared import (
     _did_you_mean,
     _draw_exit,
@@ -23,6 +23,7 @@ from ._shared import (
     _load_cfg,
     _log,
     _require_path,
+    _stamp,
 )
 
 
@@ -121,7 +122,7 @@ def _cmd_arrange(args: argparse.Namespace) -> int:
                   + ", ".join(stuck))
     if not moves or not do_apply:
         if args.json:
-            _emit(_dumps({**base, "applied": False}))
+            _emit(_dumps(_stamp({**base, "applied": False})))
         elif moves:
             _emit(f"dry-run: {len(moves)} move(s) planned — re-run with --apply")
         return EXIT["FINDINGS"] if stuck else EXIT["OK"]
@@ -137,14 +138,19 @@ def _cmd_arrange(args: argparse.Namespace) -> int:
                             backup_depth=_backup_depth(cfg),
                             allow_open=bool(getattr(args, "allow_open", False)))
     code = _draw_exit(results, findings)
+    from .. import journal as _journal
+    _journal.record(target, "arrange",
+                    "applied" if code == EXIT["OK"] else "refused",
+                    op_count=len(moves),
+                    backup=(f"{target.name}.bak" if code == EXIT["OK"] else None))
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             **base, "applied": code == EXIT["OK"],
             "connectivity": [
                 {"code": f.code, "severity": f.severity.value, "message": f.message}
                 for f in findings
             ],
-        }))
+        })))
         return (EXIT["FINDINGS"] if stuck else EXIT["OK"]) \
             if code == EXIT["OK"] else code
     if code == EXIT["OK"]:
@@ -188,7 +194,7 @@ def _cmd_arrange_groups(args: argparse.Namespace, target) -> int:
             _emit("  not placed (unknown/unattached): " + ", ".join(unplaced))
     if not moves or not do_apply:
         if args.json:
-            _emit(_dumps({**base, "applied": False}))
+            _emit(_dumps(_stamp({**base, "applied": False})))
         elif moves:
             _emit(f"dry-run: {len(moves)} move(s) planned — re-run with --apply")
         return EXIT["FINDINGS"] if unplaced else EXIT["OK"]
@@ -204,13 +210,18 @@ def _cmd_arrange_groups(args: argparse.Namespace, target) -> int:
                             backup_depth=_backup_depth(cfg),
                             allow_open=bool(getattr(args, "allow_open", False)))
     code = _draw_exit(results, findings)
+    from .. import journal as _journal
+    _journal.record(target, "arrange-groups",
+                    "applied" if code == EXIT["OK"] else "refused",
+                    op_count=len(moves),
+                    backup=(f"{target.name}.bak" if code == EXIT["OK"] else None))
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             **base, "applied": code == EXIT["OK"],
             "connectivity": [
                 {"code": f.code, "severity": f.severity.value, "message": f.message}
                 for f in findings],
-        }))
+        })))
         return (EXIT["FINDINGS"] if unplaced else EXIT["OK"]) \
             if code == EXIT["OK"] else code
     if code == EXIT["OK"]:
@@ -304,8 +315,8 @@ def _undo_list(args: argparse.Namespace, target) -> int:
             "mtime": _dt.datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
         })
     if args.json:
-        _emit(_dumps({"target": str(target), "depth": len(entries),
-                      "backups": entries}))
+        _emit(_dumps(_stamp({"target": str(target), "depth": len(entries),
+                             "backups": entries})))
         return EXIT["OK"]
     if not entries:
         _emit(f"undo: no backups for {target.name} "
@@ -336,8 +347,9 @@ def _undo_swap(args: argparse.Namespace, target) -> int:
     summary = _undo_summary(cur, old)
     if not getattr(args, "apply", False):
         if args.json:
-            _emit(_dumps({"applied": False, "target": str(target),
-                          "backup": str(bak), "steps": 1, "summary": summary}))
+            _emit(_dumps(_stamp({"applied": False, "target": str(target),
+                                 "backup": str(bak), "steps": 1,
+                                 "summary": summary})))
         else:
             _emit(f"undo (dry-run): would restore {bak.name}\n  {summary}\n"
                   "re-run with --apply to swap (undo again = redo)")
@@ -348,9 +360,12 @@ def _undo_swap(args: argparse.Namespace, target) -> int:
     _shutil.copy2(bak, tmp)
     _shutil.copy2(target, bak)
     tmp.replace(target)
+    from .. import journal as _journal
+    _journal.record(target, "undo", "applied", steps=1, backup=bak.name)
     if args.json:
-        _emit(_dumps({"applied": True, "target": str(target),
-                      "backup": str(bak), "steps": 1, "summary": summary}))
+        _emit(_dumps(_stamp({"applied": True, "target": str(target),
+                             "backup": str(bak), "steps": 1,
+                             "summary": summary})))
     else:
         _emit(f"undo: restored {target.name} from backup — {summary}\n"
               f"previous content kept at {bak.name} (undo again = redo)")
@@ -379,9 +394,9 @@ def _undo_walk(args: argparse.Namespace, target, steps: int) -> int:
     summary = _undo_summary(cur, old)
     if not getattr(args, "apply", False):
         if args.json:
-            _emit(_dumps({"applied": False, "target": str(target),
-                          "backup": str(positions[steps]), "steps": steps,
-                          "summary": summary}))
+            _emit(_dumps(_stamp({"applied": False, "target": str(target),
+                                 "backup": str(positions[steps]),
+                                 "steps": steps, "summary": summary})))
         else:
             _emit(f"undo (dry-run): would walk back {steps} step(s) to "
                   f"{positions[steps].name}\n  {summary}\n"
@@ -403,10 +418,13 @@ def _undo_walk(args: argparse.Namespace, target, steps: int) -> int:
         os.replace(tmp, b)
         lo += 1
         hi -= 1
+    from .. import journal as _journal
+    _journal.record(target, "undo", "applied", steps=steps,
+                    backup=positions[steps].name)
     if args.json:
-        _emit(_dumps({"applied": True, "target": str(target),
-                      "backup": str(positions[steps]), "steps": steps,
-                      "summary": summary}))
+        _emit(_dumps(_stamp({"applied": True, "target": str(target),
+                             "backup": str(positions[steps]),
+                             "steps": steps, "summary": summary})))
     else:
         _emit(f"undo: walked back {steps} step(s), restored {target.name} — {summary}\n"
               f"stack reversed; a single `undo` redoes the last step")
@@ -493,9 +511,10 @@ def _cmd_new(args: argparse.Namespace) -> int:
     status_line = (f"status: CREATED — wrote {target.name} "
                    f"(blank {paper} sheet; `akcli draw` to add parts)")
     if args.json:
-        _emit(_dumps({"created": True, "target": str(target), "paper": paper,
-                      "title": getattr(args, "title", None) or None,
-                      "status": "created"}))
+        _emit(_dumps(_stamp({"created": True, "target": str(target),
+                             "paper": paper,
+                             "title": getattr(args, "title", None) or None,
+                             "status": "created"})))
     else:
         _emit(status_line)
     return EXIT["OK"]
@@ -514,9 +533,12 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         if args.json:
             _emit(_dumps({
                 "protocol_version": opsmod.PROTOCOL_VERSION,
+                # "altium" matches ops.capabilities.json's executor key;
+                # "altium_live" is a deprecated duplicate kept one release
                 "ops": [{"name": name,
                          "required": list(opsmod._OP_REQUIRED.get(name, [])),
                          "kicad": (caps.get(name) or {}).get("kicad"),
+                         "altium": (caps.get(name) or {}).get("altium"),
                          "altium_live": (caps.get(name) or {}).get("altium")}
                         for name in sorted(opsmod.OP_NAMES)],
                 "macros": [{"name": name,
@@ -560,7 +582,45 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         }
         _emit(_dumps(doc))
         return EXIT["OK"]
-    raise _ExitWith(EXIT["USAGE"], "ERROR: use `akcli ops list` or `akcli ops template <op>`")
+    if action == "validate":
+        opsfile = getattr(args, "opsfile", None)
+        if not opsfile:
+            raise _ExitWith(EXIT["USAGE"], "ERROR: ops validate needs an op-list file")
+        # target-free structural validation: envelope + per-op fields + macro
+        # expansion, exactly the checks plan/draw run before touching a target
+        errors: list[dict] = []
+        oplist = None
+        try:
+            oplist = opsmod.load_oplist(opsfile)
+            oplist = opsmod.expand_macros(oplist)
+        except AkcliError as exc:
+            errors.append({"op_index": None, "code": exc.code,
+                           "message": exc.message or str(exc)})
+        if oplist is not None:
+            errors.extend(
+                {"op_index": e.op_index, "code": e.code, "message": e.message}
+                for e in opsmod.validate_oplist(oplist))
+        valid = not errors
+        if args.json:
+            _emit(_dumps({
+                "protocol_version": opsmod.PROTOCOL_VERSION,
+                "valid": valid,
+                "ops_sha256": _ops_sha256(opsfile),
+                "op_count": len((oplist or {}).get("ops", []) or []),
+                "errors": errors,
+            }))
+        else:
+            if valid:
+                _emit(f"ops validate: OK — "
+                      f"{len((oplist or {}).get('ops', []) or [])} op(s)")
+            else:
+                for e in errors:
+                    idx = "" if e["op_index"] is None else f"[{e['op_index']}] "
+                    _emit(f"ERROR: {idx}{e['code']}: {e['message']}")
+        return EXIT["OK"] if valid else EXIT["OPLIST"]
+    raise _ExitWith(EXIT["USAGE"],
+                    "ERROR: use `akcli ops list`, `akcli ops template <op>` "
+                    "or `akcli ops validate <oplist.json>`")
 
 
 # --------------------------------------------------------------------------- #
@@ -575,12 +635,47 @@ def _draw_results_text(results: list, findings: list) -> str:
             lines.append(f"  ok    [{r.op_index}] {r.op}{uuids}")
         else:
             lines.append(f"  ERROR [{r.op_index}] {r.op}: {r.error_code}: {r.message}")
+            if getattr(r, "remediation", None):
+                lines.append(f"        hint: {r.remediation}")
     lines.append(f"# connectivity ({len(findings)})")
     if not findings:
         lines.append("  (clean)")
     for f in findings:
         lines.append(f"  {f.severity.value.upper()} [{f.code}] {f.message}")
     return "\n".join(lines)
+
+
+def _ops_sha256(ops_path: str | None) -> str | None:
+    """sha256 of the op-list file bytes (journal + hook provenance), or None."""
+    if not ops_path:
+        return None
+    import hashlib
+    from pathlib import Path
+    try:
+        return hashlib.sha256(Path(ops_path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _draw_result_payload(*, applied: bool, status: str, ops: list[dict],
+                         connectivity: list, net_diff) -> dict:
+    """The ONE author of the plan/draw ``--json`` payload.
+
+    Every plan/draw exit path (normal run AND structural op-list refusal)
+    routes through here, so the shape can never fork from
+    ``draw-result.schema.json`` in just one branch.
+    """
+    return {
+        "schema_version": "1.0",   # draw-result.schema.json
+        "applied": applied,
+        "status": status,
+        "ops": ops,
+        "connectivity": [
+            {"code": f.code, "severity": f.severity.value, "message": f.message}
+            for f in connectivity
+        ],
+        "net_diff": net_diff,
+    }
 
 
 def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
@@ -592,10 +687,30 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
     from ..ops import expand_macros, load_oplist, validate_oplist
     from ..writers import kicad as kwriter
 
-    oplist = load_oplist(args.ops)               # FileNotFound -> exit 4 via main
-    oplist = expand_macros(oplist)               # macro ops -> core ops (exit 6 on bad args)
+    # FileNotFound / malformed-JSON / bad-macro failures raise AkcliError and
+    # surface via cli.main — which renders them as a machine-readable
+    # {"error": {...}} envelope under --json (never a bare non-JSON stdout).
+    oplist = load_oplist(args.ops)
+    oplist = expand_macros(oplist)
     errs = validate_oplist(oplist)
     if errs:
+        if args.json:
+            # Same draw-result shape as a normal run, so an agent parses ONE
+            # schema on every plan/draw exit path (status "refused", the
+            # structural errors as per-op error results with remediation).
+            # OpError's document-level sentinel is op_index -1; the schema
+            # (and the per-op shape) require >= 0, so clamp it to 0.
+            from ..errors import remediation_for
+            results = [
+                kwriter.OpResult(
+                    op_index=max(e.op_index, 0), op=None, status="error",
+                    error_code=e.code, message=e.message,
+                    remediation=remediation_for(e.code)).to_dict()
+                for e in errs
+            ]
+            _emit(_dumps(_draw_result_payload(
+                applied=False, status="refused", ops=results,
+                connectivity=[], net_diff=None)))
         for e in errs:
             sys.stderr.write(f"ERROR: [{e.op_index}] {e.code}: {e.message}\n")
         return EXIT["OPLIST"]
@@ -678,15 +793,22 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
             sys.stderr.write(
                 "WARNING: this file is open in the KiCad GUI — use File>Revert "
                 "there NOW; a GUI save would overwrite this edit from memory\n")
-        # advisory secondary ERC via kicad-cli, if installed (never fatal)
+        # advisory secondary ERC via kicad-cli, if installed (never fatal —
+        # but a broken integration is surfaced on stderr, not swallowed);
+        # --no-erc skips it honestly instead of leaving the agent to wonder
+        # whether the external run happened
         try:
             from ..drivers import kicad_cli
-            if kicad_cli.available():
+            if getattr(args, "no_erc", False):
+                _log(args, 1, "advisory kicad-cli ERC skipped (--no-erc)")
+            elif kicad_cli.available():
                 rep = kicad_cli.erc(str(target))
                 if rep is not None:
                     _log(args, 1, f"kicad-cli erc: exit {rep.get('exit_code')}")
-        except Exception:  # pragma: no cover - advisory only
-            pass
+        except AkcliError as exc:  # pragma: no cover - advisory only
+            sys.stderr.write(f"note: advisory kicad-cli ERC skipped: {exc}\n")
+        except OSError as exc:  # pragma: no cover - advisory only
+            sys.stderr.write(f"note: advisory kicad-cli ERC failed: {exc}\n")
 
     code = _draw_exit(results, findings)
     show_diff = not getattr(args, "no_net_diff", False)
@@ -703,19 +825,14 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         status_line = "status: REFUSED — nothing written (fix the errors above)"
 
     if args.json:
-        payload = {
-            "applied": bool(do_apply and code == EXIT["OK"]),
-            "status": status,
-            "ops": [r.to_dict() for r in results],
-            "connectivity": [
-                {"code": f.code, "severity": f.severity.value, "message": f.message}
-                for f in findings
-            ],
-            "net_diff": None if (net_lines is None or not show_diff) else {
+        _emit(_dumps(_draw_result_payload(
+            applied=bool(do_apply and code == EXIT["OK"]),
+            status=status,
+            ops=[r.to_dict() for r in results],
+            connectivity=findings,
+            net_diff=None if (net_lines is None or not show_diff) else {
                 "equivalent": net_equiv, "risk": net_risk, "lines": net_lines,
-            },
-        }
-        _emit(_dumps(payload))
+            })))
     else:
         _emit(_draw_results_text(results, findings))
         if show_diff and net_lines is not None:
@@ -725,6 +842,16 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
             for ln in net_lines:
                 _emit(f"  {ln}")
         _emit(status_line)
+
+    from .. import journal as _journal
+    _journal.record(
+        target, getattr(args, "command", "draw") or "draw", status,
+        ops_sha256=_ops_sha256(args.ops),
+        op_count=len(oplist.get("ops", []) or []),
+        net_diff=(None if net_lines is None
+                  else {"equivalent": net_equiv, "risk": net_risk}),
+        backup=(f"{target.name}.bak" if status == "applied" else None),
+    )
 
     return code
 
@@ -804,6 +931,11 @@ def register(sub, common) -> None:
     pot.add_argument("--required-only", action="store_true",
                      help="omit optional fields from the skeleton")
     pot.set_defaults(handler=_cmd_ops, action="template")
+    pov = ops_sub.add_parser("validate", parents=[common],
+                             help="validate an op-list file structurally "
+                                  "(no target needed; exit 6 on any problem)")
+    pov.add_argument("opsfile", nargs="?", help="op-list JSON file")
+    pov.set_defaults(handler=_cmd_ops, action="validate")
     p.set_defaults(handler=_cmd_ops)
 
     p = sub.add_parser("plan", parents=[common],
@@ -835,4 +967,7 @@ def register(sub, common) -> None:
                    help="write even when a KiCad GUI lock file (~<name>.lck) is "
                         "present — you accept that a GUI save may overwrite the "
                         "edit; File>Revert in KiCad after applying")
+    p.add_argument("--no-erc", dest="no_erc", action="store_true",
+                   help="skip the advisory post-apply kicad-cli ERC run "
+                        "(akcli's own connectivity gate still runs)")
     p.set_defaults(handler=_cmd_draw)

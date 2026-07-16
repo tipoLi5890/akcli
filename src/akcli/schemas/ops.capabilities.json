@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://akcli/schemas/ops.capabilities.json",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/ops.capabilities.json",
   "title": "AkcliOpCapabilities",
   "protocol_version": 1,
   "description": "Per-executor support matrix. true = supported; false = ERROR: OP_UNSUPPORTED.",
@@ -8,6 +8,8 @@
     "kicad",
     "altium"
   ],
+  "altium_live_wired": false,
+  "altium_live_note": "the 'altium' executor column describes the experimental Windows-only live bridge, which has no CLI wiring: plan/draw always build target_format 'kicad'. Do not select an Altium write target.",
   "ops": {
     "place_component": {
       "kicad": true,

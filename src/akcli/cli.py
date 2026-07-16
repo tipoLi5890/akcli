@@ -34,19 +34,30 @@ import sys
 
 from . import __version__
 from .commands import calc as _calc_cmd
+from .commands import capabilities as _capabilities_cmd
 from .commands import checks as _checks_cmd
 from .commands import doctor as _doctor_cmd
 from .commands import drawing as _drawing_cmd
 from .commands import fab as _fab_cmd
 from .commands import jlc as _jlc_cmd
 from .commands import library as _library_cmd
+from .commands import log as _log_cmd
 from .commands import query as _query_cmd
+from .commands import render as _render_cmd
 from .commands import release as _release_cmd
 from .commands import review as _review_cmd
 from .commands import sim as _sim_cmd
 from .commands import view as _view_cmd
+from .commands import _shared as _shared_mod
 from .commands._shared import _ExitWith
-from .errors import EXIT, AkcliError, as_error, to_exit
+from .errors import (
+    ERROR_CODES,
+    EXIT,
+    AkcliError,
+    as_error,
+    remediation_for,
+    to_exit,
+)
 from .ops import PROTOCOL_VERSION
 
 # Stable seams: tests reference/patch these on the ``cli`` module directly.
@@ -112,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # One module per command family registers its subparsers + handlers.
     _query_cmd.register(sub, common)
+    _render_cmd.register(sub, common)
     _view_cmd.register(sub, common)
     _checks_cmd.register(sub, common)
     _review_cmd.register(sub, common)
@@ -123,6 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
     _release_cmd.register(sub, common)
     _doctor_cmd.register(sub, common)
     _sim_cmd.register(sub, common)
+    _capabilities_cmd.register(sub, common)
+    _log_cmd.register(sub, common)
 
     return parser
 
@@ -145,24 +159,74 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return EXIT["USAGE"]
 
+    _shared_mod._reset_stdout_tracking()
     try:
         return handler(args)
     except _ExitWith as exc:
+        if getattr(args, "json", False) and exc.code != EXIT["OK"]:
+            # Recover a real ERROR_CODES member when the raiser wrapped one
+            # into the message ("ERROR: TARGET_LOCKED: ..."): the agent gets
+            # the specific code + its remediation, not the EXIT category.
+            msg = exc.msg.removeprefix("ERROR: ")
+            code = _exit_name(exc.code)
+            head, sep, rest = msg.partition(": ")
+            if sep and head in ERROR_CODES:
+                code, msg = head, rest
+            _emit_json_error(code, msg, exc.code)
         if exc.msg:
             sys.stderr.write(exc.msg + "\n")
         return exc.code
     except AkcliError as exc:
         if getattr(args, "debug", False):
             raise
+        if getattr(args, "json", False):
+            _emit_json_error(exc.code, exc.message, to_exit(exc))
         sys.stderr.write(as_error(exc) + "\n")
         return to_exit(exc)
     except FileNotFoundError as exc:
         if getattr(args, "debug", False):
             raise
+        if getattr(args, "json", False):
+            _emit_json_error("FILE_NOT_FOUND", str(exc.filename or exc),
+                             EXIT["NOT_FOUND"])
         sys.stderr.write(f"ERROR: file not found: {exc.filename or exc}\n")
         return EXIT["NOT_FOUND"]
     except BrokenPipeError:
         return EXIT["OK"]
+
+
+def _exit_name(code: int) -> str:
+    """EXIT table name for a numeric exit code (e.g. 2 -> ``USAGE``)."""
+    for name, value in EXIT.items():
+        if value == code:
+            return name
+    return "USAGE"
+
+
+def _emit_json_error(code: str, message: str, exit_code: int) -> None:
+    """Under ``--json``, a failure is STILL machine-readable on stdout.
+
+    The agent contract is "if I passed --json, stdout parses as JSON on every
+    non-OK exit path that would otherwise leave stdout empty" — the plain
+    ``ERROR:`` line keeps going to stderr for humans. ``remediation`` carries
+    the actionable next step (``errors.REMEDIATION``). ``code`` is an
+    ``ERROR_CODES`` member when an ``AkcliError`` carried one, otherwise the
+    ``EXIT`` table name (``USAGE``, ``UNSUPPORTED_FORMAT``, ...) or
+    ``FILE_NOT_FOUND``. Skipped when the handler already emitted data, so a
+    failure after partial output never yields two JSON documents.
+    """
+    if _shared_mod._stdout_touched():
+        return
+    payload = {
+        "schema_version": "1",
+        "error": {
+            "code": code,
+            "message": message,
+            "exit": exit_code,
+            "remediation": remediation_for(code),
+        },
+    }
+    sys.stdout.write(_shared_mod._dumps(payload) + "\n")
 
 
 if __name__ == "__main__":  # pragma: no cover

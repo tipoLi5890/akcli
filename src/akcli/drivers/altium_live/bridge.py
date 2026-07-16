@@ -18,19 +18,19 @@ Protocol (independent reimplementation; no source copied — SPEC Appendix B):
   ``0600``) → ``fsync`` → ``os.replace`` to ``request.json``. The watcher therefore
   only ever observes a complete file.
 * The Python side polls for ``response.json`` every :data:`POLL_INTERVAL_S` seconds
-  up to ``timeout``; a no-show raises :class:`TimeoutError`.
+  up to ``timeout``; a no-show raises :class:`BridgeTimeout`.
 * :func:`ping` performs the ``altium_ping`` handshake. The reply carries
   ``{protocol_version, altium_version}``; a ``protocol_version`` that does not equal
   :data:`~akcli.ops.PROTOCOL_VERSION` is rejected with the frozen
   ``PROTOCOL_MISMATCH`` error code.
 
-Error policy: the only structured (``AkcliError``) failure raised here is the
-required ``PROTOCOL_MISMATCH`` handshake rejection (plus whatever
-:func:`~akcli.ops.validate_oplist` flags for a malformed outgoing
-op-list). The two bridge-transport conditions for which the frozen ``errors``
-registry has no code — a busy lock and a response time-out — are surfaced as the
-stdlib-flavoured :class:`BridgeBusy` and :class:`TimeoutError` rather than by
-inventing un-registered error codes.
+Error policy: every failure raised here is a structured :class:`AkcliError`
+carrying a frozen registry code — ``PROTOCOL_MISMATCH`` for the handshake
+rejection (plus whatever :func:`~akcli.ops.validate_oplist` flags for a
+malformed outgoing op-list), ``BRIDGE_BUSY`` for a held single-flight lock and
+``BRIDGE_TIMEOUT`` for a response no-show. :class:`BridgeBusy` and
+:class:`BridgeTimeout` stay ``RuntimeError``/``TimeoutError`` subclasses so
+pre-registration callers keep working.
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ __all__ = [
     "send",
     "ping",
     "BridgeBusy",
+    "BridgeTimeout",
     "default_bridge_dir",
     "REQUEST_NAME",
     "RESPONSE_NAME",
@@ -80,8 +81,28 @@ _MAX_RESPONSE_BYTES: int = 16 * 1024 * 1024
 _O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
 
 
-class BridgeBusy(RuntimeError):
-    """Raised when another request already holds the single-flight ``.lock``."""
+class BridgeBusy(AkcliError, RuntimeError):
+    """Raised when another request already holds the single-flight ``.lock``.
+
+    Carries the frozen ``BRIDGE_BUSY`` error code (exit 6, like
+    ``TARGET_LOCKED``) while remaining a ``RuntimeError`` for callers that
+    predate the code's registration.
+    """
+
+    def __init__(self, message: str = "") -> None:
+        AkcliError.__init__(self, "BRIDGE_BUSY", message)
+
+
+class BridgeTimeout(AkcliError, TimeoutError):
+    """Raised when Altium produces no response within the deadline.
+
+    Carries the frozen ``BRIDGE_TIMEOUT`` error code (exit 7, like
+    ``KICAD_CLI_TIMEOUT``) while remaining a ``TimeoutError`` for callers that
+    predate the code's registration.
+    """
+
+    def __init__(self, message: str = "") -> None:
+        AkcliError.__init__(self, "BRIDGE_TIMEOUT", message)
 
 
 # --------------------------------------------------------------------------- #
@@ -204,7 +225,7 @@ def _exchange(payload: dict, reqdir: Path | str, timeout: float) -> dict:
             except (json.JSONDecodeError, ValueError):
                 pass  # mid-write / partial; retry until the deadline
             if time.monotonic() >= deadline:
-                raise TimeoutError(
+                raise BridgeTimeout(
                     f"no {RESPONSE_NAME} from Altium within {timeout}s (run {run_dir.name})"
                 )
             time.sleep(POLL_INTERVAL_S)

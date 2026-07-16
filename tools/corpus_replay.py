@@ -13,29 +13,42 @@ reports drift (new/lost fingerprints, histogram shifts) — the calibration
 gate for promoting a rule into a blocking ``--review-policy`` allowlist:
 replay a corpus, measure the false-positive rate, THEN allowlist.
 
-NOT part of the product: no wheel packaging, no CI dependency.
+Not wheel-packaged, but CI-wired: ``tests/test_corpus_replay.py`` replays the
+committed corpus against ``tests/golden/corpus_replay_baseline.json`` on every
+run, so a rule change that shifts findings on the corpus leaves an auditable
+baseline diff in the PR instead of an undocumented judgment call. Regenerate
+deliberately with::
+
+    python tools/corpus_replay.py tests/fixtures/corpus \
+        --write-baseline tests/golden/corpus_replay_baseline.json
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
+_REPO = Path(__file__).resolve().parent.parent
+if str(_REPO / "src") not in sys.path:
+    sys.path.insert(0, str(_REPO / "src"))
+
 
 def _analyze(fixture: Path) -> dict:
-    repo = Path(__file__).resolve().parent.parent
-    env = dict(os.environ, PYTHONPATH=str(repo / "src"))
-    out = subprocess.run(
-        [sys.executable, "-m", "akcli", "review", "analyze", str(fixture),
-         "--profile", "deep", "--json"],
-        capture_output=True, text=True, env=env, check=False)
-    if out.returncode not in (0, 1):
-        return {"error": out.stderr.strip()[-500:]}
-    doc = json.loads(out.stdout)
+    # In-process (the golden-corpus tests' pattern): the CI replay pays one
+    # interpreter start total instead of one per corpus file.
+    from akcli.cli import main as _main  # lazy: after sys.path setup
+
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        rc = _main(["review", "analyze", str(fixture),
+                    "--profile", "deep", "--json"])
+    if rc not in (0, 1):
+        return {"error": stderr.getvalue().strip()[-500:]}
+    doc = json.loads(stdout.getvalue())
     hist: dict[str, int] = {}
     for f in doc["findings"]:
         hist[f["severity"]] = hist.get(f["severity"], 0) + 1

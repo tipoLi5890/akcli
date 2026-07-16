@@ -1,0 +1,36 @@
+{
+  "schema_version": "1",
+  "source": "tests/fixtures/kicad/board_v7.kicad_sch",
+  "total": 3,
+  "matched": 3,
+  "returned": 3,
+  "truncated": false,
+  "nets": [
+    {
+      "name": "+3V3",
+      "stable_id": "net_5e72d34f4a63",
+      "members": [
+        "#PWR01.1",
+        "R1.1"
+      ]
+    },
+    {
+      "name": "GND",
+      "stable_id": "net_0459555014c9",
+      "members": [
+        "#PWR02.1",
+        "C1.2",
+        "R2.2"
+      ]
+    },
+    {
+      "name": "MID",
+      "stable_id": "net_6ba9994ea87a",
+      "members": [
+        "C1.1",
+        "R1.2",
+        "R2.1"
+      ]
+    }
+  ]
+}

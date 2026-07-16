@@ -16,6 +16,7 @@ from .. import config as _config
 from .. import report as _report
 from ..errors import EXIT
 from ._shared import (
+    _add_exit_policy_flags,
     _dumps,
     _emit,
     _ExitWith,
@@ -24,6 +25,7 @@ from ._shared import (
     _load_schematic,
     _require_path,
     _schematic_meta,
+    _stamp,
 )
 
 
@@ -57,6 +59,9 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
     if name == "libsync":
         from ..checks import libsync
         return libsync.run(args.path, lib_dirs=getattr(args, "symbols", None))
+    if name == "pairs":
+        from ..checks import pairs
+        return pairs.run(sch, cfg)
     return []
 
 
@@ -78,6 +83,8 @@ def _cmd_check(args: argparse.Namespace) -> int:
         which.append("nets")
     if getattr(args, "libsync", False):
         which.append("libsync")
+    if getattr(args, "pairs", False):
+        which.append("pairs")
     intent_file = getattr(args, "intent", None)
     contract_file = getattr(args, "contract", None)
     if not which and not intent_file and not contract_file:
@@ -85,6 +92,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
         which = ["erc", "power", "bom", "nets"]
         if str(path).lower().endswith(".kicad_sch"):
             which.append("layout")
+        # name-level pair/bus continuity; [check].pairs = false opts out
+        if cfg.check.get("pairs", True):
+            which.append("pairs")
 
     findings: list = []
     for name in which:
@@ -106,33 +116,8 @@ def _cmd_check(args: argparse.Namespace) -> int:
     meta["config_waived"] = f"{waived} ({demoted} demoted)"
     fmt = getattr(args, "format", None) or ("json" if args.json else "text")
     _emit(_report.render(findings, fmt, meta, source=str(path)))
-    return _check_exit(findings, args)
-
-
-# --fail-on token -> the least-severe Severity that trips a non-zero exit.
-_FAIL_ON_SEVERITY = {
-    "info": _report.Severity.INFO,
-    "note": _report.Severity.NOTE,
-    "warning": _report.Severity.WARNING,
-    "error": _report.Severity.ERROR,
-}
-
-
-def _check_exit(findings: list, args: argparse.Namespace) -> int:
-    """Exit code for ``check``: non-zero when any finding meets ``--fail-on``.
-
-    ``--fail-on never`` (and the deprecated ``--exit-zero`` alias) always exit 0;
-    the default ``warning`` reproduces the historical lint-style behaviour.
-    """
-    if getattr(args, "exit_zero", False):
-        return EXIT["OK"]
-    fail_on = getattr(args, "fail_on", None) or "warning"
-    if fail_on == "never":
-        return EXIT["OK"]
-    threshold = _report._SEV_RANK[_FAIL_ON_SEVERITY[fail_on]]
-    if any(_report._SEV_RANK.get(f.severity, 0) >= threshold for f in findings):
-        return EXIT["FINDINGS"]
-    return EXIT["OK"]
+    # one exit policy for every findings-emitting command (see _shared)
+    return _findings_exit(findings, args)
 
 
 def _cmd_diff(args: argparse.Namespace) -> int:
@@ -163,7 +148,7 @@ def _cmd_verify_schpcb(args: argparse.Namespace, sch_path, pcb_path) -> int:
     equivalent = not errors
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "equivalent": equivalent,
             "mode": "sch-pcb",
             "schematic": str(sch_path),
@@ -175,7 +160,7 @@ def _cmd_verify_schpcb(args: argparse.Namespace, sch_path, pcb_path) -> int:
                  "message": f.message, "anchors": f.anchors}
                 for f in findings
             ],
-        }))
+        })))
     else:
         lines = [f"SCH-PCB EQUIVALENCE: {'PASS' if equivalent else 'FAIL'}",
                  f"  components: {len(sch.components)} (sch) vs "
@@ -216,7 +201,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     equivalent = comp_ok and nets_ok and strict_ok
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "equivalent": equivalent,
             "strict": bool(getattr(args, "strict", False)),
             "components": {"a": len(a.components), "b": len(b.components)},
@@ -224,7 +209,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             "renamed_nets": [[n.name_a, n.name_b] for n in rep.renamed_nets],
             "summary": rep.summary(),
             "detail": rep.export(),
-        }))
+        })))
     else:
         lines = [f"CONVERSION PROOF: {'PASS' if equivalent else 'FAIL'}",
                  f"  components: {len(a.components)} vs {len(b.components)}"
@@ -392,15 +377,21 @@ def _cmd_relink(args: argparse.Namespace) -> int:
 
     replaces = [a for a in actions if a["status"] == "replace"]
     missing = [a for a in actions if a["status"] == "missing-lib"]
+    if res is not None and res.get("written"):
+        from .. import journal as _journal
+        _journal.record(target, "relink-symbols", "applied",
+                        op_count=len(res.get("replaced", [])),
+                        backup=(Path(res["backup"]).name
+                                if res.get("backup") else None))
     if args.json:
         # new_sexpr is a full symbol block; strip it for readability
         slim = [{k: v for k, v in a.items() if k != "new_sexpr"} for a in actions]
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "actions": slim,
             "applied": bool(res and res["written"]),
             "replaced": (res or {}).get("replaced", []),
             "backup": (res or {}).get("backup"),
-        }))
+        })))
     else:
         lines = []
         for a in actions:
@@ -436,6 +427,9 @@ def register(sub, common) -> None:
     p.add_argument("--nets", action="store_true",
                    help="run connectivity-hygiene checks (single-pin nets, "
                         "off-grid pins, wire/pin/label attachment near-misses)")
+    p.add_argument("--pairs", action="store_true",
+                   help="run differential-pair / bus-continuity checks "
+                        "(_P/_N, D+/D-, CAN_H/_L partners; D0..D7 index gaps)")
     p.add_argument("--intent", metavar="FILE",
                    help="assert a JSON design-intent file (see `akcli nets "
                         "--intent-snapshot`) against the built netlist")
@@ -450,12 +444,7 @@ def register(sub, common) -> None:
     p.add_argument("--symbols", metavar="PATH", action="append",
                    help="symbol source dir or .kicad_sym for --libsync "
                         "(repeatable)")
-    p.add_argument("--fail-on", choices=["info", "note", "warning", "error", "never"],
-                   default="warning",
-                   help="minimum finding severity that exits non-zero "
-                        "(default: warning; 'never' always exits 0)")
-    p.add_argument("--exit-zero", action="store_true",
-                   help="deprecated alias for --fail-on never (always exit 0)")
+    _add_exit_policy_flags(p)
     p.add_argument("--format", choices=["text", "json", "sarif", "junit"],
                    help="output format (sarif: GitHub code scanning; junit: CI test reporters)")
     p.set_defaults(handler=_cmd_check)
@@ -463,7 +452,7 @@ def register(sub, common) -> None:
     p = sub.add_parser("diff", parents=[common], help="net-level diff of two schematics")
     p.add_argument("path", nargs="?", help="schematic A")
     p.add_argument("other", nargs="?", help="schematic B")
-    p.add_argument("--exit-zero", action="store_true", help="always exit 0")
+    _add_exit_policy_flags(p)
     p.set_defaults(handler=_cmd_diff)
 
     p = sub.add_parser("verify", parents=[common],
@@ -483,7 +472,7 @@ def register(sub, common) -> None:
     p.add_argument("--mcu", metavar="REF", help="MCU designator (overrides config)")
     p.add_argument("--expected", metavar="FILE",
                    help="expected pin->signal table (.csv or .json)")
-    p.add_argument("--exit-zero", action="store_true", help="always exit 0")
+    _add_exit_policy_flags(p)
     p.set_defaults(handler=_cmd_pinmap)
 
     p = sub.add_parser("expected", parents=[common],

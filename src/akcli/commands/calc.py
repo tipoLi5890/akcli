@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 
 from ..errors import EXIT
-from ._shared import _did_you_mean, _dumps, _emit, _ExitWith
+from ._shared import _did_you_mean, _dumps, _emit, _ExitWith, _stamp
 
 
 def _calc_md(doc: dict) -> str:
@@ -169,7 +169,7 @@ def _cmd_calc(args: argparse.Namespace) -> int:
         _emit(_calc_md(doc))
         return EXIT["OK"]
     if getattr(args, "json", False):
-        _emit(_dumps(doc))
+        _emit(_dumps(_stamp(doc)))
         return EXIT["OK"]
     lines = [f"{doc['title']}"]
     for key, cell in doc["results"].items():

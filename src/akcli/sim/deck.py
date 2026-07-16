@@ -318,6 +318,26 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
         letter = (getattr(card, "letter", "") or "").upper()
         name = _element_name(letter, comp.designator)
         tail = getattr(card, "model_name", None) or getattr(card, "value", None) or ""
+        if letter and letter[0] in "RCL" and not getattr(card, "model_name", None):
+            # a zero-valued passive is a solver trap: R=0 is a hard short
+            # (singular matrix in some analyses), C=0 / L=0 silently deletes
+            # the part's effect — almost always a placeholder value
+            try:
+                from ..calc.si import parse_value as _pv
+                zero = _pv(str(tail).rstrip("FfHh")) == 0.0
+            except (ValueError, TypeError):
+                zero = False
+            if zero:
+                warnings.append(
+                    Finding(
+                        code="SIM_ZERO_PASSIVE",
+                        severity=Severity.WARNING,
+                        message=f"{comp.designator}: value {tail!r} parses to 0 "
+                        f"— a zero {letter[0]} is a solver trap (short / no-op); "
+                        "set the real value or Sim.Enable=0 to skip it",
+                        refs=[comp.designator],
+                    )
+                )
         elements.append(" ".join([name, *nodes, str(tail)]).rstrip())
         _add_card(getattr(card, "model_card", None))
         if letter:
@@ -367,6 +387,19 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
         name = str(stim.get("name", ""))
         n1 = _node_for(stim.get("node"), name)
         n2 = _node_for(stim.get("node2", "0"), name)
+        if n1 == n2:
+            # both terminals on one node (usually both resolved to ground):
+            # the source drives nothing — a silent no-op trap
+            warnings.append(
+                Finding(
+                    code="SIM_STIMULUS_SHORTED",
+                    severity=Severity.WARNING,
+                    message=f"stimulus {name or '?'}: both terminals resolve to "
+                    f"node {n1!r} — the source drives nothing (check node/"
+                    "node2 and the --gnd mapping)",
+                    refs=[name] if name else [],
+                )
+            )
         if kind == "vsource":
             stim_lines.append(f"{_element_name('V', name)} {n1} {n2} {stim.get('value', '')}".rstrip())
             _mark_stim((n1, n2), kind)

@@ -254,11 +254,12 @@ declared stack order. Deeper PDN work (anti-resonance, impedance) needs
 zone polygons / SPICE and stays on the backlog — the honest boundary is
 stated rather than approximated.
 
-## Closed loop (M7): propose / diff / tree
+## Closed loop (M7): propose / testbench / diff / tree
 
 ```
 akcli review analyze board.kicad_sch --out review.findings.json
 akcli review propose review.findings.json --out proposals.json
+akcli review testbench board.kicad_sch --findings review.findings.json
 akcli review diff old.findings.json new.findings.json --fail-on-new
 akcli review tree board.kicad_sch
 ```
@@ -272,6 +273,24 @@ contract `evidence` line — the sedimentation chain closes. The structural
 guarantee (in code AND in `schemas/proposals.schema.json`): **a proposal
 with open `requires_confirmation` items carries no op-list draft**; PCB
 fixes are `layout` proposals because akcli writes schematics only.
+
+**`review testbench`** closes the review → sim loop: every finding with a
+simulable claim becomes a **runnable subcircuit SPICE testbench** — the net
+cone around the finding's components is cut out of the schematic, stimuli
+and pass/fail bounds are synthesized from the finding's own calc evidence,
+and ngspice delivers the verdict ("fc = 15.9 kHz" upgrades from *computed*
+to *simulated*). Generators today: `REVIEW_RC_CUTOFF` (AC sweep, assert the
+−3 dB crossing on 1/(2πRC), ±8 %) and the divider family
+(`REVIEW_FB_DIVIDER`/`_VREF_MISMATCH`/`REVIEW_DIVIDER_TAP_MISMATCH` — drive
+the top rail, assert the tap at Vtop·Rb/(Rt+Rb), ±2 %). The same honesty
+rules as everywhere: predictions are **recomputed from the live schematic**
+(a stale findings file cannot vacuously pass), a topology that no longer
+re-derives is **skipped with a reason**, and the cone note states that the
+verdict covers the local network, not the loaded in-circuit response.
+`--findings` reuses a saved envelope (default: in-process `analyze`);
+`--deck-only --out DIR` emits the decks with no engine; without an engine
+the run mode exits 7 (`NGSPICE_MISSING`) like `akcli sim`. Lint-style exit:
+1 when any bench fails.
 
 **`review diff`** aligns two findings files by the wording-immune
 fingerprint: added / resolved / severity-or-confidence changed / persisting.

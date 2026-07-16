@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://akcli/schemas/ops.schema.json",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/ops.schema.json",
   "title": "AkcliOpList",
   "type": "object",
   "required": ["protocol_version", "target_format", "ops"],

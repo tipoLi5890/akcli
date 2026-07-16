@@ -1,0 +1,23 @@
+{
+ "nets": [
+  {
+   "name": "GND",
+   "members": [
+    "R2.2"
+   ]
+  },
+  {
+   "name": "VIN",
+   "members": [
+    "R1.1"
+   ]
+  },
+  {
+   "name": "VOUT",
+   "members": [
+    "R1.2",
+    "R2.1"
+   ]
+  }
+ ]
+}

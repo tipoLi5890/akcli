@@ -133,6 +133,7 @@ class Schematic:
     def export(self) -> dict:
         """Return the JSON-serializable export dict (stamps ``schema_version``)."""
         d = to_json(self)
+        assert isinstance(d, dict)  # to_json of a dataclass is always a dict
         d.setdefault("schema_version", SCHEMA_VERSION)
         return d
 
@@ -171,6 +172,7 @@ class Pcb:
 
     def export(self) -> dict:
         d = to_json(self)
+        assert isinstance(d, dict)  # to_json of a dataclass is always a dict
         d.setdefault("schema_version", SCHEMA_VERSION)
         return d
 
@@ -229,6 +231,7 @@ class Library:
 
     def export(self) -> dict:
         d = to_json(self)
+        assert isinstance(d, dict)  # to_json of a dataclass is always a dict
         d.setdefault("schema_version", SCHEMA_VERSION)
         return d
 

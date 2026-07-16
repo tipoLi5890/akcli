@@ -1,0 +1,224 @@
+(kicad_sch
+	(version 20231120)
+	(generator "eeschema")
+	(generator_version "8.0")
+	(uuid "2fd8c80d-9457-4b96-ad01-04d3a4b8a100")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Device:L"
+		(pin_numbers (hide yes))
+		(pin_names (offset 1.016) (hide yes))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "L"
+			(at -1.27 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "L"
+			(at 1.905 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Inductor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "L_0_1"
+			(arc
+				(start 0 -2.54)
+				(mid 0.6323 -1.905)
+				(end 0 -1.27)
+				(stroke (width 0) (type default))
+				(fill (type none))))
+		(symbol "L_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 1.27)
+				(name "1" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 1.27)
+				(name "2" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:C_Polarized"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "C"
+			(at 0.635 2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Value" "C_Polarized"
+			(at 0.635 -2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Footprint" ""
+			(at 0.9652 -3.81 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Polarized capacitor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "C_Polarized_0_1"
+			(polyline
+				(pts (xy -1.27 1.778) (xy -0.508 1.778))
+				(stroke (width 0.3048) (type default))
+				(fill (type none)))
+			(polyline
+				(pts (xy -0.889 2.159) (xy -0.889 1.397))
+				(stroke (width 0.3048) (type default))
+				(fill (type none))))
+		(symbol "C_Polarized_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:C"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "C"
+			(at 0.635 2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Value" "C"
+			(at 0.635 -2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Footprint" ""
+			(at 0.9652 -3.81 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Unpolarized capacitor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "C_0_1"
+			(polyline
+				(pts (xy -2.032 -0.762) (xy 2.032 -0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none)))
+			(polyline
+				(pts (xy -2.032 0.762) (xy 2.032 0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none))))
+		(symbol "C_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:R"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "R"
+			(at 2.032 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "R"
+			(at 0 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at -1.778 0 90)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Resistor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "R_0_1"
+			(rectangle
+				(start -1.016 -2.54)
+				(end 1.016 2.54)
+				(stroke (width 0.254) (type default))
+				(fill (type none))))
+		(symbol "R_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))))
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(symbol (lib_id "Device:L") (at 38.1 20.32 90) (unit 1) (uuid "06b474aa-2914-5d7f-870a-b1c937114def") (pin "1" (uuid "74e171eb-4ea7-5454-8a3b-38e32d0db1a5")) (pin "2" (uuid "2c7361fa-7ad3-5213-a162-fa6759c8c568")) (property "Reference" "L1" (at 38.1 18.4177 90) (effects (font (size 1.27 1.27)))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "L1") (unit 1))))
+	(property "Value" "10uH" (at 38.1 21.59 90) (effects (font (size 1.27 1.27)))))
+	(symbol (lib_id "Device:C_Polarized") (at 25.4 24.13 0) (unit 1) (uuid "01f09cd1-35cf-5723-b927-cc2529d4ad1e") (pin "1" (uuid "6fe9d0d0-2ffe-57bd-9de0-dc6d7d8b7c79")) (pin "2" (uuid "714dc573-6bd1-503b-98f6-baaa6c9a0c67")) (property "Reference" "C1" (at 26.67 22.86 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "C1") (unit 1))))
+	(property "Value" "10u" (at 26.67 25.4 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:C") (at 50.8 24.13 0) (unit 1) (uuid "b8122e7a-81bd-56d4-9df7-847868618037") (pin "1" (uuid "23e2feaf-191a-56cd-ad0f-3853131151ba")) (pin "2" (uuid "2d25a2a0-87d7-59a5-9a03-83d6843d3a90")) (property "Reference" "C2" (at 54.102 22.86 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "C2") (unit 1))))
+	(property "Value" "10u" (at 54.102 25.4 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(wire (pts (xy 25.4 20.32) (xy 34.29 20.32)) (stroke (width 0) (type default)) (uuid "8ca3ec57-f955-5b38-94b0-1cd78d4de92c"))
+	(label "VIN" (at 30.48 20.32 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "3a27f612-a024-56b1-9b30-2434d01ad7fe"))
+	(wire (pts (xy 41.91 20.32) (xy 50.8 20.32)) (stroke (width 0) (type default)) (uuid "3ae8700d-2b8f-53cc-ad5b-7dcab43cb5bd"))
+	(label "3V3" (at 45.72 20.32 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "b0e866db-736f-5f15-a8b4-596948bd5ff5"))
+	(label "GND" (at 25.4 27.94 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "d3ce797d-f904-59bb-9d18-e57dba6a8d63"))
+	(label "GND" (at 50.8 27.94 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "bf123b2e-d17f-5004-bd6d-7f1450763637"))
+	(symbol (lib_id "Device:C") (at 76.2 25.4 0) (unit 1) (uuid "bcec047d-01e6-5ba5-9624-9202e93e1e70") (pin "1" (uuid "cf8d4553-98a9-506b-9a6b-39c209f4d158")) (pin "2" (uuid "320e8f9c-08bd-52dd-9819-94f784fc627d")) (property "Reference" "C3" (at 79.502 24.13 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "C3") (unit 1))))
+	(property "Value" "100n" (at 79.502 26.67 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 76.2 21.59 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "a0e2f6c4-3556-5ec6-bf0b-8a9cd9a25348"))
+	(label "GND" (at 76.2 29.21 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "5f20bd63-41ba-5f50-8283-ed8102129f62"))
+	(symbol (lib_id "Device:C") (at 91.44 25.4 0) (unit 1) (uuid "bacd6fae-badd-5e87-86d0-64abe88081af") (pin "1" (uuid "945ac703-b860-5cab-b8b8-3d8ba0fb993a")) (pin "2" (uuid "deb45d02-a4cc-58fa-bb52-d4fccd1e4f97")) (property "Reference" "C4" (at 94.742 24.13 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "C4") (unit 1))))
+	(property "Value" "100n" (at 94.742 26.67 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 91.44 21.59 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "086c8d28-7040-508b-8a55-25b367923f10"))
+	(label "GND" (at 91.44 29.21 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "c95628db-0d8b-571f-8eca-c0bf05760dcc"))
+	(symbol (lib_id "Device:R") (at 116.84 25.4 0) (unit 1) (uuid "45a60885-ec26-5ce1-9875-d56efea7dfa1") (pin "1" (uuid "e614481e-358c-598c-941c-7af2d295c7e0")) (pin "2" (uuid "04666e9d-02cb-5e0b-a3c6-d05e1124bb60")) (property "Reference" "R3" (at 119.126 24.13 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R3") (unit 1))))
+	(property "Value" "4.7k" (at 119.126 26.67 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 116.84 21.59 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "c040b67e-5c22-58c2-85e0-371a8df7b518"))
+	(label "SDA" (at 116.84 29.21 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "dda7bb95-dc76-5bc1-b735-440be3704759"))
+	(symbol (lib_id "Device:R") (at 132.08 25.4 0) (unit 1) (uuid "e89fb61d-bb69-5c4a-aab8-1c56c4bcf041") (pin "1" (uuid "a38f924f-2c60-5669-a39b-53f5d2f99d5c")) (pin "2" (uuid "2f1f79f2-85bb-5746-bd4e-656c32150fa8")) (property "Reference" "R4" (at 134.366 24.13 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R4") (unit 1))))
+	(property "Value" "4.7k" (at 134.366 26.67 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 132.08 21.59 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "f0ea9b63-bd13-59e2-acc4-e6e379fbd997"))
+	(label "SCL" (at 132.08 29.21 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "f62c2f5c-402a-5357-969c-e748b2f60be1"))
+	(symbol (lib_id "Device:R") (at 30.48 55.88 0) (unit 1) (uuid "ade2d373-29a1-5aa9-bec0-0e362f0a529d") (pin "1" (uuid "3e47057e-6c4c-58c6-808b-75a467006f77")) (pin "2" (uuid "90e88d6b-5fbd-570d-9811-b47b239caae9")) (property "Reference" "R1" (at 32.766 54.61 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R1") (unit 1))))
+	(property "Value" "10k" (at 32.766 57.15 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 30.48 66.04 0) (unit 1) (uuid "5ef3278e-38ef-5206-ad84-ecd7ecac708c") (pin "1" (uuid "6967884b-b81e-522b-95ee-f08aaf319316")) (pin "2" (uuid "8fed84f7-33b5-598a-90a0-ca3d8de129f8")) (property "Reference" "R2" (at 32.766 64.77 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R2") (unit 1))))
+	(property "Value" "10k" (at 32.766 67.31 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 30.48 52.07 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "2d6fab70-2509-5315-b0d7-ffafbbe2b458"))
+	(label "VREF" (at 30.48 59.69 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "fd6d4d95-474d-569f-befd-6d7ff348ee1a"))
+	(label "VREF" (at 30.48 62.23 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "cebc1056-c299-5ab3-a12a-8a3840e33d7f"))
+	(label "GND" (at 30.48 69.85 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "f6809124-18b6-55fd-8731-66ae1610eac9"))
+	(symbol (lib_id "Device:R") (at 60.96 55.88 0) (unit 1) (uuid "4fa0cca1-0ac3-5771-b474-1fb03bb768fc") (pin "1" (uuid "55b303ca-bc31-55e2-baa5-6e6c82545df9")) (pin "2" (uuid "5548456f-e31d-5604-ad41-a32a907ff83a")) (property "Reference" "R6" (at 63.246 54.61 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R6") (unit 1))))
+	(property "Value" "100k" (at 63.246 57.15 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 60.96 66.04 0) (unit 1) (uuid "0852acb6-f474-55dd-8ab9-dc9ee09a1395") (pin "1" (uuid "942aa9a3-982a-55e2-ba0b-6afc3b1fda52")) (pin "2" (uuid "9a055237-0d24-5376-a3c7-20cd2ffad87d")) (property "Reference" "R7" (at 63.246 64.77 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R7") (unit 1))))
+	(property "Value" "22k" (at 63.246 67.31 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "VIN" (at 60.96 52.07 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "dcb747b7-8b5c-58d6-9ca5-5dab4757a583"))
+	(label "SENSE" (at 60.96 59.69 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "e9f3415a-31e7-5cbf-9e65-885a49439d2e"))
+	(label "SENSE" (at 60.96 62.23 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "f3e51a49-0473-550f-84dd-fa1b7911f727"))
+	(label "GND" (at 60.96 69.85 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "0c9a10bf-89eb-5319-ada3-aee084ba2686"))
+	(symbol (lib_id "Device:R") (at 96.52 55.88 0) (unit 1) (uuid "8697fd1f-6df9-5b82-b792-a86db73a77a6") (pin "1" (uuid "e8b5a221-9a24-5719-aee2-74c0ad760415")) (pin "2" (uuid "edb4fceb-d23d-5728-8aa8-ab707f2011c9")) (property "Reference" "R5" (at 98.806 54.61 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "R5") (unit 1))))
+	(property "Value" "1k" (at 98.806 57.15 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:C") (at 96.52 66.04 0) (unit 1) (uuid "9ddfe567-7b10-597a-b8a8-00f70b449de6") (pin "1" (uuid "eb56a4c1-c74c-5e3e-93ee-38121553e585")) (pin "2" (uuid "17a8216d-2833-52ef-8d79-3264eccc98fd")) (property "Reference" "C5" (at 99.822 64.77 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2fd8c80d-9457-4b96-ad01-04d3a4b8a100" (reference "C5") (unit 1))))
+	(property "Value" "10n" (at 99.822 67.31 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "SENSE" (at 96.52 52.07 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "8d754962-c993-519c-91e0-9bd3d0d3075c"))
+	(label "ADC_IN" (at 96.52 59.69 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "ea8c5a9d-3f3e-50b8-84f1-ccd8c3e5d53a"))
+	(label "ADC_IN" (at 96.52 62.23 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "a05c0218-9533-53a9-bc59-b0854f2a32ab"))
+	(label "GND" (at 96.52 69.85 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "a9e9e2f5-7c33-5033-aa7d-174970dd9b6d"))
+)

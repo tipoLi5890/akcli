@@ -1,7 +1,8 @@
 """Documentation-conformance gate — the anti-drift CI net.
 
 Two static gates over the human-facing docs (``README.md``, ``INSTALL.md``,
-``ROADMAP.md``, the two localized READMEs, ``docs/*.md`` and ``skills/*/SKILL.md``); neither runs a handler,
+``ROADMAP.md``, the two localized READMEs, ``docs/*.md``, ``skills/*/SKILL.md``
+and the plugin slash commands ``commands/*.md``); neither runs a handler,
 touches the network, or starts an engine:
 
 * **Fence gate.** Every fenced ``akcli …`` command line is shlex-split (angle
@@ -40,6 +41,7 @@ def _doc_files() -> list[Path]:
     files += sorted((_ROOT / ".github").glob("README.zh-*.md"))
     files += sorted((_ROOT / "docs").glob("*.md"))
     files += sorted((_ROOT / "skills").glob("*/SKILL.md"))
+    files += sorted((_ROOT / "commands").glob("*.md"))
     return [f for f in files if f.is_file()]
 
 

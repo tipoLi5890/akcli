@@ -32,7 +32,172 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
-_Nothing yet._
+## [0.9.0] - 2026-07-16
+
+### Added
+- **`--json` on every exit path (agent contract)**: a failing command that would previously
+  leave stdout empty now emits a `schema_version`-stamped
+  `{"error": {code, message, exit, remediation}}` on stdout under `--json` (structured
+  `AkcliError`s, missing files, and usage-style `_ExitWith` failures alike); when an `_ExitWith`
+  message wraps a real error code (`ERROR: TARGET_LOCKED: ...`), the envelope recovers the
+  specific code + its remediation instead of the generic EXIT category, and EXIT-name
+  pseudo-codes (`USAGE`, `QUERY_MISS`, ...) carry generic hints of their own.
+  `plan`/`draw` structural op-list errors emit the normal draw-result shape with
+  `status: "refused"` and per-op `remediation` through the same single payload builder as a
+  normal run (document-level errors clamp `op_index` to 0, keeping the payload schema-valid).
+  The envelope is suppressed if the handler already wrote data (never two JSON documents on
+  one stdout — raw data writes route through the same tracked emit chokepoint). Human `ERROR:`
+  lines keep going to stderr.
+- **Remediation for every error code**: the per-op hint table moved to `errors.REMEDIATION`,
+  now covering all 29 `ERROR_CODES` (readers, external tooling, bridge, config — not just
+  writer ops) and asserted complete in CI; `errors.remediation_for()` is the one lookup every
+  surface (op results, the `--json` error envelope) shares.
+- **`schema_version` on every JSON object payload**: `verify` (both modes), `fab check`,
+  `doctor`, `log`, `library audit|repair|import-altium|check-lock`, `undo`, `new`, `arrange`,
+  `relink-symbols`, `render`, `jlc bom|show|add|datasheet`, `calc <name>`, `nets`, `pins`,
+  the `net`/`component` query-miss payloads, `review explain|facts|diff|tree`, and the `sim`
+  family now stamp `schema_version` (or already carry a family version field); the
+  `capabilities` `conventions.version_stamps` claim was reworded to the exact guarantee (array
+  payloads and name-keyed tables are the documented exceptions) and is enforced twice in CI:
+  behaviorally (`tests/test_json_version_stamps.py`) and mechanically (an AST scan failing any
+  new `_dumps({...})` object payload that neither carries a `*_version` key nor routes through
+  `_stamp()`).
+- **`read --match GLOB` / `--limit N`**: graduated context-budget throttling on the full
+  export (components / library symbols / PCB footprints), applied to the model before any
+  renderer runs so text, `--md` and `--json` honor the flags identically; `--json` carries the
+  same `total/matched/returned/truncated` envelope as `nets` under a `"listing"` key — the
+  in-between of full `read` and the all-or-nothing `read --summary`. Flagless output is
+  byte-identical to before.
+- **Published op-vocabulary constraints**: `capabilities --json` `ops.constraints` now states
+  the hard limits up front (`rotation_enum` 0/90/180/270, `wire_orthogonal_only`,
+  `grid_mil` 50, `hierarchy: flat_v1_only` — ops cannot target a child sheet) so an agent can
+  branch before attempting an op instead of learning each rule from a failed `draw`; the values
+  are read from `ops.py`'s validator constants and `ops.capabilities.json` (single sources of
+  truth), never hardcoded copies.
+- **Altium-live honesty flag**: `capabilities --json` and `ops.capabilities.json` gain
+  `altium_live_wired: false` — the per-op `"altium"` support matrix describes the experimental
+  live-bridge executor, which has **no CLI wiring** (`plan`/`draw` always build
+  `target_format: "kicad"`); an agent must not try to select an Altium write target.
+- **Review-rule calibration baseline in CI**: `tools/corpus_replay.py` now has a committed
+  baseline (`tests/golden/corpus_replay_baseline.json`) replayed on every CI run
+  (`tests/test_corpus_replay.py`) — a detector change that shifts corpus findings leaves an
+  auditable baseline diff in the PR, operationalizing the "replay → measure → then allowlist"
+  promotion path for `release preflight --review-policy`.
+- **Agent-loop eval harness** (`tools/agent_eval/`): five natural-language design tasks with
+  committed ground-truth netlists and reference op-lists; `run_eval.py` scores any agent's
+  op-list (validate → `draw --apply --strict-nets` → named-net membership match) via
+  `--agent-cmd`/`--ops-dir`, and `--reference` self-checks the harness. CI pins the harness to
+  real CLI behavior by asserting every reference solution scores 100 %
+  (`tests/test_agent_eval.py`) — the first automated signal for "does an agent following the
+  skills actually succeed".
+
+- **`akcli capabilities`** — the self-describing surface manifest: every subcommand + flag
+  (introspected from the live `argparse` parser, so it cannot drift), the frozen exit/error-code
+  tables, the op-list vocabulary with per-executor support, the calculator registry, the packaged
+  JSON Schemas with version fields, and the tool conventions — one `--json` document an agent
+  reads to drive the tool blind.
+- **Exit code `8` (`QUERY_MISS`)**: `akcli net <file> NAME` and
+  `akcli component <file> REF` misses are now machine-detectable — stderr gains a
+  did-you-mean hint, `--json` emits `{"found": false, "query": ..., "kind": ..., "source": ...}`
+  on stdout, and the exit code distinguishes "entity absent" (8) from "file absent" (4).
+- **Output throttling (the context-budget contract)**: `read --summary` prints counts +
+  metadata only (never the full object arrays); `nets`/`component` gain `--match GLOB` and
+  `--limit N`, with a `total`/`matched`/`returned`/`truncated` envelope in `--json` and a stderr
+  `note:` in text mode so a cut listing can never be mistaken for the whole document.
+  `component` without `REF` now lists all components (previously a usage error, despite the
+  documented behavior).
+- **Workspace write journal + `akcli log`**: every write-path command (`plan`/`draw`/
+  `arrange`/`undo`/`relink-symbols`) appends a JSONL entry to `<dir>/.akcli/journal.jsonl`
+  (timestamp, command, status, op-list sha256, net-diff verdict, backup name); `akcli log`
+  reads it back with `--limit`/`--cmd`/per-file filters. Stateless CLI, stateful workspace —
+  journaling never fails the parent command, and `AKCLI_JOURNAL=off` disables it.
+- **`akcli ops validate` + a PreToolUse draw guard**: target-free structural op-list
+  validation as its own subcommand (exit 6 + full error list, `--json` envelope with
+  `ops_sha256`), and a plugin hook that runs it before any `draw --apply` — an invalid
+  op-list is blocked at the harness layer, and a missing prior `plan` (checked against the
+  workspace journal) warns. Fail-open by design: every CLI-side gate still stands.
+- **Every JSON payload family now has a published schema**: `diff.schema.json`,
+  `pinmap.schema.json` and `draw-result.schema.json` join the existing seven; `plan`/`draw
+  --json` payloads are now `schema_version`-stamped. All schemas share one `$id` host, the
+  packaged mirror now carries **all** canonical schemas byte-identically (previously
+  `netlist`/`schematic` were missing from the wheel), and a CI gate validates the live
+  `diff`/`pinmap`/`plan`/`draw` outputs against them.
+- **Structured remediation on op failures**: every failed op in `plan`/`draw` output now
+  carries a machine-readable `remediation` field (and a `hint:` line in text mode) telling
+  the agent what to *do* — e.g. `SYMBOL_NOT_FOUND` points at `--symbols`, `OFF_GRID` at the
+  50-mil snap rule, `OP_UNSUPPORTED` at `akcli ops list`/`ops validate`.
+- **`akcli render` — install-free SVG schematic rendering** (pulled forward from the v0.10
+  roadmap): pure-stdlib, format-agnostic (Altium `.SchDoc` renders too), deterministic, and
+  connectivity-true — wires/buses/junctions/labels/No-ERC marks plus synthesized component
+  bodies with refdes/value; hierarchical designs render one titled block per sheet. The visual
+  feedback channel for a multimodal agent after `draw --apply`.
+- **Differential-pair / bus continuity checks** (`check --pairs`, in the default family set):
+  `PAIR_INCOMPLETE` (a `_P`/`_DP`/`_H`/`+` net without its partner — asymmetric by design,
+  lone `_N`/`_L` active-low names never fire), `PAIR_PIN_MISMATCH`, and `BUS_GAP`
+  (internal index holes in `D0..D7`-style families). Configurable via `[check]`
+  (`pairs`/`pair_suffixes`/`bus_min_family`).
+- **`draw --no-erc`**: honestly skip the advisory post-apply `kicad-cli` ERC run (logged at
+  `-v`); akcli's own connectivity gate always runs.
+- **ERC pin-type conflict matrix**: `ERC_PIN_CONFLICT` covers the high-signal cells of
+  KiCad's default pin matrix (open-collector / open-emitter / tri-state vs push-pull and
+  power drivers), and `ERC_POWER_IN_UNDRIVEN` flags a supply pin on a net that is neither a
+  name-recognized rail nor driven by any `power_out` pin. Both type-confidence-gated
+  (demoted to NOTE on mostly-Passive imports) with waiver tokens
+  `pin_conflict`/`power_in_undriven`.
+- **Golden-file regression corpus** (`tests/golden/` + `tools/golden_regen.py`): frozen
+  `nets`/`check`/`diff`/`review analyze`/`render` outputs over the committed fixture boards,
+  byte-compared in CI — any behavior drift fails with a readable diff and is either a caught
+  regression or a deliberate, reviewed regeneration.
+- **Real-board corpus** (`tests/fixtures/corpus/`): `analog_frontend` — a 13-component,
+  8-net analog front-end (π-filter, decoupling, I²C pull-ups, reference + sensor dividers,
+  RC anti-alias) **authored by akcli itself** from a committed op-list (a reproducibility
+  test re-derives it), with its honest findings frozen into the golden corpus.
+- **`akcli review testbench` — auto-generated subcircuit SPICE testbenches** (the M7
+  backlog item): a quantitative review finding (an RC corner, a divider ratio) becomes a
+  runnable cone testbench — the finding's components are cut out of the schematic, stimuli
+  and pass/fail bounds are synthesized from its calc evidence (**recomputed from the live
+  schematic, never copied** — a stale findings file cannot vacuously pass), and ngspice
+  delivers the verdict. Generators: `REVIEW_RC_CUTOFF` (AC −3 dB crossing, ±8 %) and the
+  divider family (tap voltage, ±2 %); non-rederivable topologies are skipped with a
+  reason. `--findings` reuses a saved envelope, `--deck-only --out` emits engine-free
+  decks, lint-style exit. On the corpus board, ngspice confirms the detector's 15.92 kHz
+  claim at 15.88 kHz measured.
+- **Sim deepening**: the builtin behavioral library grows `AKCLI_OPAMP` (single-pole,
+  100 dB / GBW ≈ 1 MHz, soft rail clamp) and `AKCLI_NMOS_SW`/`AKCLI_PMOS_SW` (smooth
+  Ron/Roff switches, `vth`/`ron` params) — engine-validated in CI (a unity-gain buffer must
+  track; the switch must switch); two new deck diagnostics, `SIM_ZERO_PASSIVE` (a 0-valued
+  R/C/L is a solver trap) and `SIM_STIMULUS_SHORTED` (both source terminals on one node).
+- **`/circuit-parts` slash command**: `jlc search → show → add → plan → draw` as one
+  documented, stage-gated flow (networked + writes files; user-triggered only).
+- **Frozen live-bridge error codes**: `BRIDGE_BUSY` (exit 6, a held single-flight lock) and
+  `BRIDGE_TIMEOUT` (exit 7, no response within the deadline) join the error registry;
+  `BridgeBusy`/`BridgeTimeout` stay `RuntimeError`/`TimeoutError` subclasses for existing callers.
+
+### Fixed
+- **`commands/circuit-draw.md` op-list drift**: the slash command claimed "16 ops" and omitted
+  `add_sheet`/`rename_net`; corrected to the real 18-op vocabulary, and `commands/*.md` is now
+  scanned by the docs-conformance gate (fence + count) so plugin command prose can no longer
+  drift silently.
+- **`jlc bom --fix` now records to the workspace journal** (`jlc-bom-fix`, op count, backup
+  name) like every other write path — `akcli log` is no longer blind to BOM auto-fix writes.
+- **`akcli-parts/` run output untracked**: an accidentally committed `jlc add` output directory
+  was removed from version control, and `akcli-parts/`/`fpout/` are gitignored.
+
+### Changed
+- **mypy beachhead widened** to the typed core: `model`, `errors`, `units`, `safety`,
+  `netdiff`, `journal`, `render_svg`, `kicad_escape` join `parts/` and `calc/` under
+  `disallow_untyped_defs` in CI.
+- **One lint-style exit policy**: `--fail-on {info,note,warning,error,never}` is now accepted
+  by every findings-emitting command (`check`, `diff`, `pinmap`, `library audit`, `fab check`),
+  with `--exit-zero` kept everywhere as the deprecated alias — an agent learns the flag once.
+- `akcli ops list --json` now reports per-op Altium support under `"altium"` (matching
+  `ops.capabilities.json`'s executor key); `"altium_live"` remains as a deprecated duplicate
+  for one release.
+- `akcli export --json` now wraps the rendered netlist in a
+  `{schema_version, source, format, content}` envelope instead of refusing with exit 2
+  (the `content` string is byte-identical to the plain output).
+- The advisory post-apply `kicad-cli` ERC no longer swallows every failure silently; a broken
+  integration surfaces as a `note:` line on stderr (still never fatal).
 
 ## [0.8.0] - 2026-07-15
 

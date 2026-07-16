@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1500" data-akcli-render="1.0">
+<style>text{font-family:monospace}.wire{stroke:#0a7d2c;stroke-width:6;fill:none;stroke-linecap:round}.bus{stroke:#00489e;stroke-width:16;fill:none;stroke-linecap:round}.busentry{stroke:#00489e;stroke-width:6;fill:none}.body{fill:#fff3d6;stroke:#8b1a1a;stroke-width:5}.pin{fill:#8b1a1a}.junction{fill:#0a7d2c}.label{fill:#003b8e;font-size:50px}.label-global{fill:#7a0d7a;font-size:50px}.label-power{fill:#8b1a1a;font-size:45px}.refdes{fill:#333;font-size:55px;font-weight:bold}.value{fill:#555;font-size:45px}.sheet-title{fill:#000;font-size:70px;font-weight:bold}.noerc{stroke:#c00;stroke-width:6}.frame{fill:none;stroke:#bbb;stroke-width:3;stroke-dasharray:20,20}</style>
+<rect width="100%" height="100%" fill="#fdfdf8"/>
+<g data-sheet="/">
+<line class="wire" x1="200" y1="200" x2="200" y2="350"/>
+<line class="wire" x1="200" y1="650" x2="200" y2="850"/>
+<line class="wire" x1="200" y1="850" x2="800" y2="850"/>
+<line class="wire" x1="200" y1="1150" x2="800" y2="1150"/>
+<line class="wire" x1="500" y1="1150" x2="500" y2="1300"/>
+<g data-ref="#PWR01">
+<rect class="body" x="170" y="170" width="60" height="60" rx="10"/>
+<circle class="pin" cx="200" cy="200" r="8"/>
+<text class="refdes" x="170" y="150">#PWR01</text>
+<text class="value" x="170" y="285">+3V3</text>
+</g>
+<g data-ref="#PWR02">
+<rect class="body" x="470" y="1270" width="60" height="60" rx="10"/>
+<circle class="pin" cx="500" cy="1300" r="8"/>
+<text class="refdes" x="470" y="1250">#PWR02</text>
+<text class="value" x="470" y="1385">GND</text>
+</g>
+<g data-ref="C1">
+<rect class="body" x="770" y="925" width="60" height="150" rx="10"/>
+<circle class="pin" cx="800" cy="850" r="8"/>
+<circle class="pin" cx="800" cy="1150" r="8"/>
+<text class="refdes" x="770" y="905">C1</text>
+<text class="value" x="770" y="1130">100n</text>
+</g>
+<g data-ref="R1">
+<rect class="body" x="170" y="425" width="60" height="150" rx="10"/>
+<circle class="pin" cx="200" cy="350" r="8"/>
+<circle class="pin" cx="200" cy="650" r="8"/>
+<text class="refdes" x="170" y="405">R1</text>
+<text class="value" x="170" y="630">10k</text>
+</g>
+<g data-ref="R2">
+<rect class="body" x="170" y="925" width="60" height="150" rx="10"/>
+<circle class="pin" cx="200" cy="850" r="8"/>
+<circle class="pin" cx="200" cy="1150" r="8"/>
+<text class="refdes" x="170" y="905">R2</text>
+<text class="value" x="170" y="1130">10k</text>
+</g>
+<circle class="junction" cx="200" cy="850" r="15"/>
+<circle class="junction" cx="500" cy="1150" r="15"/>
+<text class="label-power" x="215" y="185">+3V3</text>
+<text class="label" x="215" y="735">MID</text>
+<text class="label-power" x="515" y="1285">GND</text>
+<text class="label-global" x="815" y="835">VOUT</text>
+</g>
+</svg>

@@ -29,7 +29,10 @@ DEFAULT_GRID_NM: int = 50 * units.NM_PER_MIL
 
 # Allowed top-level tables/keys and their allowed sub-keys.
 _TOP_KEYS: frozenset[str] = frozenset(
-    {"project", "rail", "paths", "erc_waiver", "waiver"}
+    {"project", "rail", "paths", "erc_waiver", "waiver", "check"}
+)
+_CHECK_KEYS: frozenset[str] = frozenset(
+    {"pairs", "pair_suffixes", "bus_min_family"}
 )
 _PROJECT_KEYS: frozenset[str] = frozenset({"mcu_designator", "grid", "backup_depth"})
 _RAIL_KEYS: frozenset[str] = frozenset({"name", "voltage", "tolerance_pct"})
@@ -59,6 +62,7 @@ class Config:
     source_path: str | None = None
     grid_nm: int = DEFAULT_GRID_NM
     backup_depth: int | None = None    # [project] backup_depth; None = writer default
+    check: dict = field(default_factory=dict)  # [check] table (pairs, pair_suffixes, ...)
 
 
 def _parse_grid(value: object) -> int:
@@ -180,6 +184,26 @@ def load_config(path: Path | str) -> Config:
                  "[project] backup_depth must be an integer 1..99")
         backup_depth = raw_depth
 
+    check_tbl = data.get("check", {})
+    if not isinstance(check_tbl, dict):
+        fail("BAD_CONFIG", "[check] must be a table")
+    _reject_unknown(check_tbl, _CHECK_KEYS, "[check]")
+    if "pairs" in check_tbl and not isinstance(check_tbl["pairs"], bool):
+        fail("BAD_CONFIG", "[check].pairs must be a boolean")
+    if "pair_suffixes" in check_tbl:
+        ps = check_tbl["pair_suffixes"]
+        if (not isinstance(ps, list)
+                or any(not (isinstance(pair, list) and len(pair) == 2
+                            and all(isinstance(s, str) and s for s in pair))
+                       for pair in ps)):
+            fail("BAD_CONFIG",
+                 "[check].pair_suffixes must be a list of [\"_P\", \"_N\"]-style"
+                 " two-string pairs")
+    if "bus_min_family" in check_tbl:
+        bmf = check_tbl["bus_min_family"]
+        if not isinstance(bmf, int) or isinstance(bmf, bool) or bmf < 2:
+            fail("BAD_CONFIG", "[check].bus_min_family must be an integer >= 2")
+
     return Config(
         mcu_designator=project.get("mcu_designator"),
         rails=rails,
@@ -189,4 +213,5 @@ def load_config(path: Path | str) -> Config:
         source_path=str(p.resolve()),
         grid_nm=grid_nm,
         backup_depth=backup_depth,
+        check=dict(check_tbl),
     )

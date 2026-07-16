@@ -42,11 +42,12 @@ A review is **strictly read-only**. Never modify the schematic under review, and
   A `status: insufficient_evidence` finding is an open TODO (usually "add a
   facts file" — see akcli-datasheet-facts), never a pass.
 - Run `check`/`diff`/`pinmap` in report mode so exit `1` means "findings exist",
-  not "tool failed": `check` takes `--fail-on {info,note,warning,error,never}`
-  (`--exit-zero` is its deprecated alias for `--fail-on never`); `diff`/`pinmap`/
-  `verify` take only `--exit-zero` (always exit 0). `review analyze` takes
-  `--fail-on {warning,error,critical}` (advisory: exit 0 without it). Tune the CI
-  gate with `check`/`review --fail-on`, never by hiding findings.
+  not "tool failed": every findings-emitting command (`check`/`diff`/`pinmap`/
+  `library audit`/`fab check`) takes the same
+  `--fail-on {info,note,warning,error,never}` (`--exit-zero` is the deprecated
+  alias for `--fail-on never`); the boolean proof `verify` takes `--exit-zero`.
+  `review analyze` takes `--fail-on {warning,error,critical}` (advisory: exit 0
+  without it). Tune the CI gate with `--fail-on`, never by hiding findings.
 - **Waiver discipline — never waive without a reason.** The checker-agnostic
   `[[waiver]]` config table drops (`severity = "off"`) or demotes
   (`note`/`info`) a finding by `code`/`refs`, but a review may only rely on a
@@ -97,6 +98,12 @@ was and wasn't reviewed. Interpretation rules:
   scores 0 *with the block present*: "reviewed and quiet" ≠ "never reviewed".
 - Findings with `fix_params` feed `akcli review propose` — mention available
   auto-fixes in the report but NEVER apply them during a review (read-only).
+- Quantitative findings (RC corners, divider ratios) can be **simulation-
+  verified** with `akcli review testbench <sch>`: akcli cuts out the
+  subcircuit, synthesizes the bench, and ngspice delivers the verdict —
+  cite "simulated: PASS at 15.88 kHz" instead of restating the calc. It is
+  read-only (the bench runs on an extracted copy) and safe during a review;
+  no engine → `--deck-only` still documents the bench.
 - Heuristic findings you adjudicate as false positives are waived in config
   with a `reason`, not deleted from the report.
 - Upgrade path: heuristic divider/crystal/domain findings that say "verify
@@ -152,8 +159,9 @@ akcli net board.SchDoc VBUS --json
 
 Confirm: every supply pin on the right rail, every ground pin on a ground net, EN/RESET pins
 driven or pulled as the datasheet requires, feedback/sense pins wired to the right divider.
-Caution: `net <file> NAME` and `component <file> REF` exit `0` even when nothing matches —
-check stderr for `no net named ...` / `no component ...`, not the exit code.
+Caution: `net <file> NAME` and `component <file> REF` exit `8` (`QUERY_MISS`) when nothing
+matches — check the exit code or stderr for `no net named ...` / `no component ...`, do not
+assume exit 0 means a hit.
 
 ### Step 4 — Pinmap cross-check against the expected table
 

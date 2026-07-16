@@ -37,6 +37,7 @@ Pure module: no file I/O, no CLI, stdlib only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 # How many individual +pin/-pin tokens a MODIFIED line shows per direction
 # before collapsing the tail into "(+N more)".
@@ -117,8 +118,8 @@ class NetDiff:
         )
 
 
-def _view(net) -> NetView:
-    """Coerce one input net (``model.Net`` or ``(name, pins)`` pair)."""
+def _view(net: "Any") -> NetView:
+    """Coerce one input net (``model.Net`` or ``(name, pins)`` pair) — duck-typed."""
     members = getattr(net, "members", None)
     if members is None:
         name, members = net
@@ -131,12 +132,12 @@ def _view(net) -> NetView:
     return NetView(name=name or None, pins=pins)
 
 
-def _key(v: NetView):
+def _key(v: NetView) -> tuple[bool, str, tuple[str, ...]]:
     """Deterministic ordering: named first, then by display name, then pins."""
     return (v.name is None, v.display, tuple(sorted(v.pins)))
 
 
-def diff(nets_before, nets_after) -> NetDiff:
+def diff(nets_before: "list | tuple", nets_after: "list | tuple") -> NetDiff:
     """Classify every net of both sides by pin-membership overlap."""
     before = [_view(n) for n in nets_before]
     after = [_view(n) for n in nets_after]
@@ -153,10 +154,10 @@ def diff(nets_before, nets_after) -> NetDiff:
     sources: list[set[int]] = [set() for _ in after]
     for i, v in enumerate(before):
         for p in v.pins:
-            j = pin_to_after.get(p)
-            if j is not None:
-                overlap[i][j] = overlap[i].get(j, 0) + 1
-                sources[j].add(i)
+            hit = pin_to_after.get(p)
+            if hit is not None:
+                overlap[i][hit] = overlap[i].get(hit, 0) + 1
+                sources[hit].add(i)
 
     d = NetDiff()
     for i, v in enumerate(before):
@@ -176,12 +177,10 @@ def diff(nets_before, nets_after) -> NetDiff:
         elif len(src) >= 2:
             # The source whose name survived leads ("+3V + VBAT -> +3V"),
             # then larger nets first.
-            srcs = tuple(sorted(
-                (before[i] for i in src),
-                key=lambda s, a=v: (
-                    s.name != a.name, -len(s.pins), _key(s),
-                ),
-            ))
+            def _merge_order(s: NetView, a: NetView = v) -> tuple:
+                return (s.name != a.name, -len(s.pins), _key(s))
+
+            srcs = tuple(sorted((before[i] for i in src), key=_merge_order))
             d.merged.append(Merged(sources=srcs, after=v))
         else:
             (i,) = src

@@ -13,7 +13,9 @@ from pathlib import Path
 
 from ..errors import EXIT
 from ._shared import (
+    _add_throttle_flags,
     _detect_format_ex,
+    _did_you_mean,
     _draw_symbol_sources,
     _empty_import_warning,
     _dumps,
@@ -21,11 +23,14 @@ from ._shared import (
     _ExitWith,
     _load_cfg,
     _load_schematic,
+    _match_limit,
     _net_display,
     _pin_net_index,
     _require_path,
     _schematic_md,
     _schematic_text,
+    _stamp,
+    _throttle_note,
 )
 
 
@@ -48,16 +53,65 @@ def _read_detect_meta(obj, path: Path, fmt: str, method: str,
     return EXIT["OK"]
 
 
+def _read_throttle_obj(args: argparse.Namespace, obj, attr: str,
+                       key) -> dict | None:
+    """Apply ``--match``/``--limit`` to one object list of a normalized model.
+
+    Filters the model's list attribute IN PLACE (before any renderer runs), so
+    text, ``--md`` and ``--json`` all honor the flags identically. Only active
+    when a throttle flag was actually given, so the default full export stays
+    byte-identical (golden snapshots). Returns the truncation meta (merged
+    under ``"listing"`` in the JSON payload) or None when inactive — the
+    graduated sibling of the all-or-nothing ``--summary``.
+    """
+    if getattr(args, "match", None) is None and getattr(args, "limit", None) is None:
+        return None
+    items, meta = _match_limit(getattr(obj, attr), args, key=key)
+    setattr(obj, attr, items)
+    _throttle_note(args, meta, attr)
+    return meta
+
+
 def _cmd_read(args: argparse.Namespace) -> int:
     path = _require_path(args.path)
     fmt, method = _detect_format_ex(path)
     strict = bool(getattr(args, "strict", False))
 
+    def _summary_payload(obj, counts: dict[str, int]) -> dict:
+        # --summary: the context-budget escape hatch — counts + metadata only,
+        # never the full object arrays (a big board's full export can be MBs).
+        from ..model import SCHEMA_VERSION
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "source": str(path),
+            "format": fmt,
+            "counts": dict(counts),
+            "metadata": dict(getattr(obj, "metadata", None) or {}),
+        }
+        warnings = getattr(obj, "warnings", None) or []
+        if warnings:
+            payload["warnings"] = list(warnings)
+        return payload
+
     def _emit_schematic(obj) -> int:
         counts = {"components": len(obj.components), "nets": len(obj.nets)}
+        counts["pins"] = sum(len(c.pins) for c in obj.components)
         code = _read_detect_meta(obj, path, fmt, method, counts, strict)
+        if getattr(args, "summary", False):
+            if args.json:
+                _emit(_dumps(_summary_payload(obj, counts)))
+            else:
+                _emit("\n".join([f"schematic: {obj.source_path}",
+                                 f"format:    {obj.source_format}"]
+                                + [f"{k}: {v}" for k, v in counts.items()]))
+            return code
+        meta = _read_throttle_obj(args, obj, "components",
+                                  key=lambda c: c.designator or "")
         if args.json:
-            _emit(_dumps(obj.export()))
+            doc = obj.export()
+            if meta is not None:
+                doc["listing"] = {"filtered": "components", **meta}
+            _emit(_dumps(doc))
         elif getattr(args, "md", False):
             _emit(_schematic_md(obj))
         else:
@@ -70,8 +124,20 @@ def _cmd_read(args: argparse.Namespace) -> int:
         if fps or fmt in ("altium_pcblib", "kicad_mod"):
             counts["footprints"] = len(fps)
         code = _read_detect_meta(lib, path, fmt, method, counts, strict)
+        if getattr(args, "summary", False):
+            if args.json:
+                _emit(_dumps(_summary_payload(lib, counts)))
+            else:
+                _emit("\n".join([f"library: {lib.source_path}"]
+                                + [f"{k}: {v}" for k, v in counts.items()]))
+            return code
+        meta = _read_throttle_obj(args, lib, "symbols",
+                                  key=lambda s: s.name or "")
         if args.json:
-            _emit(_dumps(lib.export()))
+            doc = lib.export()
+            if meta is not None:
+                doc["listing"] = {"filtered": "symbols", **meta}
+            _emit(_dumps(doc))
         else:
             out = [f"library: {lib.source_path}", f"symbols: {len(lib.symbols)}"]
             for s in lib.symbols:
@@ -86,8 +152,20 @@ def _cmd_read(args: argparse.Namespace) -> int:
     def _emit_pcb(pcb) -> int:
         counts = {"footprints": len(pcb.footprints), "nets": len(pcb.nets)}
         code = _read_detect_meta(pcb, path, fmt, method, counts, strict)
+        if getattr(args, "summary", False):
+            if args.json:
+                _emit(_dumps(_summary_payload(pcb, counts)))
+            else:
+                _emit("\n".join([f"pcb: {pcb.source_path}"]
+                                + [f"{k}: {v}" for k, v in counts.items()]))
+            return code
+        meta = _read_throttle_obj(args, pcb, "footprints",
+                                  key=lambda f: f.designator or "")
         if args.json:
-            _emit(_dumps(pcb.export()))
+            doc = pcb.export()
+            if meta is not None:
+                doc["listing"] = {"filtered": "footprints", **meta}
+            _emit(_dumps(doc))
         else:
             out = [
                 f"pcb: {pcb.source_path}",
@@ -145,8 +223,12 @@ def _cmd_net(args: argparse.Namespace) -> int:
             if n.name == name or name in n.aliases or n.stable_id == name
         ]
         if not matches:
-            sys.stderr.write(f"no net named {name!r}\n")
-            return EXIT["OK"]
+            if args.json:
+                _emit(_dumps(_stamp({"found": False, "query": name,
+                                     "kind": "net", "source": str(path)})))
+            hint = _did_you_mean(name, (n.name for n in sch.nets if n.name))
+            sys.stderr.write(f"no net named {name!r}{hint}\n")
+            return EXIT["QUERY_MISS"]
         if args.json:
             from ..model import to_json
             _emit(_dumps([to_json(n) for n in matches]))
@@ -190,7 +272,7 @@ def _cmd_nets(args: argparse.Namespace) -> int:
             sch, include_unnamed=getattr(args, "include_unnamed", False))
         rendered = _dumps(doc) + "\n"
         if snap_out == "-":
-            sys.stdout.write(rendered)
+            _emit(rendered)
             return EXIT["OK"]
         Path(snap_out).write_text(rendered, encoding="utf-8")
         sys.stderr.write(f"wrote intent snapshot: {snap_out} "
@@ -198,18 +280,21 @@ def _cmd_nets(args: argparse.Namespace) -> int:
                          f"`akcli check <sch> --intent {snap_out}`)\n")
 
     ordered = sorted(sch.nets, key=lambda n: (n.name is None, _net_display(n)))
+    ordered, meta = _match_limit(ordered, args, key=lambda n: n.name or "")
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "source": str(path),
+            **meta,
             "nets": [{"name": n.name, "stable_id": n.stable_id,
                       "members": sorted(f"{d}.{p}" for d, p in n.members)}
                      for n in ordered],
-        }))
+        })))
     else:
         out = [f"{_net_display(n)}: "
                + ", ".join(sorted(f"{d}.{p}" for d, p in n.members))
                for n in ordered]
         _emit("\n".join(out) if out else "(no nets)")
+        _throttle_note(args, meta, "nets")
     return EXIT["OK"]
 
 
@@ -218,12 +303,38 @@ def _cmd_component(args: argparse.Namespace) -> int:
     sch = _load_schematic(path)
     ref = getattr(args, "ref", None)
     if not ref:
-        raise _ExitWith(EXIT["USAGE"], "ERROR: missing component designator")
+        # no REF: list every component (compact rows, throttleable)
+        ordered = sorted(sch.components, key=lambda c: c.designator)
+        ordered, meta = _match_limit(ordered, args, key=lambda c: c.designator)
+        if args.json:
+            from ..model import SCHEMA_VERSION
+            _emit(_dumps({
+                "schema_version": SCHEMA_VERSION,
+                "source": str(path),
+                **meta,
+                "components": [
+                    {"designator": c.designator, "library_ref": c.library_ref,
+                     "value": c.value, "footprint": c.footprint,
+                     "pins": len(c.pins)}
+                    for c in ordered
+                ],
+            }))
+        else:
+            out = [f"{c.designator:<8} {c.library_ref or '-':<20} "
+                   f"value={c.value or '-'} pins={len(c.pins)}"
+                   for c in ordered]
+            _emit("\n".join(out) if out else "(no components)")
+            _throttle_note(args, meta, "components")
+        return EXIT["OK"]
 
     comp = next((c for c in sch.components if c.designator == ref), None)
     if comp is None:
-        sys.stderr.write(f"no component {ref!r}\n")
-        return EXIT["OK"]
+        if args.json:
+            _emit(_dumps(_stamp({"found": False, "query": ref,
+                                 "kind": "component", "source": str(path)})))
+        hint = _did_you_mean(ref, (c.designator for c in sch.components))
+        sys.stderr.write(f"no component {ref!r}{hint}\n")
+        return EXIT["QUERY_MISS"]
 
     index = _pin_net_index(sch)
     if args.json:
@@ -302,10 +413,10 @@ def _cmd_pins(args: argparse.Namespace) -> int:
             })
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "lib_id": lib_id, "at": [at[0], at[1]], "rotation": rot,
             "mirror": mirror, "unit_count": part_count, "pins": rows,
-        }))
+        })))
     else:
         head = f"{lib_id}  @({_r(at[0])},{_r(at[1])}) rot={rot} mirror={mirror}"
         if part_count > 1:
@@ -320,16 +431,26 @@ def _cmd_pins(args: argparse.Namespace) -> int:
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
-    if args.json:
-        sys.stderr.write(
-            "ERROR: `export` emits a netlist format — use --format {protel,kicad,csv}; "
-            "for structured netlist JSON use `akcli net --json`\n"
-        )
-        return EXIT["USAGE"]
     path = _require_path(args.path)
     sch = _load_schematic(path)
     from .. import exporters
     text = exporters.export_netlist(sch, args.format)
+    if args.json:
+        # --json wraps the rendered netlist in an envelope instead of refusing:
+        # the netlist text itself stays exactly what --format produces.
+        from ..model import SCHEMA_VERSION
+        payload = _dumps({
+            "schema_version": SCHEMA_VERSION,
+            "source": str(path),
+            "format": args.format,
+            "content": text,
+        })
+        if getattr(args, "output", None):
+            Path(args.output).write_text(payload + "\n", encoding="utf-8")
+            sys.stderr.write(f"wrote {args.output}\n")
+        else:
+            _emit(payload)
+        return EXIT["OK"]
     if getattr(args, "output", None):
         Path(args.output).write_text(text, encoding="utf-8")
         sys.stderr.write(f"wrote {args.output}\n")
@@ -346,6 +467,10 @@ def register(sub, common) -> None:
     p.add_argument("--strict", action="store_true",
                    help="exit 1 when a non-empty source normalizes to nothing "
                         "(EMPTY_IMPORT)")
+    p.add_argument("--summary", action="store_true",
+                   help="counts + metadata only, never the full object arrays "
+                        "(the context-budget escape hatch for big boards)")
+    _add_throttle_flags(p, "objects (components/symbols/footprints)")
     p.set_defaults(handler=_cmd_read)
 
     p = sub.add_parser("net", parents=[common], help="query nets")
@@ -363,11 +488,15 @@ def register(sub, common) -> None:
     p.add_argument("--include-unnamed", action="store_true",
                    help="intent snapshot: include unnamed nets "
                         "(keyed by stable id)")
+    _add_throttle_flags(p, "nets")
     p.set_defaults(handler=_cmd_nets)
 
-    p = sub.add_parser("component", parents=[common], help="query one component's pin->net")
+    p = sub.add_parser("component", parents=[common],
+                       help="list components, or query one component's pin->net")
     p.add_argument("path", nargs="?", help="input schematic")
-    p.add_argument("ref", nargs="?", help="component designator (e.g. U3)")
+    p.add_argument("ref", nargs="?",
+                   help="component designator (e.g. U3); omit to list all")
+    _add_throttle_flags(p, "components")
     p.set_defaults(handler=_cmd_component)
 
     p = sub.add_parser("pins", parents=[common],

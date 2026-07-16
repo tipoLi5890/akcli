@@ -128,6 +128,7 @@ Write it to a file with `--out deck.cir`, or get a structured envelope with
 ```bash
 $ akcli sim board_v8.kicad_sch --deck-only --json
 {
+  "schema_version": "1",
   "deck_sha": "299eaa7e9ffd",
   "deck": "* akcli sim: board_v8.kicad_sch\nR1 _3V3 MID 10k\n…\n.end\n",
   "warnings": [],
@@ -146,7 +147,10 @@ The full format is validated both by
 [`sim/assertions.load()`](../src/akcli/sim/assertions.py) and by
 [`schemas/sim.schema.json`](../schemas/sim.schema.json) (draft 2020-12,
 byte-identical mirror packaged under `src/akcli/schemas/`). Unknown
-keys are rejected at every level.
+keys are rejected at the top level and inside each `assert` entry; `stimuli`
+entries and `options` are more permissive — only `stimuli[].name` and
+`options.rshunt` are actually validated, so other keys there are accepted
+without error.
 
 ```json
 {
@@ -266,6 +270,25 @@ strict **first-hit-wins ladder**:
 > `SIM_PIN_ORDER_ASSUMED` warning — set `Sim.Pins` or a `spec.models` `pin_order`
 > to fix the polarity.
 
+### The builtin behavioral library
+
+`sim/builtin.lib` ships six clean-room behavioral subcircuits, loaded
+automatically when `Sim.Name`/`model_name` references one — enough for
+sanity-level transient/AC runs, never a substitute for a vendor model:
+
+| Subcircuit | Ports | What it models |
+|---|---|---|
+| `AKCLI_COMP555` | `GND TRIG OUT RESET CTRL THRES DISCH VCC` | NE555 astable/monostable core (⅓/⅔ VCC comparators, SR latch, discharge sink) |
+| `AKCLI_COMPARATOR` | `inp inn out vcc` | LM393-style open-collector comparator |
+| `AKCLI_OPAMP` | `inp inn out vcc vee` | single-pole op-amp: A0 = 100 dB, GBW ≈ 1 MHz, soft rail clamp, 75 Ω output |
+| `AKCLI_NMOS_SW` | `d g s` (`vth=2.0 ron=0.1`) | enhancement NMOS as a smooth Ron/Roff switch |
+| `AKCLI_PMOS_SW` | `d g s` (`vth=2.0 ron=0.1`) | the PMOS complement |
+| `AKCLI_PHOTOTRANS` | `c e` (`gain=1`) | phototransistor collector-emitter path |
+
+The op-amp and FET switches are engine-validated in CI (a unity-gain buffer
+must track its input; the switch must actually switch) — the models are tested
+against ngspice, not just inspected as text.
+
 ### The `M`/`MEG` value fix (and other deck gotchas)
 
 `spice_value()` (inside `models.py`) is where engineering notation becomes a
@@ -335,7 +358,7 @@ measured values:
   (none)
 ```
 
-`--json` returns `{deck_sha, engine, measured, findings, ok}`.
+`--json` returns `{schema_version, deck_sha, engine, measured, findings, ok}`.
 
 ### `--wave OUT.csv` — the clean waveform CSV
 
@@ -378,6 +401,11 @@ spaces is handled (ngspice `wrdata`s to a fixed name, then the file is moved).
 runs). Deck `WARNING`-severity findings (unmodeled parts, dangling pins) render
 but never change the exit code.
 
+Under `--json`, a failing exit still prints machine-readable JSON on stdout:
+`{schema_version, error: {code, message, exit, remediation}}` (e.g.
+`NGSPICE_MISSING`/`BAD_CONFIG`/`SIM_NO_GROUND`), instead of leaving stdout
+empty.
+
 Findings raised by the sim pipeline:
 
 | Code | Severity | Meaning |
@@ -391,6 +419,8 @@ Findings raised by the sim pipeline:
 | `SIM_UNKNOWN_STIMULUS_NODE` | WARNING | A stimulus `node` matched no net; a new dangling node was created (suggestions offered). |
 | `SIM_FLOATING_NODE` | WARNING | A net has no DC path to ground (only a cap/nothing left after skips) — ngspice would return a singular matrix. Auto-`rshunt` (below) makes it solvable. |
 | `SIM_UNDRIVEN_RAIL` | WARNING | A power-named net (`+*`/`VCC*`/`VDD*`/`VBAT*`/`VSUP*`) has no voltage-source drive while the spec has stimuli — a silent read-≈0 trap (forgot the rail source). |
+| `SIM_ZERO_PASSIVE` | WARNING | An `R`/`C`/`L` value parsed to exactly 0 — a solver trap (R=0 is a hard short / singular matrix; C=0/L=0 silently deletes the part). Almost always a placeholder value; set the real one or `Sim.Enable=0`. |
+| `SIM_STIMULUS_SHORTED` | WARNING | Both terminals of a stimulus resolved to the same node (usually both to ground) — the source drives nothing. Check `node`/`node2` and the `--gnd` mapping. |
 | `SIM_RSHUNT_ADDED` | NOTE | Auto-`rshunt` appended `.option rshunt=1e12` because a floating node was found. Below WARNING, so it never changes the exit code. |
 | `SIM_SWEEP_IGNORED` | WARNING | A `--sweep` component-value override has no effect because that part's SPICE card resolves from `Sim.Params` / `spec.models` / a device model, not its component value — every corner would be identical. |
 
@@ -419,7 +449,7 @@ Sim.Params: IS=2.4034e-08 N=1.0500
 
 Add `--rs-point V@I` (a high-current point) to solve series resistance `RS`, and
 `--cjo F` (e.g. `50p`) for junction capacitance. `--json` returns
-`{name, model_card, sim_params, params, note}` — `note` carries the fit warning
+`{schema_version, name, model_card, sim_params, params, note}` — `note` carries the fit warning
 when a multi-point `N` is clamped or disagrees with the prior.
 
 ### Writing the fit back onto a schematic — the datasheet → model loop
@@ -510,7 +540,7 @@ corners: 1/2 passed
 ```
 
 The run exits `1` if **any** corner fails an assertion (or `0` with
-`--exit-zero`). `--json` returns `{engine, corners: [{params, measured, ok,
+`--exit-zero`). `--json` returns `{schema_version, engine, corners: [{params, measured, ok,
 findings}], warnings, ok}`. `--sweep` is engine-only: it is a usage error
 together with `--deck-only`, without `--sim`, or with `--wave`.
 

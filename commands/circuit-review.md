@@ -1,5 +1,5 @@
 ---
-description: Read a schematic, run the akcli review engine (confidence-graded detectors) plus design checks (ERC-lite + power + BOM), then summarize findings — with an optional revision diff.
+description: Read a schematic, run the akcli review engine (confidence-graded detectors) plus design checks (ERC-lite + power + BOM + net/layout/pair-continuity), then summarize findings — with an optional revision diff.
 argument-hint: <schematic> [against <old-schematic>] [-C akcli.toml]
 ---
 
@@ -23,10 +23,14 @@ Steps (use the Bash tool; `akcli` is on PATH when the plugin is installed, other
    trustworthy as printed; heuristic ones need your adjudication before reporting above
    Minor; `detectors_skipped` says what was NOT reviewed — repeat it in the summary.
    `akcli review explain <CODE>` prints any rule's formula + reference for the report.
+   Pass `--fail-on <severity>` if the caller wants `review analyze` to exit non-zero at a
+   chosen finding severity instead of the default always-exit-0 advisory behavior.
 3. Run the structural checks in report mode so a finding doesn't abort the flow:
    `akcli check <schematic> [-C <toml>] --exit-zero`
    (use `--json` if you want to parse/group findings precisely). `check` runs ERC-lite + power +
-   power-rail + BOM by default; narrow with `--erc` / `--power` / `--bom` if asked.
+   BOM + net-hygiene (+ layout-overlap for `.kicad_sch`, + differential-pair/bus continuity
+   unless `[check].pairs = false`) by default; narrow with `--erc` / `--power` / `--bom` /
+   `--nets` / `--layout` / `--pairs` if asked.
 4. If a prior revision was given, also run `akcli diff <old> <schematic>` and fold net/component
    changes into the summary.
 

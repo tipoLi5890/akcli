@@ -1,0 +1,43 @@
+{
+ "protocol_version": 1,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {
+   "op": "place_component",
+   "lib_id": "Device:R",
+   "designator": "R1",
+   "x_mil": 1000,
+   "y_mil": 1000,
+   "value": "4.7k"
+  },
+  {
+   "op": "place_component",
+   "lib_id": "Device:R",
+   "designator": "R2",
+   "x_mil": 1500,
+   "y_mil": 1000,
+   "value": "4.7k"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R1.1",
+   "name": "3V3"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R2.1",
+   "name": "3V3"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R1.2",
+   "name": "SDA"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R2.2",
+   "name": "SCL"
+  }
+ ]
+}

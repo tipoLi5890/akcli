@@ -11,11 +11,13 @@ import argparse
 
 from ..errors import EXIT
 from ._shared import (
+    _add_exit_policy_flags,
     _dumps,
     _emit,
     _ExitWith,
     _findings_exit,
     _require_path,
+    _stamp,
 )
 
 
@@ -39,7 +41,7 @@ def _cmd_fab_check(args: argparse.Namespace) -> int:
         findings.extend(fab.check_order(order, profile))
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "board": str(board_path),
             "profile": {"id": profile.get("id"),
                         "vendor": profile.get("vendor"),
@@ -51,7 +53,7 @@ def _cmd_fab_check(args: argparse.Namespace) -> int:
                  "message": f.message, "pos": f.pos, "anchors": f.anchors}
                 for f in findings
             ],
-        }))
+        })))
         return _findings_exit(findings, args)
 
     _emit(f"fab check: {board_path.name} against {profile.get('id')} "
@@ -102,8 +104,7 @@ def register(sub, common) -> None:
     pc.add_argument("--order", metavar="FILE",
                     help="order manifest TOML (declared purchase intent: "
                          "delivery format, finish, via covering, ...)")
-    pc.add_argument("--exit-zero", action="store_true",
-                    help="always exit 0 (report mode)")
+    _add_exit_policy_flags(pc)
     pc.set_defaults(handler=_cmd_fab_check)
 
     pe = fab_sub.add_parser(

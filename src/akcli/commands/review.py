@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .. import report as _report
 from ..errors import EXIT
-from ._shared import _did_you_mean, _dumps, _emit, _ExitWith, _require_path
+from ._shared import _did_you_mean, _dumps, _emit, _ExitWith, _require_path, _stamp
 
 _FAIL_ON = ("warning", "error", "critical")
 _FORMATS = ("text", "json", "sarif", "junit", "markdown")
@@ -157,12 +157,12 @@ def _cmd_review_explain(args: argparse.Namespace) -> int:
             f"ERROR: unknown rule {code!r}"
             f"{_did_you_mean(code.upper(), rules)} (see docs/review-rules.md)")
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "code": rule.code, "title": rule.title, "explain": rule.explain,
             "default_severity": rule.default_severity,
             "confidence": rule.confidence, "rule_version": rule.version,
             "reference": rule.reference,
-        }))
+        })))
         return EXIT["OK"]
     lines = [
         f"{rule.code} — {rule.title}",
@@ -236,9 +236,9 @@ def _cmd_facts_add(args: argparse.Namespace) -> int:
     path.write_text(json.dumps(fx.facts_to_doc(facts), ensure_ascii=False,
                                indent=2) + "\n", encoding="utf-8")
     if args.json:
-        _emit(_dumps({"written": str(path), "mpn": mpn,
-                      "sha256": facts.sha256, "facts_set": sorted(added),
-                      "facts_total": len(facts.values)}))
+        _emit(_dumps(_stamp({"written": str(path), "mpn": mpn,
+                             "sha256": facts.sha256, "facts_set": sorted(added),
+                             "facts_total": len(facts.values)})))
     else:
         _emit(f"wrote {path} ({len(facts.values)} fact(s)"
               + (f"; set: {', '.join(added)}" if added else "")
@@ -344,6 +344,102 @@ def _cmd_review_propose(args: argparse.Namespace) -> int:
     return EXIT["OK"]
 
 
+def _cmd_review_testbench(args: argparse.Namespace) -> int:
+    """`review testbench <sch>` — auto-generated subcircuit SPICE benches.
+
+    Findings with a simulable claim (RC corners, divider ratios) become
+    runnable cone testbenches; ngspice delivers the verdict. ``--findings``
+    reuses a saved envelope, otherwise ``review analyze`` runs in-process.
+    ``--deck-only`` writes the decks without an engine (exit 0); a run mode
+    without libngspice is ``NGSPICE_MISSING`` (exit 7) like ``akcli sim``.
+    """
+    from ..review import engine
+    from ..review import testbench as tbmod
+
+    target = _require_path(args.path, "schematic (.kicad_sch / .SchDoc)")
+    sch = _read_schematic(target)
+
+    if getattr(args, "findings", None):
+        doc = json.loads(Path(args.findings).read_text(encoding="utf-8"))
+        fdicts = [f for f in doc.get("findings", []) if isinstance(f, dict)]
+    else:
+        found, _meta = engine.analyze(sch, profile="standard")
+        fdicts = [_report._finding_json(f) for f in found]
+
+    benches, skipped = tbmod.generate(sch, fdicts)
+    for s in skipped:
+        sys.stderr.write(f"note: testbench skipped for {s['finding_code']} "
+                         f"({s['fingerprint'][:8]}): {s['reason']}\n")
+
+    deck_only = bool(getattr(args, "deck_only", False))
+    out_dir = getattr(args, "out", None)
+    if deck_only:
+        from ..sim import deck as _deck
+        written = []
+        for b in benches:
+            d = _deck.build(b.schematic, b.spec, gnd=b.gnd)
+            entry = {**b.describe(), "deck": d.text}
+            if out_dir:
+                base = Path(out_dir) / f"{b.fingerprint[:8]}_{b.kind}"
+                base.parent.mkdir(parents=True, exist_ok=True)
+                base.with_suffix(".deck").write_text(d.text, encoding="utf-8")
+                entry["deck_path"] = str(base.with_suffix(".deck"))
+                entry.pop("deck")
+            written.append(entry)
+        if args.json:
+            _emit(_dumps({"testbench_version": tbmod.TESTBENCH_VERSION,
+                          "source": str(target), "mode": "deck-only",
+                          "benches": written, "skipped": skipped}))
+        else:
+            for e in written:
+                where = e.get("deck_path", "(stdout suppressed; use --out)")
+                _emit(f"deck  {e['kind']:<12} {'+'.join(e['refs']):<12} {where}")
+            _emit(f"{len(written)} testbench deck(s), {len(skipped)} skipped")
+        return EXIT["OK"]
+
+    from ..sim import engine as sim_engine
+    if sim_engine.available() is None:
+        raise _ExitWith(EXIT["TOOL_MISSING"],
+                        "ERROR: NGSPICE_MISSING: no libngspice found — "
+                        "use --deck-only, or install KiCad / set AKCLI_NGSPICE")
+
+    verdicts = [tbmod.run_bench(b, timeout=float(getattr(args, "timeout", None)
+                                                 or 60.0))
+                for b in benches]
+    failed = [v for v in verdicts if not v["ok"]]
+    if args.json:
+        _emit(_dumps({
+            "testbench_version": tbmod.TESTBENCH_VERSION,
+            "source": str(target),
+            "benches": verdicts,
+            "skipped": skipped,
+            "summary": {"total": len(verdicts), "passed":
+                        len(verdicts) - len(failed), "failed": len(failed)},
+            "ok": not failed,
+        }))
+    else:
+        for v in verdicts:
+            mark = "PASS" if v["ok"] else "FAIL"
+            expect = ", ".join(
+                f"{k}~{e['value']:.4g}{e.get('unit', '')}"
+                for k, e in v["expect"].items())
+            got = ", ".join(
+                f"{k}={val:.4g}" if isinstance(val, (int, float))
+                else f"{k}=?" for k, val in (v.get("measured") or {}).items())
+            _emit(f"{mark}  {v['kind']:<12} {'+'.join(v['refs']):<12} "
+                  f"expected {expect}  measured {got}")
+            for f in v.get("findings") or []:
+                _emit(f"      {f['severity'].upper()} [{f['code']}] {f['message']}")
+            if v.get("error"):
+                _emit(f"      engine: {v['error']}")
+        _emit(f"{len(verdicts)} testbench(es): "
+              f"{len(verdicts) - len(failed)} passed, {len(failed)} failed, "
+              f"{len(skipped)} skipped")
+    if getattr(args, "exit_zero", False):
+        return EXIT["OK"]
+    return EXIT["FINDINGS"] if failed else EXIT["OK"]
+
+
 def _cmd_review_diff(args: argparse.Namespace) -> int:
     """`review diff <old.json> <new.json>` — fingerprint-aligned drift."""
     from ..review import diff as diffmod
@@ -356,7 +452,7 @@ def _cmd_review_diff(args: argparse.Namespace) -> int:
     new_doc = {"findings": [_report._finding_json(f) for f in new_f]}
     d = diffmod.diff_findings(old_doc, new_doc)
     if args.json:
-        _emit(_dumps(d))
+        _emit(_dumps(_stamp(d)))
     else:
         _emit(diffmod.render_text(d).rstrip("\n"))
     if getattr(args, "fail_on_new", False) and d["added"]:
@@ -372,7 +468,7 @@ def _cmd_review_tree(args: argparse.Namespace) -> int:
     sch = _read_schematic(target)
     doc = treemod.power_tree(sch)
     if args.json:
-        _emit(_dumps(doc))
+        _emit(_dumps(_stamp(doc)))
     else:
         _emit(treemod.render_text(doc).rstrip("\n"))
     return EXIT["OK"]
@@ -526,6 +622,25 @@ def register(sub, common) -> None:
     pp.add_argument("path", nargs="?", help="findings .json (from analyze --out)")
     pp.add_argument("--out", metavar="FILE", help="write proposals JSON here")
     pp.set_defaults(handler=_cmd_review_propose)
+
+    pb = rev.add_parser(
+        "testbench", parents=[common],
+        help="auto-generate + run subcircuit SPICE testbenches from "
+             "quantitative findings (RC corners, divider ratios)")
+    pb.add_argument("path", nargs="?", help="schematic (.kicad_sch / .SchDoc)")
+    pb.add_argument("--findings", metavar="FILE",
+                    help="reuse a findings .json (default: run "
+                         "`review analyze` in-process, standard profile)")
+    pb.add_argument("--deck-only", dest="deck_only", action="store_true",
+                    help="emit the decks without running ngspice (exit 0)")
+    pb.add_argument("--out", metavar="DIR",
+                    help="with --deck-only: write <fingerprint>_<kind>.deck "
+                         "files here")
+    pb.add_argument("--timeout", type=float, metavar="S",
+                    help="per-bench engine timeout (default 60)")
+    pb.add_argument("--exit-zero", action="store_true",
+                    help="always exit 0 (report mode)")
+    pb.set_defaults(handler=_cmd_review_testbench)
 
     pd = rev.add_parser(
         "diff", parents=[common],

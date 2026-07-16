@@ -1,0 +1,789 @@
+{
+  "schema_version": "1.3",
+  "metadata": {
+    "passive_pin_ratio": 1.0,
+    "no_erc_suppressed": 0,
+    "unnamed_net_count": 0,
+    "frac_present": false,
+    "config_waived": "0 (0 demoted)",
+    "component_count": 13,
+    "pin_count": 26,
+    "undesignated_count": 0
+  },
+  "findings": [
+    {
+      "code": "ERC_DANGLING_NET",
+      "severity": "warning",
+      "message": "single-pin net SDA: R3.2 is the only connection (likely dangling / unrouted)",
+      "refs": [
+        "R3.2"
+      ],
+      "pos": [
+        4600.0,
+        1150.0
+      ],
+      "anchors": [
+        {
+          "kind": "pin",
+          "id": "R3.2",
+          "pos": [
+            4600.0,
+            1150.0
+          ]
+        },
+        {
+          "kind": "net",
+          "id": "SDA"
+        }
+      ]
+    },
+    {
+      "code": "ERC_DANGLING_NET",
+      "severity": "warning",
+      "message": "single-pin net SCL: R4.2 is the only connection (likely dangling / unrouted)",
+      "refs": [
+        "R4.2"
+      ],
+      "pos": [
+        5200.0,
+        1150.0
+      ],
+      "anchors": [
+        {
+          "kind": "pin",
+          "id": "R4.2",
+          "pos": [
+            5200.0,
+            1150.0
+          ]
+        },
+        {
+          "kind": "net",
+          "id": "SCL"
+        }
+      ]
+    },
+    {
+      "code": "POWER_GROUND",
+      "severity": "info",
+      "message": "1 ground net(s): GND",
+      "refs": [
+        "GND"
+      ]
+    },
+    {
+      "code": "POWER_RAIL",
+      "severity": "info",
+      "message": "rail '3V3' @ ~3.3V (from name): 7 consumer(s): C2, C3, C4, L1, R1, R3, R4",
+      "refs": [
+        "3V3"
+      ]
+    },
+    {
+      "code": "POWER_RAIL",
+      "severity": "info",
+      "message": "rail 'VIN': 3 consumer(s): C1, L1, R6",
+      "refs": [
+        "VIN"
+      ]
+    },
+    {
+      "code": "POWER_RAIL",
+      "severity": "info",
+      "message": "rail 'VREF': 2 consumer(s): R1, R2",
+      "refs": [
+        "VREF"
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component L1 has no footprint",
+      "refs": [
+        "L1"
+      ],
+      "pos": [
+        1500.0,
+        800.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "L1",
+          "pos": [
+            1500.0,
+            800.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component C1 has no footprint",
+      "refs": [
+        "C1"
+      ],
+      "pos": [
+        1000.0,
+        950.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C1",
+          "pos": [
+            1000.0,
+            950.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component C2 has no footprint",
+      "refs": [
+        "C2"
+      ],
+      "pos": [
+        2000.0,
+        950.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C2",
+          "pos": [
+            2000.0,
+            950.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component C3 has no footprint",
+      "refs": [
+        "C3"
+      ],
+      "pos": [
+        3000.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C3",
+          "pos": [
+            3000.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component C4 has no footprint",
+      "refs": [
+        "C4"
+      ],
+      "pos": [
+        3600.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C4",
+          "pos": [
+            3600.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R3 has no footprint",
+      "refs": [
+        "R3"
+      ],
+      "pos": [
+        4600.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R3",
+          "pos": [
+            4600.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R4 has no footprint",
+      "refs": [
+        "R4"
+      ],
+      "pos": [
+        5200.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R4",
+          "pos": [
+            5200.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R1 has no footprint",
+      "refs": [
+        "R1"
+      ],
+      "pos": [
+        1200.0,
+        2200.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R1",
+          "pos": [
+            1200.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R2 has no footprint",
+      "refs": [
+        "R2"
+      ],
+      "pos": [
+        1200.0,
+        2600.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R2",
+          "pos": [
+            1200.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R6 has no footprint",
+      "refs": [
+        "R6"
+      ],
+      "pos": [
+        2400.0,
+        2200.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R6",
+          "pos": [
+            2400.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R7 has no footprint",
+      "refs": [
+        "R7"
+      ],
+      "pos": [
+        2400.0,
+        2600.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R7",
+          "pos": [
+            2400.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component R5 has no footprint",
+      "refs": [
+        "R5"
+      ],
+      "pos": [
+        3800.0,
+        2200.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R5",
+          "pos": [
+            3800.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component C5 has no footprint",
+      "refs": [
+        "C5"
+      ],
+      "pos": [
+        3800.0,
+        2600.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C5",
+          "pos": [
+            3800.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MPN_COVERAGE",
+      "severity": "warning",
+      "message": "only 0/13 components (0%) carry a part-number identity (MPN/distributor field) -- below the 50% sourcing floor, this BOM cannot be ordered as-is; `akcli jlc bom --fix` can fill LCSC parts",
+      "refs": [],
+      "detector": "check.bom",
+      "confidence": "deterministic",
+      "evidence": {
+        "source": "bom"
+      }
+    },
+    {
+      "code": "NET_SINGLE_PIN",
+      "severity": "warning",
+      "message": "net 'SDA' has a single pin R3.2 — floating or missing connection",
+      "refs": [
+        "R3.2"
+      ],
+      "pos": [
+        4600.0,
+        1150.0
+      ],
+      "anchors": [
+        {
+          "kind": "pin",
+          "id": "R3.2",
+          "pos": [
+            4600.0,
+            1150.0
+          ]
+        },
+        {
+          "kind": "net",
+          "id": "SDA"
+        }
+      ]
+    },
+    {
+      "code": "NET_SINGLE_PIN",
+      "severity": "warning",
+      "message": "net 'SCL' has a single pin R4.2 — floating or missing connection",
+      "refs": [
+        "R4.2"
+      ],
+      "pos": [
+        5200.0,
+        1150.0
+      ],
+      "anchors": [
+        {
+          "kind": "pin",
+          "id": "R4.2",
+          "pos": [
+            5200.0,
+            1150.0
+          ]
+        },
+        {
+          "kind": "net",
+          "id": "SCL"
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'VIN' at (1200,800) runs over L1 (1500,800) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "VIN",
+        "L1"
+      ],
+      "pos": [
+        1200.0,
+        800.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "VIN",
+          "pos": [
+            1200.0,
+            800.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "L1",
+          "pos": [
+            1500.0,
+            800.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label '3V3' at (1800,800) runs over C2 (2000,950) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "3V3",
+        "C2"
+      ],
+      "pos": [
+        1800.0,
+        800.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "3V3",
+          "pos": [
+            1800.0,
+            800.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "C2",
+          "pos": [
+            2000.0,
+            950.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'VREF' at (1200,2350) runs over R2 (1200,2600) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "VREF",
+        "R2"
+      ],
+      "pos": [
+        1200.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "VREF",
+          "pos": [
+            1200.0,
+            2350.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "R2",
+          "pos": [
+            1200.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'VREF' at (1200,2450) runs over R1 (1200,2200) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "VREF",
+        "R1"
+      ],
+      "pos": [
+        1200.0,
+        2450.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "VREF",
+          "pos": [
+            1200.0,
+            2450.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "R1",
+          "pos": [
+            1200.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'SENSE' at (2400,2350) runs over R7 (2400,2600) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "SENSE",
+        "R7"
+      ],
+      "pos": [
+        2400.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "SENSE",
+          "pos": [
+            2400.0,
+            2350.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "R7",
+          "pos": [
+            2400.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'SENSE' at (2400,2450) runs over R6 (2400,2200) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "SENSE",
+        "R6"
+      ],
+      "pos": [
+        2400.0,
+        2450.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "SENSE",
+          "pos": [
+            2400.0,
+            2450.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "R6",
+          "pos": [
+            2400.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'ADC_IN' at (3800,2350) runs over C5 (3800,2600) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "ADC_IN",
+        "C5"
+      ],
+      "pos": [
+        3800.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "ADC_IN",
+          "pos": [
+            3800.0,
+            2350.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "C5",
+          "pos": [
+            3800.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVER_SYMBOL",
+      "severity": "warning",
+      "message": "label 'ADC_IN' at (3800,2450) runs over R5 (3800,2200) — reorient it away from the symbol (the writer auto-orients labels anchored on pins) or move it to a wire stub",
+      "refs": [
+        "ADC_IN",
+        "R5"
+      ],
+      "pos": [
+        3800.0,
+        2450.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "ADC_IN",
+          "pos": [
+            3800.0,
+            2450.0
+          ]
+        },
+        {
+          "kind": "component",
+          "id": "R5",
+          "pos": [
+            3800.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVERLAP",
+      "severity": "warning",
+      "message": "labels 'VREF' at (1200,2350) and 'VREF' at (1200,2450) overlap — separate them or shorten the text",
+      "refs": [
+        "VREF",
+        "VREF"
+      ],
+      "pos": [
+        1200.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "VREF",
+          "pos": [
+            1200.0,
+            2350.0
+          ]
+        },
+        {
+          "kind": "label",
+          "id": "VREF",
+          "pos": [
+            1200.0,
+            2450.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVERLAP",
+      "severity": "warning",
+      "message": "labels 'SENSE' at (2400,2350) and 'SENSE' at (2400,2450) overlap — separate them or shorten the text",
+      "refs": [
+        "SENSE",
+        "SENSE"
+      ],
+      "pos": [
+        2400.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "SENSE",
+          "pos": [
+            2400.0,
+            2350.0
+          ]
+        },
+        {
+          "kind": "label",
+          "id": "SENSE",
+          "pos": [
+            2400.0,
+            2450.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "LAYOUT_LABEL_OVERLAP",
+      "severity": "warning",
+      "message": "labels 'ADC_IN' at (3800,2350) and 'ADC_IN' at (3800,2450) overlap — separate them or shorten the text",
+      "refs": [
+        "ADC_IN",
+        "ADC_IN"
+      ],
+      "pos": [
+        3800.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "label",
+          "id": "ADC_IN",
+          "pos": [
+            3800.0,
+            2350.0
+          ]
+        },
+        {
+          "kind": "label",
+          "id": "ADC_IN",
+          "pos": [
+            3800.0,
+            2450.0
+          ]
+        }
+      ]
+    }
+  ]
+}

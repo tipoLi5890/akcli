@@ -55,15 +55,31 @@ def test_schema_pins_model_schema_version():
 
 PACKAGED = ROOT / "src" / "akcli" / "schemas"
 
+_ALL_SCHEMAS = sorted(p.name for p in (ROOT / "schemas").glob("*.json"))
 
-@pytest.mark.parametrize("name", ["ops.schema.json", "ops.capabilities.json"])
+
+@pytest.mark.parametrize("name", _ALL_SCHEMAS)
 def test_packaged_schema_identical_to_root(name):
+    """EVERY canonical schema ships byte-identically in the wheel."""
+    packaged_path = PACKAGED / name
+    assert packaged_path.exists(), (
+        f"{name}: missing from the packaged mirror — "
+        f"copy schemas/{name} to src/akcli/schemas/{name}"
+    )
     root_text = (ROOT / "schemas" / name).read_text()
-    packaged_text = (PACKAGED / name).read_text()
-    assert packaged_text == root_text, (
+    assert packaged_path.read_text() == root_text, (
         f"{name}: packaged mirror drifted from canonical schemas/{name} — "
         f"copy the root file over src/akcli/schemas/{name}"
     )
+
+
+def test_schema_ids_share_one_host():
+    """Every schema's $id resolves under the one canonical host."""
+    for name in _ALL_SCHEMAS:
+        doc = json.loads((ROOT / "schemas" / name).read_text())
+        assert doc["$id"].startswith(
+            "https://github.com/tipoLi5890/akcli/schemas/"), (
+            f"{name}: $id host drifted: {doc['$id']}")
 
 
 def test_ops_loaders_use_packaged_or_root():

@@ -1,0 +1,84 @@
+{
+  "schema_version": "1",
+  "source": "tests/fixtures/corpus/analog_frontend.kicad_sch",
+  "total": 8,
+  "matched": 8,
+  "returned": 8,
+  "truncated": false,
+  "nets": [
+    {
+      "name": "3V3",
+      "stable_id": "net_9aceeef3d825",
+      "members": [
+        "C2.1",
+        "C3.1",
+        "C4.1",
+        "L1.2",
+        "R1.1",
+        "R3.1",
+        "R4.1"
+      ]
+    },
+    {
+      "name": "ADC_IN",
+      "stable_id": "net_0e3dda67de3e",
+      "members": [
+        "C5.1",
+        "R5.2"
+      ]
+    },
+    {
+      "name": "GND",
+      "stable_id": "net_9cfcb81d5743",
+      "members": [
+        "C1.2",
+        "C2.2",
+        "C3.2",
+        "C4.2",
+        "C5.2",
+        "R2.2",
+        "R7.2"
+      ]
+    },
+    {
+      "name": "SCL",
+      "stable_id": "net_c7f0b6c05d1e",
+      "members": [
+        "R4.2"
+      ]
+    },
+    {
+      "name": "SDA",
+      "stable_id": "net_11acc7000d32",
+      "members": [
+        "R3.2"
+      ]
+    },
+    {
+      "name": "SENSE",
+      "stable_id": "net_3a10349e8449",
+      "members": [
+        "R5.1",
+        "R6.2",
+        "R7.1"
+      ]
+    },
+    {
+      "name": "VIN",
+      "stable_id": "net_7b0725636f36",
+      "members": [
+        "C1.1",
+        "L1.1",
+        "R6.1"
+      ]
+    },
+    {
+      "name": "VREF",
+      "stable_id": "net_1fea7890ea9d",
+      "members": [
+        "R1.2",
+        "R2.1"
+      ]
+    }
+  ]
+}

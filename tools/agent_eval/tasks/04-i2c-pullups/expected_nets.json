@@ -1,0 +1,23 @@
+{
+ "nets": [
+  {
+   "name": "3V3",
+   "members": [
+    "R1.1",
+    "R2.1"
+   ]
+  },
+  {
+   "name": "SCL",
+   "members": [
+    "R2.2"
+   ]
+  },
+  {
+   "name": "SDA",
+   "members": [
+    "R1.2"
+   ]
+  }
+ ]
+}

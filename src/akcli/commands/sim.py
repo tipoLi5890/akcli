@@ -62,6 +62,7 @@ from ._shared import (
     _ExitWith,
     _load_schematic,
     _require_path,
+    _stamp,
 )
 
 # Fixed, space-free wrdata filename written inside the (space-free) tempdir; the
@@ -188,12 +189,12 @@ def _cmd_sim(args: argparse.Namespace) -> int:
 def _emit_deck(args: argparse.Namespace, d, deck_sha: str) -> int:
     """`--deck-only`: write the deck (stdout/--out/JSON); warnings never fail it."""
     if getattr(args, "json", False):
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "deck_sha": deck_sha,
             "deck": d.text,
             "warnings": [_finding_dict(f) for f in d.warnings],
             "unmodeled": list(d.unmodeled),
-        }))
+        })))
         return EXIT["OK"]
     if getattr(args, "out", None):
         Path(args.out).write_text(d.text, encoding="utf-8")
@@ -291,13 +292,13 @@ def _run_engine(args, path, spec, d, deck_sha, assertions, engine) -> int:
     ok = not any(f.severity in _FAIL_SEVERITIES for f in findings)
 
     if getattr(args, "json", False):
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "deck_sha": deck_sha,
             "engine": lib,
             "measured": measured,
             "findings": [_finding_dict(f) for f in all_findings],
             "ok": ok,
-        }))
+        })))
     else:
         header = f"# akcli sim\n  engine: {lib}\n  deck sha1: {deck_sha}"
         table = _measured_table(spec, measured, findings)
@@ -481,9 +482,9 @@ def _run_sweep(args, path, sch, spec, sweeps_arg, deck_only, sim_file,
         })
 
     if getattr(args, "json", False):
-        _emit(_dumps({"engine": lib, "corners": corners,
-                      "warnings": [_finding_dict(f) for f in notices],
-                      "ok": not any_fail}))
+        _emit(_dumps(_stamp({"engine": lib, "corners": corners,
+                             "warnings": [_finding_dict(f) for f in notices],
+                             "ok": not any_fail})))
     else:
         table = _sweep_table(lib, spec, sweeps, corners)
         if notices:
@@ -603,14 +604,14 @@ def _cmd_fit_diode(args: argparse.Namespace) -> int:
 
     note = result.get("note") or ""
     if getattr(args, "json", False):
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "name": name,
             "model_card": model_card,
             "sim_params": sim_params,
             "params": {"IS": result["IS"], "N": result["N"],
                        "RS": result["RS"], "CJO": result["CJO"]},
             "note": note,
-        }))
+        })))
     else:
         lines = ["# akcli sim fit-diode", "", model_card, "",
                  f"Sim.Params: {sim_params}"]
@@ -653,7 +654,7 @@ def _fit_diode_apply(args, models, result, name, model_card,
 
     if not commit:
         if getattr(args, "json", False):
-            _emit(_dumps({
+            _emit(_dumps(_stamp({
                 "name": name,
                 "model_card": model_card,
                 "sim_params": sim_params,
@@ -661,7 +662,7 @@ def _fit_diode_apply(args, models, result, name, model_card,
                 "target": str(target),
                 "oplist": oplist,
                 "applied": False,
-            }))
+            })))
         else:
             _emit(
                 "# akcli sim fit-diode (dry-run)\n\n"
@@ -683,7 +684,7 @@ def _fit_diode_apply(args, models, result, name, model_card,
 
     code = _draw_exit(results, findings)
     if getattr(args, "json", False):
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "name": name,
             "model_card": model_card,
             "sim_params": sim_params,
@@ -692,7 +693,7 @@ def _fit_diode_apply(args, models, result, name, model_card,
             "oplist": oplist,
             "applied": code == EXIT["OK"],
             "results": [r.to_dict() for r in results],
-        }))
+        })))
     else:
         if code == EXIT["OK"]:
             _emit(f"# akcli sim fit-diode\n\n{model_card}\n\n"

@@ -7,10 +7,12 @@ import pytest
 from akcli.errors import (
     ERROR_CODES,
     EXIT,
+    REMEDIATION,
     AkcliError,
     as_error,
     exit_for_code,
     fail,
+    remediation_for,
     to_exit,
 )
 
@@ -27,6 +29,8 @@ def test_required_codes_present():
         "KICAD_CLI_TIMEOUT", "KICAD_CLI_MISSING", "BAD_CONFIG",
         # binary-fetch integrity codes
         "BINFETCH_DOWNLOAD", "BINFETCH_CHECKSUM",
+        # Altium live bridge transport
+        "BRIDGE_BUSY", "BRIDGE_TIMEOUT",
     }
     assert required <= ERROR_CODES
     assert len(ERROR_CODES) == len(required)
@@ -41,6 +45,7 @@ def test_exit_table_values():
     assert EXIT["UNSUPPORTED_FORMAT"] == 5
     assert EXIT["OPLIST"] == 6
     assert EXIT["TOOL_MISSING"] == 7
+    assert EXIT["QUERY_MISS"] == 8
 
 
 def test_fail_raises_akclierror_with_code():
@@ -64,6 +69,8 @@ def test_exit_mapping_categories():
     assert exit_for_code("BAD_CONFIG") == EXIT["USAGE"]
     assert exit_for_code("PATH_OUTSIDE_ROOT") == EXIT["USAGE"]
     assert exit_for_code("KICAD_CLI_MISSING") == EXIT["TOOL_MISSING"]
+    assert exit_for_code("BRIDGE_BUSY") == EXIT["OPLIST"]
+    assert exit_for_code("BRIDGE_TIMEOUT") == EXIT["TOOL_MISSING"]
 
 
 def test_every_code_has_exit_mapping():
@@ -75,6 +82,22 @@ def test_to_exit_for_filenotfound():
     assert to_exit(FileNotFoundError(2, "no", "x")) == EXIT["NOT_FOUND"]
     assert to_exit(ValueError("?")) == EXIT["PARSE"]
     assert to_exit(AkcliError("KICAD_CLI_TIMEOUT")) == EXIT["TOOL_MISSING"]
+
+
+def test_every_error_code_has_a_remediation_hint():
+    """The agent contract: no error path is hint-less (SPEC agent surface)."""
+    missing = sorted(ERROR_CODES - set(REMEDIATION))
+    assert not missing, f"ERROR codes without a remediation hint: {missing}"
+    stale = sorted(set(REMEDIATION) - ERROR_CODES)
+    assert not stale, f"remediation hints for unknown codes: {stale}"
+    for code, hint in REMEDIATION.items():
+        assert hint.strip(), f"empty remediation for {code}"
+
+
+def test_remediation_for_lookup():
+    assert remediation_for("BAD_ANGLE") == REMEDIATION["BAD_ANGLE"]
+    assert remediation_for("NOT_A_CODE") is None
+    assert remediation_for(None) is None
 
 
 def test_as_error_line_format():

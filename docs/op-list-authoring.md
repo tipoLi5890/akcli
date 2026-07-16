@@ -3,12 +3,16 @@
 An **op-list** is the JSON document `akcli plan` / `akcli draw` execute against
 a KiCad schematic. This guide is the practical companion to the formal schema
 (`schemas/ops.schema.json`) and the per-executor support matrix
-(`schemas/ops.capabilities.json`). Scaffolding helpers:
+(`schemas/ops.capabilities.json`). An agent can also fetch the coordinate-contract
+limits below mechanically via `akcli capabilities --json` (`.ops.constraints`:
+`rotation_enum`, `wire_orthogonal_only`, `grid_mil`, `hierarchy`) instead of
+hardcoding them from this doc. Scaffolding helpers:
 
 ```bash
 akcli ops list                    # the 18-op vocabulary + 9 macros + required fields + support
 akcli ops template place_component        # fill-in JSON skeleton (all fields)
 akcli ops template add_wire --required-only
+akcli ops validate ops.json               # cheap structural check (envelope+ops+macros) before plan/draw; the PreToolUse hook runs this automatically before draw --apply
 akcli pins Device:R --at 2000 1000        # every pin's WORLD (x,y) for that placement
 akcli pins Timer:NE555P --at 2600 1500 --symbols /path/Timer.kicad_sym --json
 ```

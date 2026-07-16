@@ -59,6 +59,7 @@ from pathlib import Path
 
 from .. import model, units
 from ..errors import AkcliError, fail
+from ..errors import remediation_for as _remediation_for
 from ..kicad_escape import escape_lib_id, unescape_string
 from ..ops import PROTOCOL_VERSION, parse_mid_anchor, validate_oplist
 from ..readers import kicad_lib, sexpr
@@ -97,6 +98,7 @@ class OpResult:
     created_uuids: list[str] = field(default_factory=list)
     error_code: str | None = None
     message: str = ""
+    remediation: str | None = None          # actionable next step, machine-readable
 
     def to_dict(self) -> dict:
         return {
@@ -106,7 +108,12 @@ class OpResult:
             "created_uuids": list(self.created_uuids),
             "error_code": self.error_code,
             "message": self.message,
+            "remediation": self.remediation,
         }
+
+
+# Per-op remediation hints live in ``errors.REMEDIATION`` (one registry for
+# every surface: per-op results, CLI top level, findings) — imported above.
 
 
 # --------------------------------------------------------------------------- #
@@ -1597,6 +1604,7 @@ def apply(
             res.status = "error"
             res.error_code = "OP_UNSUPPORTED"
             res.message = f"no kicad writer for op {name!r}"
+            res.remediation = _remediation_for("OP_UNSUPPORTED")
             any_error = True
             results.append(res)
             continue
@@ -1608,6 +1616,7 @@ def apply(
             res.status = "error"
             res.error_code = exc.code
             res.message = exc.message
+            res.remediation = _remediation_for(exc.code)
             any_error = True
         except Exception as exc:  # noqa: BLE001 — per-op containment (SPEC §2.4):
             # a handler bug must surface as ONE failed OpResult, never as a

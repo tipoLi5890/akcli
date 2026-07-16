@@ -71,3 +71,49 @@ Bout out 0 I=(v(out)/10)*(0.5+0.5*tanh(100*(v(inp)-v(inn))))
 Bce c e I={gain}*1m*(0.5+0.5*tanh(20*(v(c)-v(e)-0.1)))
 Rce c e 10meg
 .ends AKCLI_PHOTOTRANS
+
+*------------------------------------------------------------------------------
+* AKCLI_OPAMP - behavioral single-pole op-amp (textbook macromodel).
+*
+* Boyle-style reduction: differential input resistance 1 meg per input
+* (bipolar-input textbook nominal), open-loop DC gain A0 = 100k (100 dB),
+* single dominant pole set by Rp*Cp = 1/(2*pi*10 Hz) so GBW ~= 1 MHz
+* (Sedra/Smith, "Microelectronic Circuits", internally-compensated op-amp
+* first-order model). The output stage clamps softly to (vee+0.1, vcc-0.1)
+* through a tanh() so the transient solver converges instead of railing hard;
+* output resistance 75 ohm (uA741-class nominal).
+* Pin order: inp inn out vcc vee.
+*------------------------------------------------------------------------------
+.subckt AKCLI_OPAMP inp inn out vcc vee
+Rin1 inp 0 1meg
+Rin2 inn 0 1meg
+* gain stage into the dominant pole (A0=100k, fp=10 Hz -> GBW ~= 1 MHz)
+Bg p 0 V=100k*(v(inp)-v(inn))
+Rp p pole 1meg
+Cp pole 0 15.9n
+* soft rail clamp around the supply midpoint, then a 75-ohm output stage
+Bo o 0 V=(v(vcc)+v(vee))/2 + ((v(vcc)-v(vee))/2 - 0.1)*tanh(v(pole)/max((v(vcc)-v(vee))/2,0.1))
+Ro o out 75
+.ends AKCLI_OPAMP
+
+*------------------------------------------------------------------------------
+* AKCLI_NMOS_SW / AKCLI_PMOS_SW - behavioral MOSFET switches.
+*
+* A logic-level FET reduced to what a power-switch sanity run needs: channel
+* conductance blends smoothly from roff (10 meg) to {ron} as Vgs crosses
+* {vth} (tanh gate, ~0.2 V transition width -- enhancement-mode textbook
+* behavior, e.g. Sedra/Smith triode-region reduction). No body diode, no
+* capacitances: gate leakage is a 10-meg bleed so an undriven gate reads a
+* level instead of floating. For switching-loss or gate-charge questions use
+* a vendor model via Sim.* fields instead.
+* Pin order: d g s ; params: vth=2.0 ron=0.1.
+*------------------------------------------------------------------------------
+.subckt AKCLI_NMOS_SW d g s params: vth=2.0 ron=0.1
+Rg g s 10meg
+Bds d s I=(v(d)-v(s)) * ( 1/10meg + (1/{ron} - 1/10meg)*(0.5+0.5*tanh((v(g)-v(s)-{vth})/0.2)) )
+.ends AKCLI_NMOS_SW
+
+.subckt AKCLI_PMOS_SW d g s params: vth=2.0 ron=0.1
+Rg g s 10meg
+Bds d s I=(v(d)-v(s)) * ( 1/10meg + (1/{ron} - 1/10meg)*(0.5+0.5*tanh((v(s)-v(g)-{vth})/0.2)) )
+.ends AKCLI_PMOS_SW

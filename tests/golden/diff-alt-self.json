@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.3",
+  "summary": {
+    "components": {
+      "added": 0,
+      "removed": 0,
+      "changed": 0,
+      "matched": 4
+    },
+    "nets": {
+      "added": 0,
+      "removed": 0,
+      "renamed": 0,
+      "membership_changed": 0,
+      "matched": 1
+    },
+    "low_confidence": true
+  },
+  "low_confidence": true,
+  "notes": [
+    "no shared UniqueIDs between revisions; components matched by signature/refdes (heuristic, not authoritative)"
+  ],
+  "rename_map": {},
+  "component_changes": [
+    {
+      "designator_a": "U2",
+      "designator_b": "U2",
+      "method": "refdes",
+      "confidence": 0.6,
+      "field_changes": {}
+    },
+    {
+      "designator_a": "R7",
+      "designator_b": "R7",
+      "method": "refdes",
+      "confidence": 0.6,
+      "field_changes": {}
+    },
+    {
+      "designator_a": "U3",
+      "designator_b": "U3",
+      "method": "refdes",
+      "confidence": 0.6,
+      "field_changes": {}
+    },
+    {
+      "designator_a": "R12",
+      "designator_b": "R12",
+      "method": "refdes",
+      "confidence": 0.6,
+      "field_changes": {}
+    }
+  ],
+  "net_changes": [
+    {
+      "name_a": "STAT",
+      "name_b": "STAT",
+      "stable_id_a": "net_c5ab4c1e8111",
+      "stable_id_b": "net_c5ab4c1e8111",
+      "method": "membership",
+      "jaccard": 1.0,
+      "added_members": [],
+      "removed_members": [],
+      "name_changed": false,
+      "membership_changed": false,
+      "confidence": 0.6
+    }
+  ]
+}

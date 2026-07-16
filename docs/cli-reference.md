@@ -64,10 +64,17 @@ Parse an Altium or KiCad schematic/PCB/library into the normalized model and pri
   (`board.units == "mm"`), unlike the Altium PCB reader's mils — check `source_format`.
 - `--json` prints the full `Schematic`/`Pcb`/`Library` export with `schema_version`; `--md` prints
   a human Markdown summary.
+- `--summary` prints **counts + metadata only, never the full object arrays** — the
+  context-budget escape hatch for big boards. `--summary --json` emits
+  `{schema_version, source, format, counts, metadata[, warnings]}`; drill down afterwards with
+  `akcli nets --match`, `akcli component --match`, or a full `read --json`.
 
 ### `akcli net <file> [NAME]`
 Extract the netlist (net → pin membership) using the shared `netbuild` engine.
-- With `NAME`, print just that net; a miss prints a notice to **stderr** and still exits `0`.
+- With `NAME`, print just that net; a miss prints a notice (with a did-you-mean hint) to
+  **stderr** and exits `8` (`QUERY_MISS`); `--json` additionally emits
+  `{"found": false, "query": NAME, "kind": "net", "source": FILE}` on stdout so an agent can
+  distinguish "net absent" from "file absent" (exit `4`) without parsing stderr.
 - Output: nets with members, aliases, and source names; `--json` validates against
   `schemas/netlist.schema.json`.
 - **Buses (imported KiCad designs):** the engine models real bus semantics
@@ -89,9 +96,14 @@ Extract the netlist (net → pin membership) using the shared `netbuild` engine.
   builds in a fraction of a second); the semantics are byte-identical to the
   prior brute-force scan.
 
-### `akcli nets <file> [--intent-snapshot OUT.json] [--include-unnamed]`
+### `akcli nets <file> [--intent-snapshot OUT.json] [--include-unnamed] [--match GLOB] [--limit N]`
 Print **every net → sorted members**, one line per net (`MID: C1.1, R1.2, R2.1`); unnamed nets
-render as `<unnamed net_...>`. `--json` emits `{source, nets: [{name, stable_id, members}]}`.
+render as `<unnamed net_...>`. `--json` emits
+`{source, total, matched, returned, truncated, nets: [{name, stable_id, members}]}`.
+- `--match GLOB` filters by net name (case-sensitive `fnmatch`, e.g. `--match 'VDD*'`);
+  `--limit N` caps the listing. A cut listing is visible in-band: the JSON envelope carries
+  `total`/`matched`/`returned`/`truncated`, and text mode prints a `note:` to stderr — a filtered
+  result can never be mistaken for the whole netlist.
 - `--intent-snapshot OUT.json` additionally writes the netlist as a **design-intent JSON**
   document (`'-'` = stdout) that `akcli check --intent` consumes — the snapshot → edit → assert
   workflow. Named nets only by default; `--include-unnamed` also captures unnamed nets keyed by
@@ -99,10 +111,13 @@ render as `<unnamed net_...>`. `--json` emits `{source, nets: [{name, stable_id,
 - A snapshot round-trips: `akcli check <sch> --intent <snapshot>` on the unchanged schematic
   reports zero findings.
 
-### `akcli component <file> [REF]`
-Without `REF`: list components (designator, library reference, value, footprint, pin count, sheet).
-With `REF`: that component's pin → net table. A missing `REF` prints a notice to **stderr** and
-exits `0`.
+### `akcli component <file> [REF] [--match GLOB] [--limit N]`
+Without `REF`: list components — compact rows (designator, library reference, value, pin count),
+filterable with `--match GLOB` (on the designator) and `--limit N`; `--json` wraps the rows in the
+same `total`/`matched`/`returned`/`truncated` envelope as `nets`.
+With `REF`: that component's pin → net table. A missing `REF` prints a notice (with a
+did-you-mean hint) to **stderr** and exits `8` (`QUERY_MISS`); `--json` additionally emits
+`{"found": false, "query": REF, "kind": "component", "source": FILE}` on stdout.
 
 ### `akcli pins <lib_id> [--at X Y] [--rotation {0,90,180,270}] [--mirror {none,x,y}] [--symbols PATH ...]`
 Op-list authoring helper: resolve a symbol (`Device:R`, `Timer:NE555P`, ...) from the same
@@ -126,9 +141,18 @@ unresolvable `lib_id` is `SYMBOL_NOT_FOUND` (exit `6`). `--json` emits the table
 Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print findings.
 - `-C/--config` supplies rails, MCU designator, the schematic grid, `[[erc_waiver]]`
   entries, and the checker-agnostic `[[waiver]]` table (below).
-- `--erc` / `--power` / `--bom` / `--nets` / `--layout` / `--intent` / `--contract` / `--libsync`
-  select check families (default: `erc`+`power`+`bom`+`nets`+`layout`; `layout` only runs on
-  `.kicad_sch`; `intent`, `contract` and `libsync` are **opt-in only** — they never run by default).
+- `--erc` / `--power` / `--bom` / `--nets` / `--pairs` / `--layout` / `--intent` / `--contract` /
+  `--libsync` select check families (default: `erc`+`power`+`bom`+`nets`+`pairs`+`layout`;
+  `layout` only runs on `.kicad_sch`; `[check] pairs = false` opts `pairs` out of the default
+  set; `intent`, `contract` and `libsync` are **opt-in only** — they never run by default).
+- `--pairs` is **name-level continuity**: `PAIR_INCOMPLETE` (WARNING — a `_P`/`_DP`/`_H`/`+`
+  net whose `_N`/`_DN`/`_L`/`-` partner does not exist; deliberately asymmetric, a lone
+  `_N`/`_L` is the active-low convention and never fires), `PAIR_PIN_MISMATCH` (NOTE — both
+  sides exist with different pin counts), and `BUS_GAP` (a numbered family `D0..D7` with
+  internal index holes; WARNING for families ≥ 4 members, NOTE below; families need not start
+  at 0). `[check] pair_suffixes = [["_P","_N"], ...]` replaces the suffix table and
+  `bus_min_family` raises the family-size threshold; geometric diff-pair *skew* stays in
+  `review analyze` (EMC family).
 - `--nets` is **connectivity hygiene**: `NET_SINGLE_PIN` (a floating label or
   a power port driving nothing), `NET_OFF_GRID` (pins off the configured grid
   — wires that touch on screen without ever connecting), and, on `.kicad_sch`
@@ -152,6 +176,15 @@ Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print
   only): a multi-unit part with units never placed (e.g. gate B of a dual
   comparator) — terminate them with the `terminate_unused_unit` macro.
   Waiver rule token: `unplaced_unit`.
+- `--erc` also runs the **pin-type conflict matrix** (`ERC_PIN_CONFLICT`,
+  waiver token `pin_conflict`): the high-signal cells of KiCad's default
+  matrix — open-collector/open-emitter/tri-state pins mixed with push-pull
+  `output`/`power_out` drivers on one net (WARNING; softer cells NOTE) — and
+  **undriven POWER_IN** (`ERC_POWER_IN_UNDRIVEN`, waiver token
+  `power_in_undriven`): a supply pin on a net that is neither a
+  name-recognized rail nor driven by any `power_out` pin. Both are gated
+  behind the type-confidence demotion like every type-based rule, so a
+  mostly-Passive import degrades to NOTEs instead of emitting garbage.
 - `--intent FILE` asserts a **design-intent JSON** file (written by
   `akcli nets --intent-snapshot`, or by hand) against the built netlist:
 
@@ -208,7 +241,9 @@ Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print
   minimum (post-waiver) finding severity that exits non-zero. Default `warning`
   reproduces the historical behavior (exit `1` iff any finding ≥ WARNING);
   `never` always exits `0`. `--exit-zero` is a **deprecated alias for
-  `--fail-on never`** (still works).
+  `--fail-on never`** (still works). The same pair is accepted by **every**
+  findings-emitting command — `diff`, `pinmap`, `library audit`, and
+  `fab check` — one exit policy to learn, not one per command.
 - **`[[waiver]]` config** (checker-agnostic, applied centrally before both
   rendering and the exit decision — independent of the ERC-only
   `[[erc_waiver]]`). Each entry: `code` (required; `fnmatch` glob like `"ERC_*"`
@@ -234,9 +269,48 @@ Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print
   `partialFingerprints` deliberately **exclude** pos/anchors so alert identity
   never churns when a part moves.
 
+### `akcli review <analyze|facts|report|explain|propose|testbench|diff|tree|validate> ...`
+Engineering design review: advisory findings with explicit confidence and evidence. Unlike
+`check`, review findings never fail the build on their own — they exit `0` unless you opt in with
+`--fail-on`. See [docs/review-rules.md](review-rules.md) for the full rule table.
+- `akcli review analyze <sch> [--profile fast|standard|deep] [--detector NAME]
+  [--pcb FILE] [--gerbers DIR] [--facts DIR] [--out FILE] [--fail-on warning|error|critical]` —
+  runs the review detectors over a schematic (`--profile` picks the detector families;
+  `--detector` repeatable to run only named detectors, overriding `--profile`; `--pcb`/
+  `--gerbers` feed the pcb/cross and gerber-package checks; `--facts` points at a datasheet
+  facts dir, auto-discovered as `<sch dir>/datasheets` when it holds `extracted/`; `--out`
+  also writes the findings JSON envelope). Advisory by default (exit `0`); `--fail-on` turns
+  on the same lint-style exit `1` as `check`.
+- `akcli review facts <add|verify|lookup> ...` — the **datasheet facts store**: audited,
+  PDF-pinned numbers that turn heuristic findings `datasheet_backed`. `facts add MPN --pdf FILE
+  [--dir DIR] [--method manual|pdftotext|llm] [--set KEY=VAL@pN ...]` binds a fact to its source
+  PDF by sha256; `facts verify [MPN] [--dir DIR] [--exit-zero]` audits the store (schema, PDF
+  staleness, page bounds, quotes); `facts lookup MPN [KEY] [--dir DIR]` prints one MPN's audited
+  facts.
+- `akcli review report <findings.json> [--format text|json|sarif|junit|markdown]` — re-renders a
+  findings file (from `analyze --out`) in another format.
+- `akcli review explain <CODE>` — prints one review rule: what it checks, the formula, and its
+  provenance.
+- `akcli review propose <findings.json> [--out FILE]` — turns findings into declarative candidate
+  changes (op-list / contract / sim drafts); never touches design files.
+- `akcli review testbench <sch> [--findings FILE] [--deck-only] [--out DIR] [--timeout S]
+  [--exit-zero]` — auto-generates and runs subcircuit SPICE testbenches from quantitative
+  findings (RC corners, divider ratios) with ngspice verdicts. Reuses a findings file with
+  `--findings`, or runs `review analyze` in-process (standard profile) otherwise. `--deck-only`
+  emits the decks without running ngspice (exit `0`); with `--deck-only`, `--out DIR` writes
+  `<fingerprint>_<kind>.deck` files there.
+- `akcli review diff <old.json> <new.json> [--fail-on-new]` — compares two findings files
+  (fingerprint-aligned drift); `--fail-on-new` exits `1` when the later run adds findings.
+- `akcli review tree <sch>` — prints the schematic's power tree (rails, regulators, consumers).
+- `akcli review validate <candidates.json> <sch> [--facts DIR] [--out FILE]` — gates LLM
+  deep-review candidates: schema / anchors / datasheet evidence / masquerade checks; failures are
+  quarantined with reasons.
+
 ### `akcli diff <file_a> <file_b>`
 Diff two schematic revisions. Nets are matched by **membership** (not display name); components by
-UniqueID, then `(value, footprint, pin-count)` signature, then refdes.
+UniqueID, then `(value, footprint, pin-count)` signature, then refdes. `--json` validates against
+`schemas/diff.schema.json` (summary counts, rename map, per-component and per-net changes with
+match method + confidence).
 
 ### `akcli arrange <target.kicad_sch> [--apply] [--grid MIL] [--margin MIL] [--symbols PATH ...]`
 Resolve symbol overlaps by nudging **free** components — parts with no wire
@@ -293,6 +367,8 @@ Dry-run by default (prints the part/net delta that restoring would cause);
 Emit the MCU pin → net table (MCU chosen by `mcu_designator` in config, or `--mcu REF`).
 - `--expected PATH` cross-checks against an external expected pin→signal table (CSV or JSON). The
   schematic is authoritative; the expected table is advisory.
+- `--json` emits the standard findings envelope, validated against `schemas/pinmap.schema.json`
+  (each `PINMAP` finding is one pin→net row; `PINMAP_*` codes report expected-table mismatches).
 
 ### `akcli expected <file.dts|.overlay|.md> [-o FILE]`
 Extract an **expected pin→signal table** from a Zephyr devicetree source/overlay
@@ -364,8 +440,9 @@ color/SMD/EIA-96 markings (IEC 60062:2016), galvanic compatibility
 Export the schematic's **netlist** for other EDA tools. Default `--format protel` (an
 Altium-importable `.NET`); `kicad` emits a legacy eeschema netlist; `csv` flat `net,ref,pin` rows.
 Writes stdout unless `-o` is given. Deterministically sorted; unnamed nets are named by their
-membership-derived `stable_id`, so re-exports diff cleanly. `--json` is **refused** (exit `2`) —
-use `akcli net --json` for structured output.
+membership-derived `stable_id`, so re-exports diff cleanly. `--json` wraps the rendered netlist
+in a `{schema_version, source, format, content}` envelope (the `content` string is byte-identical
+to the plain output); for a structured net-by-net document use `akcli net --json`.
 
 ### `akcli plan <target.kicad_sch> --ops FILE [--symbols PATH ...] [--no-net-diff]`
 Validate an op-list against `protocol_version` and `schemas/ops.schema.json`, resolve it against the
@@ -373,7 +450,7 @@ target `.kicad_sch` (symbols from repeatable `--symbols` sources and the target'
 print what *would* change. Never writes. Includes the **Net changes** block (below);
 `--no-net-diff` skips it.
 
-### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets] [--allow-open]`
+### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets] [--allow-open] [--no-erc]`
 Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 18 ops + 9 macros (see
 `schemas/ops.schema.json`), including `delete_component` (with `cascade`) / `delete_object` /
 `move_component` / `rename_net`, hierarchical `add_sheet` (below), and multi-unit placement via
@@ -416,8 +493,12 @@ Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 18 ops + 9 ma
   `status: dry-run — nothing written (re-run with --apply)`,
   `status: APPLIED — wrote board.kicad_sch (backup board.kicad_sch.bak; akcli undo reverts)`, or
   `REFUSED: --strict-nets: net split/merge touches a named net; nothing written`.
-- `--json` payloads carry `"status"` and
-  `"net_diff": {"equivalent", "risk", "lines"}` (or `null` when unavailable).
+- After a successful `--apply`, an **advisory** `kicad-cli` ERC runs when that binary is
+  installed (never fatal); `--no-erc` skips it honestly (logged at `-v`) — akcli's own
+  connectivity gate always runs regardless.
+- `--json` payloads validate against `schemas/draw-result.schema.json`
+  (`schema_version`/`applied`/`status`/`ops`/`connectivity`, plus
+  `"net_diff": {"equivalent", "risk", "lines"}` or `null` when unavailable).
 - **`add_sheet` (hierarchical authoring, KiCad only — `altium: false`):** emits a
   `(sheet …)` node with `Sheetname`/`Sheetfile`, deterministic uuids, and
   edge-computed sheet pins. Op shape:
@@ -452,7 +533,7 @@ status: dry-run — 2 replacement(s) pending; re-run with --apply
 - Exit `6` when any entry is `missing-lib` (scope with `--only` to silence intentionally
   unavailable nicks); `--json` lists the actions (minus the raw symbol text).
 
-### `akcli ops <list|template OP> [--required-only]`
+### `akcli ops <list|template OP|validate FILE> [--required-only]`
 Op-list authoring kit: `list` prints the 18-op vocabulary with required fields
 and per-executor support, plus the **9 macro ops** (`connect_and_label`,
 `place_pwr_flag`, `terminate_unused_unit`, `place_divider`, `place_decoupling`,
@@ -461,6 +542,13 @@ that expand to core ops before validation; `template` emits a fill-in JSON
 op-list skeleton for any op or macro (guide:
 [docs/op-list-authoring.md](op-list-authoring.md)). A mistyped op or
 calculator name gets a did-you-mean suggestion.
+- `validate <oplist.json>` runs the **target-free structural validation** —
+  envelope, per-op fields, macro expansion; exactly the checks `plan`/`draw`
+  run before touching a target. Exit `0` valid / `6` on any problem; `--json`
+  emits `{protocol_version, valid, ops_sha256, op_count, errors}`. The
+  plugin's PreToolUse hook runs this before any `draw --apply` and blocks on
+  failure; the hook also warns (never blocks) when the workspace journal shows
+  no prior `plan`/dry-run for that exact op-list.
 
 ### `akcli view <calc|live|SCH> [PATH] [--port N] [--no-browser] [--state-dir DIR] [--max-steps N]`
 ONE local dashboard server for both pages (127.0.0.1 only, zero dependencies,
@@ -559,6 +647,42 @@ for `{name, model_card, sim_params, params, note}`. `--apply SCH --designator RE
 run** printing the op-list unless `--write`, which commits through the KiCad writer with a rotated
 `.bak`). This closes the datasheet → model loop with [`jlc datasheet`](jlc.md).
 
+### `akcli render <file> [-o FILE]`
+Render a schematic to **SVG with no EDA install** — the same normalized model every check runs
+on, so an Altium `.SchDoc` renders as readily as a `.kicad_sch`. **Connectivity-true, not
+pixel-faithful**: wires, buses, bus entries, junctions, labels (scope-colored), No-ERC marks,
+pin tips, and synthesized component bodies (from pin geometry — the model carries pin tips, not
+symbol artwork) with refdes/value. Hierarchical designs render one titled block per sheet.
+Deterministic output (same input bytes → same SVG bytes). `-o -` writes to stdout; default
+output is `<input>.svg` next to the input. `--json` emits
+`{render_version, source, output, components, wires, labels, junctions, bytes}`. The
+visual-feedback channel after a `draw --apply`: render, then *look* at what you placed.
+
+### `akcli log [PATH] [--limit N] [--cmd NAME]`
+Query the **workspace write journal**. Every write-path command (`plan`, `draw`, `arrange`,
+`undo`, `relink-symbols`) appends one JSONL entry to `<dir>/.akcli/journal.jsonl` — timestamp,
+command, target, status (`dry-run`/`applied`/`refused`), the op-list sha256, op count, the
+net-diff verdict, and the backup name — so a later invocation (or a harness hook) can answer
+"was there a plan for this op-list before the `--apply`" and "what did the last session do here"
+without re-deriving state. `PATH` is the workspace directory or an edited file (which filters to
+that file); `--cmd` filters by command; `--json` emits
+`{journal_version, journal, returned, entries}`. Journaling never fails the parent command
+(failures degrade to a stderr `note:`), is size-capped with one rotation
+(`journal.jsonl.1`), and `AKCLI_JOURNAL=off` disables it. Add `.akcli/` to your project's
+`.gitignore`.
+
+### `akcli capabilities [--json]`
+The **self-describing surface manifest** — the single root document an agent reads to drive the
+tool blind. `--json` emits every subcommand + flag (introspected from the live parser, so it can
+never drift from reality), the frozen exit-code and error-code tables, the op-list vocabulary
+(core/sugar/macros + per-executor support, plus a `constraints` block — the rotation enum, the
+orthogonal-wire-only rule, `grid_mil`, and a flat-hierarchy note — and an honest
+`altium_live_wired` flag reporting that the live-bridge "altium" executor support is unwired in
+the CLI today), the calculator registry, the packaged JSON Schemas with their version fields, and
+the tool conventions (`stdout=data/stderr=logs`, dry-run default, version-stamp policy, and the
+`--json` error-envelope contract). Without `--json`, a compact human summary. Static surface only —
+environment probing (which optional tools are actually installed here) is `akcli doctor`.
+
 ### `akcli doctor [--network] [--require CAPS] [--json]`
 One-shot environment report. Probes — the same way the features themselves discover them —
 **python** (>= 3.11), the **akcli** install (version + mode), packaged **schemas**,
@@ -574,7 +698,7 @@ command for setup/repair flows.
 ### `akcli library <audit|repair|import-altium> ...`
 Project **library workspace**: the sym/fp-lib-table, the schematics, the registered libraries and
 their 3D models as one auditable object. See [docs/design-integrity.md](design-integrity.md).
-- `akcli library audit [<project>] [--sch FILE ...] [--exit-zero]` — cross-checks schematics ↔
+- `akcli library audit [<project>] [--sch FILE ...] [--fail-on SEV]` — cross-checks schematics ↔
   `sym-lib-table`/`fp-lib-table` ↔ library contents ↔ 3D models (project dir or `.kicad_pro`;
   default `.`). Findings: `FOOTPRINT_LIB_UNREGISTERED` (a Footprint nickname the fp-lib-table does
   not register — the "cannot find footprint" trap), `FOOTPRINT_MISSING`, `SYMBOL_LIB_UNREGISTERED`/
@@ -595,7 +719,7 @@ their 3D models as one auditable object. See [docs/design-integrity.md](design-i
 ### `akcli fab <check|explain> ...`
 Manufacturing policy against a **versioned fab profile** (TOML carrying mandatory `[source]` urls —
 policy is source-controlled, never a builtin constant).
-- `akcli fab check <board.kicad_pcb> --profile FILE [--order FILE] [--exit-zero]` — checks the
+- `akcli fab check <board.kicad_pcb> --profile FILE [--order FILE] [--fail-on SEV]` — checks the
   deep-read board: via geometry vs the free-process envelope (`FAB_VIA_PAID_PROCESS`,
   `FAB_VIA_TENTED_TOO_BIG`, `FAB_VIA_MIN_MARGIN`), via-in-pad (`FAB_VIA_IN_PAD`, with registered
   `thermal_via` exceptions → `FAB_VIA_IN_PAD_EXCEPTION`; an expired one → `FAB_EXCEPTION_EXPIRED`),
@@ -627,7 +751,8 @@ every gate passed.
 | `4` | File not found. |
 | `5` | Unsupported format (incl. `ALTIUM_UNSUPPORTED` features). |
 | `6` | Op-list or verify failure (incl. `--strict-nets` refusal, `relink-symbols` gate refusal, `PROTOCOL_MISMATCH`, GUI-lock `TARGET_LOCKED`). |
-| `7` | Required external tool missing **or network failure** (`KICAD_CLI_MISSING`/`KICAD_CLI_TIMEOUT`, `jlc` `ERROR: NETWORK`, `BINFETCH_*`, `sim`'s `NGSPICE_MISSING`/`NGSPICE_FAILED`). |
+| `7` | Required external tool missing **or network failure** (`KICAD_CLI_MISSING`/`KICAD_CLI_TIMEOUT`, `jlc` `ERROR: NETWORK`, `BINFETCH_*`, `sim`'s `NGSPICE_MISSING`/`NGSPICE_FAILED`, live-bridge `BRIDGE_TIMEOUT`). |
+| `8` | Query miss: the file parsed fine but the named entity does not exist in it (`net <file> NAME`, `component <file> REF`; `--json` emits `{"found": false, ...}`). |
 
 ## Structured errors
 
@@ -637,6 +762,13 @@ Without `--debug`, failures print a single structured line, e.g.:
 ERROR: ALTIUM_FAT_CYCLE: FAT chain revisits sector 42 (cycle); aborting
 ```
 
+- With `--json`, a failing command that would otherwise leave stdout empty instead emits a JSON
+  error envelope on stdout: `{"schema_version": "1", "error": {"code", "message", "exit",
+  "remediation"}}` — `remediation` is an actionable next step from the frozen `errors.REMEDIATION`
+  table (covering every error code); the plain `ERROR:` line still goes to stderr for humans. The
+  envelope is skipped when the handler already wrote data on stdout, so a failure after partial
+  output never yields two JSON documents.
+
 Error codes (frozen registry in `src/akcli/errors.py`), grouped by the exit code they
 surface as:
 
@@ -644,9 +776,9 @@ surface as:
 |---|---|
 | `3` (parse) | `ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`, `ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG` |
 | `5` (unsupported) | `ALTIUM_UNSUPPORTED` |
-| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH`, `TARGET_LOCKED` |
+| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH`, `TARGET_LOCKED`, `BRIDGE_BUSY` |
 | `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG` |
-| `7` (tool/network) | `KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, `BINFETCH_DOWNLOAD`, `BINFETCH_CHECKSUM` (and `jlc`'s `ERROR: NETWORK: ...` line) |
+| `7` (tool/network) | `KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, `BINFETCH_DOWNLOAD`, `BINFETCH_CHECKSUM`, `BRIDGE_TIMEOUT` (and `jlc`'s `ERROR: NETWORK: ...` line) |
 
 Two related but distinct vocabularies:
 

@@ -1,0 +1,205 @@
+{
+  "schema_version": "1.3",
+  "metadata": {
+    "passive_pin_ratio": 1.0,
+    "no_erc_suppressed": 0,
+    "unnamed_net_count": 0,
+    "frac_present": false,
+    "config_waived": "0 (0 demoted)",
+    "component_count": 4,
+    "pin_count": 4,
+    "undesignated_count": 0
+  },
+  "findings": [
+    {
+      "code": "POWER_GROUND",
+      "severity": "info",
+      "message": "1 ground net(s): GND",
+      "refs": [
+        "GND"
+      ]
+    },
+    {
+      "code": "POWER_NO_RAILS",
+      "severity": "note",
+      "message": "no power rails detected (no power ports/rail-named nets and no configured [[rail]] entries) — power analysis is vacuous",
+      "refs": []
+    },
+    {
+      "code": "BOM_MISSING_VALUE",
+      "severity": "warning",
+      "message": "component U1 has no value",
+      "refs": [
+        "U1"
+      ],
+      "pos": [
+        9000.0,
+        -10000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U1",
+          "pos": [
+            9000.0,
+            -10000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component U1 has no footprint",
+      "refs": [
+        "U1"
+      ],
+      "pos": [
+        9000.0,
+        -10000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U1",
+          "pos": [
+            9000.0,
+            -10000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_VALUE",
+      "severity": "warning",
+      "message": "component U2 has no value",
+      "refs": [
+        "U2"
+      ],
+      "pos": [
+        21000.0,
+        -10000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U2",
+          "pos": [
+            21000.0,
+            -10000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component U2 has no footprint",
+      "refs": [
+        "U2"
+      ],
+      "pos": [
+        21000.0,
+        -10000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U2",
+          "pos": [
+            21000.0,
+            -10000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_VALUE",
+      "severity": "warning",
+      "message": "component U3 has no value",
+      "refs": [
+        "U3"
+      ],
+      "pos": [
+        9000.0,
+        -20000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U3",
+          "pos": [
+            9000.0,
+            -20000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component U3 has no footprint",
+      "refs": [
+        "U3"
+      ],
+      "pos": [
+        9000.0,
+        -20000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U3",
+          "pos": [
+            9000.0,
+            -20000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_VALUE",
+      "severity": "warning",
+      "message": "component U4 has no value",
+      "refs": [
+        "U4"
+      ],
+      "pos": [
+        21000.0,
+        -20000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U4",
+          "pos": [
+            21000.0,
+            -20000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_FOOTPRINT",
+      "severity": "warning",
+      "message": "component U4 has no footprint",
+      "refs": [
+        "U4"
+      ],
+      "pos": [
+        21000.0,
+        -20000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U4",
+          "pos": [
+            21000.0,
+            -20000.0
+          ]
+        }
+      ]
+    }
+  ]
+}

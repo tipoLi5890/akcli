@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://akcli/schemas/sim.schema.json",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/sim.schema.json",
   "title": "AkcliSimSpec",
   "description": "sim.json: stimuli/analyses for akcli sim, plus .meas-backed pass/fail assertions. Mirrors validation in akcli.sim.assertions.load().",
   "type": "object",

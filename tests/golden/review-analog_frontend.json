@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.3",
+  "metadata": {
+    "passive_pin_ratio": "n/a",
+    "no_erc_suppressed": "0",
+    "unnamed_net_count": "0",
+    "frac_present": "false",
+    "config_waived": "0 (0 demoted)",
+    "review_profile": "standard",
+    "facts_mpns": [],
+    "source_format": "kicad",
+    "components": 13,
+    "nets": 8,
+    "detectors_run": [
+      "signal.crystal",
+      "signal.divider",
+      "signal.opamp",
+      "signal.protection",
+      "signal.rc_filter",
+      "validation.enable_pin",
+      "validation.i2c_pullup",
+      "validation.vdomain"
+    ],
+    "detectors_skipped": [
+      "domain.usb",
+      "emc.diffpair",
+      "emc.edge",
+      "emc.planes",
+      "emc.protection",
+      "emc.stitching",
+      "gerber.package",
+      "pcb.decap",
+      "pcb.routing",
+      "pcb.thermal",
+      "pcb.trace_width"
+    ],
+    "trust_summary": {
+      "deterministic": 1
+    }
+  },
+  "findings": [
+    {
+      "code": "REVIEW_RC_CUTOFF",
+      "severity": "info",
+      "message": "RC low-pass R5/C5 on net 'ADC_IN': fc = 1.592e+04 Hz",
+      "refs": [
+        "R5",
+        "C5"
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R5"
+        },
+        {
+          "kind": "component",
+          "id": "C5"
+        },
+        {
+          "kind": "net",
+          "id": "ADC_IN"
+        }
+      ],
+      "detector": "signal.rc_filter",
+      "confidence": "deterministic",
+      "rule_version": "1",
+      "fingerprint": "18301eb502997a56f9deeb7d70e4abb6",
+      "remediation": "confirm the corner suits this net's bandwidth; retune R or C if not",
+      "evidence": {
+        "source": "calc",
+        "calc": {
+          "calc": "rc",
+          "title": "RC time constant / cutoff frequency",
+          "inputs": {
+            "r": 1000.0,
+            "c": 1e-08
+          },
+          "results": {
+            "tau": {
+              "value": 1e-05,
+              "unit": "s"
+            },
+            "fc": {
+              "value": 15915.494309189533,
+              "unit": "Hz",
+              "note": "−3 dB corner"
+            },
+            "t_63pct": {
+              "value": 1e-05,
+              "unit": "s"
+            },
+            "t_99pct": {
+              "value": 4.6e-05,
+              "unit": "s",
+              "note": "≈ ln(100)·τ"
+            }
+          },
+          "reference": "P. Horowitz & W. Hill, The Art of Electronics, 3rd ed. (2015), §1.4.1 (τ = RC), §1.7.1 (f_c = 1/(2πRC), −3 dB)"
+        }
+      }
+    }
+  ]
+}

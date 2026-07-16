@@ -196,6 +196,11 @@ stderr, the full traceback from re-running with `--debug`, the `akcli --version`
 protocol version), the exact command line, and the smallest input file that reproduces. Parse
 failures (exit 3) on files that open fine in Altium/KiCad are always report-worthy.
 
+With `--json`, a failure still yields parseable stdout instead of an empty stream:
+`{"schema_version":"1","error":{"code","message","exit","remediation"}}` — `remediation` carries
+the actionable next step for every error/exit code, so a caller can branch on `error.code` instead
+of scraping the stderr `ERROR: ...` line.
+
 ## 5. `akcli sim` as a hypothesis tester
 
 Connectivity tools tell you *what is wired to what*; they cannot tell you *why the

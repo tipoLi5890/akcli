@@ -46,12 +46,16 @@ becomes a `datasheet_backed` judgement with the exact page as evidence — and
 ### Step 1 — Get the PDF (hash included)
 
 ```bash
-akcli jlc datasheet board.kicad_sch          # whole-BOM batch into datasheets/
-akcli jlc datasheet C2984661                 # or one LCSC part
+akcli jlc datasheet board.kicad_sch --fetch --out datasheets   # whole-BOM batch into ./datasheets/
+akcli jlc datasheet C2984661 --fetch --out datasheets          # or one LCSC part
 ```
 
-PDFs land in `datasheets/` named `C<lcsc>_<MPN>.pdf`. A vendor PDF you were
-given by the user works too — put it in `datasheets/` yourself.
+PDFs land under `--out` (default: `AKCLI_DATASHEET_DIR` or
+`~/.cache/akcli/datasheets` — pass `--out datasheets` to land them where
+`review facts`/`review analyze --facts` auto-discover) named
+`C<lcsc>_<MPN>.pdf`. Without `--fetch`, the command only resolves datasheet
+URLs and does not download anything. A vendor PDF you were given by the user
+works too — put it in `datasheets/` yourself.
 
 ### Step 2 — Read the PDF and extract
 

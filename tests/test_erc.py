@@ -496,3 +496,113 @@ def test_all_fixtures_run_without_error(fixture):
     out = erc.run(sch, _cfg())
     assert isinstance(out, list)
     assert all(isinstance(f, Finding) for f in out)
+
+
+# ---------------------------------------------------------------------------
+# pin-type conflict matrix (ERC_PIN_CONFLICT)
+# ---------------------------------------------------------------------------
+def _two_pin_net(etype_a: PinType, etype_b: PinType):
+    u1 = _comp("U1", [_pin("1", etype=etype_a)])
+    u2 = _comp("U2", [_pin("1", etype=etype_b)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    return _sch([u1, u2], [net])
+
+
+@pytest.mark.parametrize(
+    "a,b,sev",
+    [
+        (PinType.OPEN_COLLECTOR, PinType.OUTPUT, Severity.WARNING),
+        (PinType.OPEN_COLLECTOR, PinType.POWER_OUT, Severity.WARNING),
+        (PinType.OPEN_EMITTER, PinType.OUTPUT, Severity.WARNING),
+        (PinType.OPEN_EMITTER, PinType.POWER_OUT, Severity.WARNING),
+        (PinType.TRI_STATE, PinType.POWER_OUT, Severity.WARNING),
+        (PinType.TRI_STATE, PinType.OUTPUT, Severity.NOTE),
+        (PinType.OPEN_COLLECTOR, PinType.OPEN_EMITTER, Severity.NOTE),
+    ],
+)
+def test_pin_conflict_matrix_cells(a, b, sev):
+    findings = erc.run(_two_pin_net(a, b))
+    hits = _by_code(findings, "ERC_PIN_CONFLICT")
+    assert len(hits) == 1
+    assert hits[0].severity is sev
+    assert "U1.1" in hits[0].refs and "U2.1" in hits[0].refs
+
+
+def test_pin_conflict_safe_pairs_are_silent():
+    for a, b in [
+        (PinType.OPEN_COLLECTOR, PinType.OPEN_COLLECTOR),  # wired-OR is fine
+        (PinType.INPUT, PinType.OUTPUT),
+        (PinType.PASSIVE, PinType.OUTPUT),
+        (PinType.TRI_STATE, PinType.TRI_STATE),
+    ]:
+        findings = erc.run(_two_pin_net(a, b))
+        assert _by_code(findings, "ERC_PIN_CONFLICT") == [], (a, b)
+
+
+def test_pin_conflict_demoted_at_low_type_confidence():
+    # 2 typed pins out of 12 -> confidence < 0.2 -> NOTE with the caveat text
+    passives = _comp("R1", [_pin(str(i), etype=PinType.PASSIVE, x=float(i))
+                            for i in range(1, 11)])
+    u1 = _comp("U1", [_pin("1", etype=PinType.OPEN_COLLECTOR)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    findings = erc.run(_sch([passives, u1, u2], [net]))
+    hits = _by_code(findings, "ERC_PIN_CONFLICT")
+    assert len(hits) == 1 and hits[0].severity is Severity.NOTE
+    assert "type-confidence low" in hits[0].message
+
+
+def test_pin_conflict_waiver():
+    findings = erc.run(
+        _two_pin_net(PinType.OPEN_COLLECTOR, PinType.OUTPUT),
+        _cfg(waivers=[{"rule": "pin_conflict", "net": "SIG"}]),
+    )
+    assert _by_code(findings, "ERC_PIN_CONFLICT") == []
+
+
+def test_pin_conflict_no_erc_suppression():
+    u1 = _comp("U1", [_pin("1", etype=PinType.OPEN_COLLECTOR, x=100, y=100)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT, x=200, y=100)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    findings = erc.run(_sch([u1, u2], [net], no_erc_points=[(100.0, 100.0)]))
+    assert _by_code(findings, "ERC_PIN_CONFLICT") == []
+
+
+# ---------------------------------------------------------------------------
+# undriven POWER_IN (ERC_POWER_IN_UNDRIVEN)
+# ---------------------------------------------------------------------------
+def test_power_in_undriven_flagged():
+    u1 = _comp("U1", [_pin("1", name="VDD", etype=PinType.POWER_IN)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    findings = erc.run(_sch([u1, u2], [net]))
+    hits = _by_code(findings, "ERC_POWER_IN_UNDRIVEN")
+    assert len(hits) == 1 and hits[0].severity is Severity.WARNING
+    assert "U1.1" in hits[0].refs
+
+
+def test_power_in_on_named_rail_is_trusted():
+    u1 = _comp("U1", [_pin("1", name="VDD", etype=PinType.POWER_IN)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.PASSIVE)])
+    net = _net("3V3", [("U1", "1"), ("U2", "1")])
+    findings = erc.run(_sch([u1, u2], [net]))
+    assert _by_code(findings, "ERC_POWER_IN_UNDRIVEN") == []
+
+
+def test_power_in_driven_by_power_out_is_silent():
+    u1 = _comp("U1", [_pin("1", name="VDD", etype=PinType.POWER_IN)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.POWER_OUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    findings = erc.run(_sch([u1, u2], [net]))
+    assert _by_code(findings, "ERC_POWER_IN_UNDRIVEN") == []
+
+
+def test_power_in_undriven_waiver():
+    u1 = _comp("U1", [_pin("1", etype=PinType.POWER_IN)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    findings = erc.run(
+        _sch([u1, u2], [net]),
+        _cfg(waivers=[{"rule": "power_in_undriven", "net": "SIG"}]),
+    )
+    assert _by_code(findings, "ERC_POWER_IN_UNDRIVEN") == []

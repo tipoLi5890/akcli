@@ -15,10 +15,12 @@ from pathlib import Path
 
 from ..errors import EXIT
 from ._shared import (
+    _add_exit_policy_flags,
     _dumps,
     _emit,
     _ExitWith,
     _findings_exit,
+    _stamp,
 )
 
 
@@ -37,7 +39,7 @@ def _cmd_library_audit(args: argparse.Namespace) -> int:
     findings = libtable.audit(ws, sch_override)
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "project": str(ws.project_dir),
             "sym_lib_table": str(ws.sym_table.path) if ws.sym_table else None,
             "fp_lib_table": str(ws.fp_table.path) if ws.fp_table else None,
@@ -47,7 +49,7 @@ def _cmd_library_audit(args: argparse.Namespace) -> int:
                  "message": f.message, "anchors": f.anchors}
                 for f in findings
             ],
-        }))
+        })))
         return _findings_exit(findings, args)
 
     _emit(f"library audit: {ws.project_dir}")
@@ -88,12 +90,12 @@ def _cmd_library_repair(args: argparse.Namespace) -> int:
 
     do_apply = bool(getattr(args, "apply", False))
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "project": str(ws.project_dir),
             "applied": do_apply and bool(edits),
             "edits": [{"path": str(e.path), "description": e.description}
                       for e in edits],
-        }))
+        })))
     else:
         if not edits:
             _emit("repair: nothing to change")
@@ -185,14 +187,14 @@ def _cmd_library_import_altium(args: argparse.Namespace) -> int:
             out_dir / "provenance.json", _dumps(provenance) + "\n")
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "source": str(src),
             "out": str(out_dir),
             "applied": do_apply,
             "footprints": [{k: item[k] for k in ("name", "source_name", "pads", "file")}
                            for item in plan],
             "warnings": all_warnings,
-        }))
+        })))
     else:
         _emit(f"import-altium: {src.name} -> {out_dir} "
               f"({len(plan)} footprint(s))")
@@ -231,13 +233,13 @@ def _cmd_library_check_lock(args: argparse.Namespace) -> int:
     locked = [f for f in files if kwriter.gui_lock_path(f).exists()]
 
     if args.json:
-        _emit(_dumps({
+        _emit(_dumps(_stamp({
             "project": str(root),
             "scanned": len(files),
             "locked": [{"file": str(f), "lock": str(kwriter.gui_lock_path(f))}
                        for f in locked],
             "writable": not locked,
-        }))
+        })))
         return EXIT["OPLIST"] if locked else EXIT["OK"]
 
     if not locked:
@@ -268,8 +270,7 @@ def register(sub, common) -> None:
     pa.add_argument("--sch", metavar="FILE", action="append",
                     help="audit this schematic instead of auto-discovery "
                          "(repeatable)")
-    pa.add_argument("--exit-zero", action="store_true",
-                    help="always exit 0 (report mode)")
+    _add_exit_policy_flags(pa)
     pa.set_defaults(handler=_cmd_library_audit)
 
     pr = lib_sub.add_parser(

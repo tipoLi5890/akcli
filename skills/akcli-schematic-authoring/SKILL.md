@@ -274,6 +274,8 @@ inline `lib_symbols` is harvested), or config `[paths]` entries ending in
 
 ```bash
 SYMS=/usr/share/kicad/symbols    # macOS: /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
+akcli ops validate ldo.json      # structural check first — no target needed, exit 6 lists
+                                 # EVERY problem at once (the PreToolUse hook runs this too)
 akcli plan board.kicad_sch --ops ldo.json --symbols "$SYMS/Regulator_Linear.kicad_sym" \
   --symbols "$SYMS/Device.kicad_sym" --symbols "$SYMS/power.kicad_sym"      # never writes
 akcli draw board.kicad_sch --ops ldo.json --symbols "$SYMS/Regulator_Linear.kicad_sym" \
@@ -289,9 +291,12 @@ Exit 6 means an op errored or connectivity found an ERROR/CRITICAL
 file open (a `~<name>.lck` lock file). After confirming it is safe, use
 `--apply --allow-open`, then File > Revert in KiCad to pick up the change. Use
 `--json` for machine output:
-`{applied, status, ops[], connectivity[], net_diff}`. On `OP_UNSUPPORTED`,
+`{applied, status, ops[], connectivity[], net_diff}` — a failed op carries a
+`remediation` field saying what to do next. On `OP_UNSUPPORTED`,
 `PROTOCOL_MISMATCH`, or geometry errors: stop and report, do not retry
-blindly. Do not pass `--dry-run` — it is accepted but inert; omitting
+blindly. After a successful `--apply`, `akcli render board.kicad_sch` gives
+you an SVG to *look at* what you placed, and `akcli log .` shows the write
+journal (every plan/draw/undo with its op-list hash and net-diff verdict). Do not pass `--dry-run` — it is accepted but inert; omitting
 `--apply` already is the dry run.
 
 **Read the "Net changes" block on every plan/draw** — the before/after

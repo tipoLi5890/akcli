@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/draw-result.schema.json",
+  "title": "AkcliDrawResult",
+  "description": "akcli plan/draw --json: per-op results + connectivity findings + the before/after net diff. 'applied' is true only when --apply was given AND every op succeeded AND connectivity verified; a dry run reports the same net_diff the real apply would produce. Consumers must tolerate additive growth.",
+  "type": "object",
+  "required": ["schema_version", "applied", "status", "ops", "connectivity"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "applied": {"type": "boolean"},
+    "status": {"type": "string", "enum": ["dry-run", "applied", "refused"]},
+    "ops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["op_index", "status"],
+        "properties": {
+          "op_index": {"type": "integer", "minimum": 0},
+          "op": {"type": ["string", "null"]},
+          "status": {"type": "string", "enum": ["ok", "error"]},
+          "created_uuids": {"type": "array", "items": {"type": "string"}},
+          "error_code": {"type": ["string", "null"]},
+          "message": {"type": "string"},
+          "remediation": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "connectivity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": {"type": "string"},
+          "severity": {
+            "type": "string",
+            "enum": ["info", "note", "warning", "error", "critical"]
+          },
+          "message": {"type": "string"}
+        }
+      }
+    },
+    "net_diff": {
+      "type": ["object", "null"],
+      "required": ["equivalent", "risk", "lines"],
+      "properties": {
+        "equivalent": {"type": "boolean"},
+        "risk": {"type": "boolean"},
+        "lines": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

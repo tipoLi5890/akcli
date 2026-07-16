@@ -72,9 +72,11 @@ akcli export main.SchDoc --format csv -o nets.csv            # flat net,ref,pin 
 ```
 
 `export` defaults to `--format protel` and writes stdout unless `-o` is given.
-`akcli export --json` is refused (exit 2) by design — for structured JSON use
-`akcli net --json`. All exports are deterministically sorted; unnamed nets are named
-by membership-derived `stable_id`, so re-exports are diffable.
+`akcli export --json` wraps the rendered netlist text in a `{schema_version, source,
+format, content}` envelope (the netlist body itself is unchanged) — for a fully
+structured netlist model use `akcli net --json` instead. All exports are
+deterministically sorted; unnamed nets are named by membership-derived `stable_id`,
+so re-exports are diffable.
 
 ## Getting changes INTO Altium
 

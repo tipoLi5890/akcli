@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.3",
+  "metadata": {
+    "passive_pin_ratio": "n/a",
+    "no_erc_suppressed": "0",
+    "unnamed_net_count": "0",
+    "frac_present": "false",
+    "config_waived": "0 (0 demoted)",
+    "review_profile": "standard",
+    "facts_mpns": [],
+    "source_format": "kicad",
+    "components": 5,
+    "nets": 3,
+    "detectors_run": [
+      "signal.crystal",
+      "signal.divider",
+      "signal.opamp",
+      "signal.protection",
+      "signal.rc_filter",
+      "validation.enable_pin",
+      "validation.i2c_pullup",
+      "validation.vdomain"
+    ],
+    "detectors_skipped": [
+      "domain.usb",
+      "emc.diffpair",
+      "emc.edge",
+      "emc.planes",
+      "emc.protection",
+      "emc.stitching",
+      "gerber.package",
+      "pcb.decap",
+      "pcb.routing",
+      "pcb.thermal",
+      "pcb.trace_width"
+    ],
+    "trust_summary": {}
+  },
+  "findings": []
+}

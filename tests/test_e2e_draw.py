@@ -442,3 +442,32 @@ def test_adjacent_labels_do_not_stack(tmp_path):
     first = tgt.read_bytes()
     kw.apply(ops, str(tgt), apply=True, sources=[str(DEVICE)])
     assert tgt.read_bytes() == first
+
+
+# --------------------------------------------------------------------------- #
+# --no-erc: the advisory post-apply kicad-cli run is skipped, honestly
+# --------------------------------------------------------------------------- #
+def test_draw_no_erc_skips_advisory_run(tmp_path, monkeypatch, capsys):
+    import json as _json
+
+    from akcli.cli import main as _main
+    from akcli.drivers import kicad_cli as _kc
+
+    target = tmp_path / "board.kicad_sch"
+    assert _main(["new", str(target)]) == 0
+    ops = {"protocol_version": 1, "target_format": "kicad",
+           "target_file": "board.kicad_sch",
+           "ops": [{"op": "add_text", "at": [1000, 1000], "text": "x"}]}
+    (tmp_path / "ops.json").write_text(_json.dumps(ops), encoding="utf-8")
+
+    calls = []
+    monkeypatch.setattr(_kc, "available", lambda: (calls.append("probe"), True)[1])
+    monkeypatch.setattr(_kc, "erc", lambda p: calls.append("erc") or {})
+
+    assert _main(["draw", str(target), "--ops", str(tmp_path / "ops.json"),
+                  "--apply", "--no-erc"]) == 0
+    assert calls == []  # neither probed nor run
+
+    assert _main(["draw", str(target), "--ops", str(tmp_path / "ops.json"),
+                  "--apply"]) == 0
+    assert "erc" in calls  # without the flag the advisory run happens

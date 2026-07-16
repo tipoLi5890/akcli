@@ -27,6 +27,13 @@ imported legacy schematic or a blank sheet, all the way to a simulated, part-sou
 
 - **AI-agent native.** Ships as a Claude Code plugin with skills/commands, emits structured JSON with
   `schema_version`, and accepts a versioned op-list for deterministic, idempotent edits.
+  `akcli capabilities` self-describes the whole CLI surface in one JSON document (including hard
+  op-vocabulary constraints, published up front); `read`/`nets` take `--match`/`--limit` (plus
+  `read --summary`) to keep big-board output inside an agent's context budget; a workspace write
+  journal (`akcli log`) makes multi-step sessions stateful; **every** error code carries a
+  machine-readable `remediation` hint, and with `--json` every failure path still emits parseable
+  JSON; and `akcli render` draws an install-free SVG so a multimodal agent can *look at* what it
+  placed.
 - **Net-diff safety rails.** Every `plan`/`draw` prints a before/after **net connectivity diff**
   (splits, merges, renames — matched by pin membership, never by name); `draw --apply --strict-nets`
   refuses a write that splits or merges a named net, and `akcli check --intent` asserts a
@@ -282,7 +289,7 @@ idempotent. Note: when piping (`akcli … | head`) the shell reports the *pipe's
 use `set -o pipefail` if you branch on it.
 
 - **Claude Code** — install the bundled plugin (below) for the `/akcli:circuit-review`,
-  `circuit-pinmap`, `circuit-draw`, and `circuit-diff` commands plus twelve skills: `akcli-circuit-design`
+  `circuit-pinmap`, `circuit-draw`, `circuit-diff`, and `circuit-parts` commands plus twelve skills: `akcli-circuit-design`
   (read/analyze/draw basics), `akcli-circuit-debug` (connectivity & tool triage), `akcli-schematic-review`
   (severity-ranked design review), `akcli-schematic-authoring` (new circuits from an op-list),
   `akcli-altium-interop` (working with Altium Designer), `akcli-parts-sourcing` (JLC/LCSC parts),
@@ -334,7 +341,7 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Roadmap
 
-Shipped today (v0.8.x): KiCad write/draw from an 18-op + 9-macro vocabulary (hierarchical
+Shipped today (v0.9.x): KiCad write/draw from an 18-op + 9-macro vocabulary (hierarchical
 `add_sheet`, net-diff safety rails, `new`/multi-level `undo`, output arbitrated against KiCad's own
 netlister), net-preserving **`arrange --groups`** / `move_component` carry re-layout, an advisory
 **`akcli review`** engine (analyze across signal/validation/pcb/emc/domain/gerber detector families,
@@ -345,13 +352,14 @@ schematic ↔ PCB **`verify`**, a project **`library`** workspace (audit/repair/
 versioned **`fab`** profiles, and a **`release preflight`** gate (see
 [docs/design-integrity.md](docs/design-integrity.md)), **`akcli sim`** (SPICE decks on KiCad's
 bundled ngspice, assertions, sweeps, datasheet-fitted models), JLCPCB/LCSC part search + BOM
-purchasability + **datasheet fetch**, 60 standards-cited calculators, the `view` dashboard, and
-version-tolerant Altium/KiCad readers. The forward plan (v0.9 → v1.0, with exit criteria) lives in
-**[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
+purchasability + **datasheet fetch**, 60 standards-cited calculators, the `view` dashboard,
+published JSON Schemas for `diff`/`pinmap` findings with machine-detectable lookup misses
+(`QUERY_MISS`, exit 8), a full **ERC pin-type conflict matrix** with `check --pairs`
+differential-pair/bus continuity rules, pure-stdlib **SVG schematic rendering** (`akcli render`),
+and version-tolerant Altium/KiCad readers. The forward plan (v0.9 → v1.0, with exit criteria)
+lives in **[ROADMAP.md](ROADMAP.md)**. Headline items still ahead:
 
-- Published JSON Schemas for `diff`/`pinmap` findings; machine-detectable lookup misses.
-- Full **ERC pin-type conflict matrix** and `check`-side differential-pair / bus continuity rules.
-- Pure-stdlib **SVG schematic rendering** and a generated pinout book.
+- A generated pinout book (`akcli render`'s SVG output already ships).
 - A GitHub **Action** gating schematic PRs (check + review + diff + intent + sim assertions).
 - *Optional, demand-driven:* the Altium track — binary `.SchLib` decoder, remaining `.PcbDoc`
   sections, and the Windows **live driver** (scaffold pending validation).

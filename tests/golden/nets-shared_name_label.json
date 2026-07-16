@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "source": "tests/fixtures/shared_name_label.SchDoc",
+  "total": 1,
+  "matched": 1,
+  "returned": 1,
+  "truncated": false,
+  "nets": [
+    {
+      "name": "STAT",
+      "stable_id": "net_c5ab4c1e8111",
+      "members": [
+        "R12.1",
+        "R7.1",
+        "U2.1",
+        "U3.2"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1",
+  "source": "tests/fixtures/t_junction.SchDoc",
+  "total": 1,
+  "matched": 1,
+  "returned": 1,
+  "truncated": false,
+  "nets": [
+    {
+      "name": null,
+      "stable_id": "net_49331c7c9741",
+      "members": [
+        "U1.1",
+        "U2.1",
+        "U3.1"
+      ]
+    }
+  ]
+}

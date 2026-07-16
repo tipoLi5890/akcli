@@ -1,0 +1,25 @@
+{
+ "nets": [
+  {
+   "name": "GND",
+   "members": [
+    "C1.2",
+    "C2.2"
+   ]
+  },
+  {
+   "name": "VIN",
+   "members": [
+    "C1.1",
+    "L1.1"
+   ]
+  },
+  {
+   "name": "VOUT",
+   "members": [
+    "C2.1",
+    "L1.2"
+   ]
+  }
+ ]
+}

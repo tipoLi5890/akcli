@@ -62,8 +62,25 @@ def _log(args: argparse.Namespace, level: int, msg: str) -> None:
         sys.stderr.write(msg + "\n")
 
 
+# Set by ``_emit`` (reset per ``cli.main`` invocation): lets the top-level
+# ``--json`` error envelope know whether stdout already carries data, so a
+# failure after partial output never produces two JSON documents.
+_stdout_written = False
+
+
+def _stdout_touched() -> bool:
+    return _stdout_written
+
+
+def _reset_stdout_tracking() -> None:
+    global _stdout_written
+    _stdout_written = False
+
+
 def _emit(text: str) -> None:
     """Write a data payload to stdout with exactly one trailing newline."""
+    global _stdout_written
+    _stdout_written = True
     sys.stdout.write(text)
     if not text.endswith("\n"):
         sys.stdout.write("\n")
@@ -239,22 +256,103 @@ def _schematic_meta(sch) -> dict:
     return meta
 
 
+# --fail-on token -> the least-severe Severity that trips a non-zero exit.
+_FAIL_ON_SEVERITY = {
+    "info": _report.Severity.INFO,
+    "note": _report.Severity.NOTE,
+    "warning": _report.Severity.WARNING,
+    "error": _report.Severity.ERROR,
+}
+
+
 def _findings_exit(findings: list, args: argparse.Namespace) -> int:
-    """Lint-style exit: 1 if any actionable (≥WARNING) finding, else 0."""
+    """Lint-style exit: 1 when any finding meets ``--fail-on`` (default warning).
+
+    ``--fail-on never`` (and the deprecated ``--exit-zero`` alias) always exit
+    0. One policy for every findings-emitting command — an agent learns the
+    flag once.
+    """
     if getattr(args, "exit_zero", False):
         return EXIT["OK"]
-    actionable = {
-        _report.Severity.WARNING,
-        _report.Severity.ERROR,
-        _report.Severity.CRITICAL,
-    }
-    if any(f.severity in actionable for f in findings):
+    fail_on = getattr(args, "fail_on", None) or "warning"
+    if fail_on == "never":
+        return EXIT["OK"]
+    threshold = _report._SEV_RANK[_FAIL_ON_SEVERITY[fail_on]]
+    if any(_report._SEV_RANK.get(f.severity, 0) >= threshold for f in findings):
         return EXIT["FINDINGS"]
     return EXIT["OK"]
 
 
+def _add_exit_policy_flags(parser: argparse.ArgumentParser) -> None:
+    """The one lint-style exit-policy pair: ``--fail-on`` + deprecated alias."""
+    parser.add_argument("--fail-on", dest="fail_on",
+                        choices=["info", "note", "warning", "error", "never"],
+                        help="minimum finding severity that exits non-zero "
+                             "(default: warning; never always exits 0)")
+    parser.add_argument("--exit-zero", action="store_true",
+                        help="always exit 0 (deprecated alias for "
+                             "--fail-on never)")
+
+
 def _dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=False)
+
+
+def _stamp(payload: dict, version: str = "1") -> dict:
+    """Prepend the agent-contract ``schema_version`` on a hand-built payload.
+
+    Every JSON *object* payload carries ``schema_version`` (or a family
+    version field like ``protocol_version``) so an agent can detect a
+    breaking change; payloads with a canonical schema stamp their own pinned
+    version instead of routing through here. Never overwrites an existing
+    stamp.
+    """
+    if "schema_version" in payload:
+        return payload
+    return {"schema_version": version, **payload}
+
+
+def _match_limit(items: list, args: argparse.Namespace, key) -> tuple[list, dict]:
+    """Apply ``--match GLOB`` / ``--limit N`` to a listing; return (items, meta).
+
+    ``meta`` is the truncation envelope (``total``/``matched``/``returned``/
+    ``truncated``) merged into ``--json`` payloads so an agent can see that a
+    listing was cut without diffing counts itself. ``--match`` is a
+    case-sensitive ``fnmatch`` glob over ``key(item)``.
+    """
+    import fnmatch
+
+    total = len(items)
+    pattern = getattr(args, "match", None)
+    if pattern:
+        items = [i for i in items if fnmatch.fnmatchcase(key(i) or "", pattern)]
+    matched = len(items)
+    limit = getattr(args, "limit", None)
+    truncated = limit is not None and limit >= 0 and len(items) > limit
+    if truncated:
+        items = items[:limit]
+    return items, {"total": total, "matched": matched,
+                   "returned": len(items), "truncated": truncated}
+
+
+def _throttle_note(args: argparse.Namespace, meta: dict, what: str) -> None:
+    """stderr note when a listing was filtered/truncated (text mode courtesy)."""
+    if meta["returned"] != meta["total"]:
+        sys.stderr.write(
+            f"note: showing {meta['returned']} of {meta['total']} {what}"
+            + (f" matching {getattr(args, 'match', None)!r}"
+               if getattr(args, "match", None) else "")
+            + (" (truncated by --limit)" if meta["truncated"] else "")
+            + "\n")
+
+
+def _add_throttle_flags(parser: argparse.ArgumentParser, what: str) -> None:
+    parser.add_argument("--match", metavar="GLOB",
+                        help=f"only list {what} whose name matches this "
+                             "fnmatch glob (case-sensitive)")
+    parser.add_argument("--limit", type=int, metavar="N",
+                        help=f"list at most N {what} (JSON carries "
+                             "total/matched/returned/truncated)")
 
 
 def _did_you_mean(name: str, candidates) -> str:

@@ -23,6 +23,11 @@ undo）、运行 ERC／设计／**intent／contract**／BOM 检查、**验证原
 
 - **AI 代理原生。** 以 Claude Code 插件形式发布，附带 skills/commands，输出带有
   `schema_version` 的结构化 JSON，并接受带版本号的 op-list 以实现确定性、幂等的编辑。
+  `akcli capabilities` 用一份 JSON 文档自描述整个 CLI 能力面（包含预先公开的硬性 op 词汇约束）；
+  `read`/`nets` 支持 `--match`/`--limit`（以及 `read --summary`），把大型电路板的输出压缩在
+  代理的上下文预算之内；工作区写入日志（`akcli log`）让多步会话可追溯状态；**每个**错误码都
+  携带机器可读的 `remediation` 提示，且加 `--json` 后每条失败路径都仍会输出可解析的 JSON；
+  `akcli render` 可绘制免安装的 SVG，让多模态代理能「看到」自己刚放置的内容。
 - **net-diff 安全护栏。** 每次 `plan`/`draw` 都会打印写入前后的 **net 连通性差异**
   （拆分、合并、改名——按引脚成员关系匹配，绝不按名称匹配）；`draw --apply --strict-nets`
   会拒绝任何拆分或合并具名 net 的写入，`akcli check --intent` 则可在任何编辑后
@@ -66,6 +71,13 @@ akcli draw board.kicad_sch --ops ops.json --apply --strict-nets  # 原子写入 
 `lib_symbols`，并由 net 等价安全闸门把关。Altium 的*写入/绘制*仅通过可选的
 Windows live driver（需运行 Altium 22+）提供；离线状态下，Altium 仅支持分析。
 
+有两类编辑在结构上**天然保持 net 不变**：`move_component` 可以在移动一个符号时一并携带它的
+net 标签与导线端点（`carry_labels`/`carry_wires`）；`arrange` 就建立在这个原语之上——
+`arrange board.kicad_sch --apply` 会把未接线的自由符号相互推开直到不再重叠，
+`arrange --groups blocks.toml` 则会把整个功能模块（一份 `group-name → [refdes]` 映射）
+当作刚性整体一起搬迁。`akcli library check-lock hardware/kicad/board` 会报告哪些文件正被
+KiCad GUI 打开（若有则退出码为 6），方便外部自动化在写入前把关。
+
 ## 运行检查（ERC、power、pinmap、BOM、diff）
 
 无需打开任何 EDA 工具即可运行电气规则检查（ERC）及其他设计检查：
@@ -87,6 +99,35 @@ power/ground 检测是**基于 net 名称 + power 端口（power-port）**的，
 丢弃或降级 findings（数量会显示在元数据头中）。设计意图文件支持逐 net 模式与 `fnmatch` 通配符成员；
 已定位的 findings 会在 JSON／SARIF 中携带 `pos`／`anchors`。
 
+## 设计评审（advisory）
+
+`akcli review` 是构建在同一套归一化模型上的顾问式工程设计评审引擎，因此它评审
+Altium `.SchDoc` 与评审 `.kicad_sch` 一样顺畅。`review analyze` 会运行六大检测族——
+**signal**（分压器、反馈 Vref 合理性、RC 转折点、晶振负载、运放增益、连接器 ESD）、
+**validation**（I²C 上拉窗口、跨电压域信号、悬空使能）、**pcb**（基于并查集的未布线铜箔、
+去耦电容距离、散热过孔、IPC-2221 载流量）、**emc**（预合规风险：地平面、接地缝合、
+边缘/时钟走线、差分对偏斜、TVS 位置）、**domain**（USB-C CC 端接）以及 **gerber**
+（fab 输出包的完整性/对齐/陈旧度）——并输出**分级置信度**的 findings
+（`deterministic`/`heuristic`/`datasheet_backed`/`llm_reviewed`），附带一份发布为
+`findings.schema.json` 的证据信封（evidence envelope）。
+
+```bash
+akcli review analyze board.kicad_sch --profile deep --pcb board.kicad_pcb --gerbers fab/  # advisory：除非 --fail-on，否则退出 0
+akcli review explain REVIEW_FB_DIVIDER_VREF_MISMATCH    # 一条规则的规格、公式与引用来源
+akcli review facts add TPS61023 --pdf datasheets/tps61023.pdf --set vref=0.6V@5   # 经审计的 datasheet 事实
+akcli review tree board.kicad_sch                       # 电源树：rails -> 稳压器 -> 负载
+akcli review propose review.findings.json --out proposals.json   # findings -> op-list/contract/sim 草案
+```
+
+它**默认为 advisory**（无论发现什么都退出 0）；`--fail-on warning|error|critical` 可让某个
+CI job 选择把关。依赖 datasheet 数值的 findings 会引用该 PDF 的 sha256 与页码（**事实存储**，
+facts store）；`review propose` 会把修复方案（经 E 系列吸附）重新计算为 op-list 草案，
+再走回正常的 `plan → draw` 安全护栏——绝不直接改文件。`review validate` 会用四道确定性检查
+（schema／anchor 是否存在／datasheet 佐证／规则冒充）把关 LLM 生成的候选项，未通过者会被隔离。
+评审发现能够阻塞发布的**唯一**路径，是显式、经过校准的 `release preflight --review-policy`
+白名单。完整规则目录以及提取/深度评审/放行 skills 见
+[docs/review-rules.md](../docs/review-rules.md)。
+
 ## 设计完整性：库、契约、fab、release
 
 在单文件 ERC 之外，`akcli` 把整个设计当作一个可审计的整体——库工作区、原理图 ↔ PCB 的关系、
@@ -98,16 +139,18 @@ akcli library repair hardware/kicad/board --rename-footprint-lib footprint=proj_
 akcli library import-altium vendor.PcbLib --out vendor.pretty --courtyard 0.25 --apply
 akcli check   board.kicad_sch --contract board.contract.toml
 akcli fab     check board.kicad_pcb --profile jlc-4l-1oz.toml --order order.toml
-akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile jlc-4l-1oz.toml --out manifest.json
+akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile jlc-4l-1oz.toml --gerbers fab/ --out manifest.json
 ```
 
 `library audit`/`repair` 会找出并修复过去只能靠手动 `sed` 处理的 footprint-nickname 与 3D 路径
 陷阱；**契约（contract）** 能表达 ERC 表达不了的 datasheet 规则，并支持带 owner 与到期日的批准
 例外；**fab profile** 是版本化、附来源引用的供应商策略（free-via envelope、tenting、via-in-pad、
 成本阈值），并会依据声明的订单 manifest 校验，而不是从 PCB 猜测；**`release preflight`** 会运行
-每一道关卡（check/intent/contract/library/sch-pcb/fab/order/git），并写出一份绑定输入哈希、git
-版本以及各关卡结果的 manifest。当 KiCad GUI 打开着文件时，KiCad 写入会拒绝并报
-`TARGET_LOCKED`（可用 `--allow-open` 覆盖，之后在 KiCad 里执行 File→Revert）。完整指南见
+每一道关卡（check/intent/contract/library/sch-pcb/fab/order/**review-policy**/**gerber**/git），
+并写出一份绑定输入哈希、git 版本以及各关卡结果的 manifest。`--review-policy` TOML 白名单是唯一
+能让顾问式评审发现阻塞发布的方式；`--gerbers` 会加上 fab 输出的完整性/对位/陈旧度检查。当 KiCad
+GUI 打开着文件时，KiCad 写入会拒绝并报 `TARGET_LOCKED`（可用 `--allow-open` 覆盖，之后在 KiCad
+里执行 File→Revert），`akcli library check-lock <dir>` 则让外部自动化查询同一份锁状态。完整指南见
 [docs/design-integrity.md](../docs/design-integrity.md)。
 
 ## 仿真并断言
@@ -211,7 +254,7 @@ akcli component main.SchDoc U10    # 单个元件的引脚 -> net（需给 desig
 exit code 而非 akcli 的——若要据此判断请加 `set -o pipefail`。
 
 - **Claude Code** — 安装随附的插件（见下方），即可获得 `/akcli:circuit-review`、
-  `circuit-pinmap`、`circuit-draw`、`circuit-diff` 命令与十二个 skills：`akcli-circuit-design`（读取/分析/
+  `circuit-pinmap`、`circuit-draw`、`circuit-diff`、`circuit-parts` 命令与十二个 skills：`akcli-circuit-design`（读取/分析/
   绘制基础）、`akcli-circuit-debug`（连接与工具排障）、`akcli-schematic-review`（按严重度分级的设计评审）、
   `akcli-schematic-authoring`（用 op-list 从零设计电路）、`akcli-altium-interop`（与 Altium Designer 互通）、
   `akcli-parts-sourcing`（JLC/LCSC 元件选型）、`akcli-jlcpcb-capabilities`（JLCPCB 制程能力参考）、
@@ -255,16 +298,19 @@ codex plugin install akcli@akcli
 
 ## 路线图
 
-当前已提供（v0.7.x）：KiCad 写入/绘制（18 种 op + 9 种宏，含层次 `add_sheet`、net-diff
-安全护栏、`new`/多级 `undo`，输出经 KiCad 自身 netlister 仲裁）、ERC/power/BOM/diff/pinmap/
-**intent**/**contract** 检查（含 waiver 与 SARIF）、原理图 ↔ PCB **`verify`**、项目
-**`library`** 工作区（audit/repair/import-altium——Altium `.PcbLib` footprint 导入 + 深度
-`.kicad_pcb` 读取）、版本化的 **`fab`** profile，以及 **`release preflight`** 把关
-（见 [docs/design-integrity.md](../docs/design-integrity.md)）、**`akcli sim`**（KiCad 自带
-ngspice 上的 SPICE deck、断言、角点扫描、规格书拟合模型）、JLCPCB/LCSC 元件搜索 + BOM 可购性 +
-**规格书抓取**、60 个附标准引用的计算器、`view` 仪表板，以及版本容忍的 Altium/KiCad 读取器
-（KiCad 层级、Altium 多图纸 + 二进制铜箔）。前瞻计划（v0.8 → v1.0，各里程碑附验收条件）见
-**[ROADMAP.md](../ROADMAP.md)**。重点待开发项目：
+当前已提供（v0.9.x）：KiCad 写入/绘制（18 种 op + 9 种宏，含层次 `add_sheet`、net-diff
+安全护栏、`new`/多级 `undo`，输出经 KiCad 自身 netlister 仲裁）、net 不变的 **`arrange --groups`**/
+`move_component` carry 式重新布局、一个顾问式的 **`akcli review`** 评审引擎（跨
+signal/validation/pcb/emc/domain/gerber 检测族分析，一份 datasheet **facts** 存储，
+`propose`/`diff`/`tree`、`validate`，以及 `release --review-policy` 把关）、
+ERC/power/BOM/diff/pinmap/**intent**/**contract** 检查（含 waiver 与 SARIF）、原理图 ↔ PCB
+**`verify`**、项目 **`library`** 工作区（audit/repair/import-altium/**check-lock**——Altium
+`.PcbLib` footprint 导入 + 深度 `.kicad_pcb` + **gerber** 读取）、版本化的 **`fab`** profile，
+以及 **`release preflight`** 把关（见 [docs/design-integrity.md](../docs/design-integrity.md)）、
+**`akcli sim`**（KiCad 自带 ngspice 上的 SPICE deck、断言、角点扫描、规格书拟合模型）、
+JLCPCB/LCSC 元件搜索 + BOM 可购性 + **规格书抓取**、60 个附标准引用的计算器、`view` 仪表板，
+以及版本容忍的 Altium/KiCad 读取器（KiCad 层级、Altium 多图纸 + 二进制铜箔）。前瞻计划
+（v0.8 → v1.0，各里程碑附验收条件）见 **[ROADMAP.md](../ROADMAP.md)**。重点待开发项目：
 
 - `check`/`diff`/`pinmap` findings 的正式 JSON Schema；查无结果的机器可判别化。
 - 完整 **ERC 引脚类型冲突矩阵**（schematic-vs-PCB 同步检查现已以 `akcli verify` 形式提供）。

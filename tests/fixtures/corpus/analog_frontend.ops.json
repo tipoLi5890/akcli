@@ -1,0 +1,39 @@
+{
+  "protocol_version": 1,
+  "target_format": "kicad",
+  "target_file": "analog_frontend.kicad_sch",
+  "ops": [
+    {"op": "place_component", "lib_id": "Device:L", "designator": "L1",
+     "x_mil": 1500, "y_mil": 800, "rotation": 90, "value": "10uH"},
+    {"op": "place_component", "lib_id": "Device:C_Polarized", "designator": "C1",
+     "x_mil": 1000, "y_mil": 950, "value": "10u"},
+    {"op": "place_component", "lib_id": "Device:C", "designator": "C2",
+     "x_mil": 2000, "y_mil": 950, "value": "10u"},
+    {"op": "connect_and_label", "from": "C1.1", "to": "L1.1", "net": "VIN"},
+    {"op": "connect_and_label", "from": "L1.2", "to": "C2.1", "net": "3V3"},
+    {"op": "add_net_label", "at": "C1.2", "name": "GND"},
+    {"op": "add_net_label", "at": "C2.2", "name": "GND"},
+
+    {"op": "place_decoupling", "x_mil": 3000, "y_mil": 1000,
+     "power_net": "3V3", "designator": "C3", "value": "100n"},
+    {"op": "place_decoupling", "x_mil": 3600, "y_mil": 1000,
+     "power_net": "3V3", "designator": "C4", "value": "100n"},
+
+    {"op": "place_pullup", "x_mil": 4600, "y_mil": 1000,
+     "net": "SDA", "rail_net": "3V3", "designator": "R3", "value": "4.7k"},
+    {"op": "place_pullup", "x_mil": 5200, "y_mil": 1000,
+     "net": "SCL", "rail_net": "3V3", "designator": "R4", "value": "4.7k"},
+
+    {"op": "place_divider", "x_mil": 1200, "y_mil": 2200,
+     "top_net": "3V3", "mid_net": "VREF", "bottom_net": "GND",
+     "designators": ["R1", "R2"], "values": ["10k", "10k"]},
+
+    {"op": "place_divider", "x_mil": 2400, "y_mil": 2200,
+     "top_net": "VIN", "mid_net": "SENSE", "bottom_net": "GND",
+     "designators": ["R6", "R7"], "values": ["100k", "22k"]},
+
+    {"op": "place_rc_filter", "x_mil": 3800, "y_mil": 2200,
+     "in_net": "SENSE", "out_net": "ADC_IN",
+     "designators": ["R5", "C5"], "r_value": "1k", "c_value": "10n"}
+  ]
+}

@@ -1,0 +1,23 @@
+{
+ "nets": [
+  {
+   "name": "GND",
+   "members": [
+    "C1.2"
+   ]
+  },
+  {
+   "name": "IN",
+   "members": [
+    "R1.1"
+   ]
+  },
+  {
+   "name": "OUT",
+   "members": [
+    "C1.1",
+    "R1.2"
+   ]
+  }
+ ]
+}

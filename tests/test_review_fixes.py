@@ -90,11 +90,16 @@ def test_diff_and_component_json_have_schema_version(capsys):
     assert comp_out["schema_version"]
 
 
-# --- #3 export rejects --json (no silent non-JSON + exit 0) ------------------
-def test_export_json_rejected(capsys):
-    rc = cli.main(["export", "whatever.SchDoc", "--json"])
-    assert rc == EXIT["USAGE"]
-    assert "net --json" in capsys.readouterr().err
+# --- #3 export --json wraps the netlist in a structured envelope -------------
+def test_export_json_envelope(capsys):
+    from pathlib import Path
+    fixture = str(Path(__file__).parent / "fixtures" / "shared_name_label.SchDoc")
+    rc = cli.main(["export", fixture, "--json"])
+    assert rc == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["format"] == "protel"
+    assert doc["schema_version"]
+    assert doc["content"].startswith("[")  # protel netlist body
 
 
 # --- #4 report JSON carries schema_version ----------------------------------

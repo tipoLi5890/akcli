@@ -98,8 +98,15 @@ def test_net_list_all_json(capsys):
 
 
 def test_net_missing_name(capsys):
-    assert main(["net", F(SHARED), "NOPE"]) == EXIT["OK"]
+    assert main(["net", F(SHARED), "NOPE"]) == EXIT["QUERY_MISS"]
     assert "no net" in capsys.readouterr().err
+
+
+def test_net_missing_name_json(capsys):
+    assert main(["net", "--json", F(SHARED), "NOPE"]) == EXIT["QUERY_MISS"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc == {"schema_version": "1", "found": False, "query": "NOPE",
+                   "kind": "net", "source": F(SHARED)}
 
 
 def test_component_pin_to_net(capsys):
@@ -117,8 +124,14 @@ def test_component_json(capsys):
 
 
 def test_component_not_found(capsys):
-    assert main(["component", F(SHARED), "Q99"]) == EXIT["OK"]
+    assert main(["component", F(SHARED), "Q99"]) == EXIT["QUERY_MISS"]
     assert "no component" in capsys.readouterr().err
+
+
+def test_component_not_found_json(capsys):
+    assert main(["component", "--json", F(SHARED), "Q99"]) == EXIT["QUERY_MISS"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["found"] is False and doc["kind"] == "component"
 
 
 # --------------------------------------------------------------------------- #

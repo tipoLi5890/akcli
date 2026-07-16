@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akcli"
-version = "0.8.0"
+version = "0.9.0"
 description = "AI-native KiCad schematic/PCB design agent: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc — no EDA install required."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -70,11 +70,16 @@ select = ["E4", "E7", "E9", "F", "W"]
 "tests/**" = ["E702", "E741", "F401", "F841"]
 
 [tool.mypy]
-# Beachhead: only the already-annotated networked layer is gated so far. Every
-# other package is untyped or partially typed; widen `files` module-by-module
-# as each is brought up to the same bar rather than gating the whole tree at
-# once.
-files = ["src/akcli/parts", "src/akcli/calc"]
+# Beachhead: gate packages module-by-module as each is brought up to the bar
+# rather than the whole tree at once. Covered so far: the networked layer
+# (parts), the calculators, and the typed core (model/errors/units/safety/
+# netdiff/journal/render_svg/kicad_escape).
+files = [
+    "src/akcli/parts", "src/akcli/calc",
+    "src/akcli/model.py", "src/akcli/errors.py", "src/akcli/units.py",
+    "src/akcli/safety.py", "src/akcli/netdiff.py", "src/akcli/journal.py",
+    "src/akcli/render_svg.py", "src/akcli/kicad_escape.py",
+]
 python_version = "3.11"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

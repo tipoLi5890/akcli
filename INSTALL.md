@@ -4,7 +4,7 @@
 (for the stdlib `tomllib` module). There is nothing to compile and no EDA software to install.
 
 - import package: `akcli`
-- CLI command: `akcli` (long alias: `akcli`)
+- CLI command: `akcli`
 - Claude Code plugin / marketplace name: `akcli`
 
 > **Not on PyPI yet** — install from source with one of the options below. Once a release is published,
@@ -62,7 +62,7 @@ pip install git+https://github.com/tipoLi5890/akcli
 
 `akcli` is a plain CLI, so any agent that can run shell commands drives it once it's on PATH (install it
 with one of the options above). The repo also ships **twelve skills** under `skills/` that teach the agent
-how to drive `akcli`: `akcli-circuit-design` (read/analyze/draw basics), `akcli-circuit-debug` (connectivity & tool
+how to drive `akcli`, including `akcli-circuit-design` (read/analyze/draw basics), `akcli-circuit-debug` (connectivity & tool
 triage), `akcli-schematic-review` (severity-ranked design review), `akcli-schematic-authoring` (new circuits from an
 op-list), `akcli-altium-interop` (working with Altium Designer), `akcli-parts-sourcing` (JLC/LCSC parts),
 `akcli-jlcpcb-capabilities` (JLCPCB manufacturing limits), and `akcli-design-calc` (standards-cited engineering
@@ -80,7 +80,7 @@ Install the plugin — it bundles all twelve skills and the slash commands:
 ```
 
 You get the twelve skills and `/akcli:circuit-review`, `circuit-pinmap`,
-`circuit-draw`, and `circuit-diff`, all calling `akcli`.
+`circuit-draw`, `circuit-diff`, and `circuit-parts`, all calling `akcli`.
 
 ### Codex
 

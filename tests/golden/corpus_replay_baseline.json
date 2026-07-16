@@ -1,0 +1,13 @@
+{
+  "analog_frontend.kicad_sch": {
+    "fingerprints": [
+      "18301eb502997a56f9deeb7d70e4abb6"
+    ],
+    "severity_hist": {
+      "info": 1
+    },
+    "codes": [
+      "REVIEW_RC_CUTOFF"
+    ]
+  }
+}

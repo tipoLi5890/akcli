@@ -12,7 +12,7 @@ Windows live bridge into a running Altium instance) — not a symmetric conversi
 repositioning (2026-07) reshaped this roadmap: the Altium-interop items that earlier milestones
 treated as release-critical now live in a demand-driven optional track.
 
-## Where we are (v0.8.0)
+## Where we are (v0.9.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 
@@ -30,7 +30,7 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   wildcards), checker-agnostic `[[waiver]]` config + `--fail-on`, SARIF/JUnit output, structured
   `pos`/`anchors` on findings. Net inference is **arbitrated against `kicad-cli`'s own netlister**
   (a standing parity harness incl. rotation/mirror transforms, label scoping, buses, hierarchy).
-- **Design review (0.8.0):** `akcli review analyze|report|explain|facts|propose|diff|tree|validate`
+- **Design review (0.8.0):** `akcli review analyze|report|explain|facts|propose|testbench|diff|tree|validate`
   — an advisory engineering-review engine on the normalized model (so it reviews Altium `.SchDoc`
   as readily as `.kicad_sch`). Six detector families (signal / validation / pcb / emc / domain /
   gerber; **39 rules**) emit **confidence-graded** findings (deterministic / heuristic /
@@ -65,11 +65,17 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   (`Tracks6`/`Vias6`/`Arcs6`/`Pads6`, cross-validated against KiCad's importer), **`.PcbLib`**
   footprint libraries → `FootprintDef`/`FootprintPad` (also `.kicad_mod`/`.pretty`), and a
   **RS-274X/Excellon gerber** directory reader (0.8.0) feeding the fab-package checks.
-- **Agent surface:** Claude Code / Codex plugin (`akcli`), 12 skills, 4 slash commands, `akcli view`
+- **Agent surface:** Claude Code / Codex plugin (`akcli`), 12 skills, 5 slash commands, `akcli view`
   dashboard (hub + calc + live watch with SSE, ERC markers, lint overlay, BOM panel), stable exit
-  codes 0–7, `schema_version`-stamped JSON. `akcli --version` reports the code actually running (a
-  source checkout's `pyproject.toml` wins over stale installed metadata).
-- **Quality gates:** ~2 300 tests (parser fuzzing, round-trip netlist properties, live ngspice in
+  codes 0–8, `schema_version`-stamped JSON, and a `--json` error envelope (`{"error": {code,
+  message, exit, remediation}}`) on every failing exit path so stdout always parses as JSON even
+  on failure. `akcli --version` reports the code actually running (a
+  source checkout's `pyproject.toml` wins over stale installed metadata). 0.9.0 additions:
+  `akcli capabilities` (the self-describing surface manifest), `akcli render` (install-free SVG),
+  the workspace write journal + `akcli log`, `akcli ops validate` + a PreToolUse draw guard,
+  `read --summary`/`nets --match`/`--limit` output throttling, and structured per-op
+  `remediation` hints.
+- **Quality gates:** ~2 400 tests (parser fuzzing, round-trip netlist properties, live ngspice in
   CI, Windows/macOS/Linux × Python 3.11–3.14), ruff + mypy (parts/ + calc/), a
   **docs-conformance gate** (every documented command line and count claim is executed/asserted in
   CI), wheel-install smoke, tag-driven GitHub Releases.
@@ -80,16 +86,19 @@ Honest limitations:
 - **`.PcbDoc` `Fills6`/`Regions6`/`Texts6`/`Polygons6` are skipped**, not parsed.
 - **The Altium live bridge is an unvalidated scaffold** (Windows + Altium 22+; no CLI entry point,
   no CJK text, parameters/footprints not applied). It is now an *optional track*, not a milestone.
-- **ERC is ERC-lite:** no full N×N pin-type conflict matrix yet; power checks are net-name +
-  power-port based by design.
-- **`diff`/`pinmap` findings have no published JSON Schema** — the check/review evidence envelope
-  now ships `findings.schema.json`, reads/exports ship `netlist.schema.json`/`schematic.schema.json`,
-  op-lists ship `ops.schema.json`, and the review layer ships
-  `datasheet-facts.schema.json`/`proposals.schema.json`; only `diff`/`pinmap`/draw-result schemas
-  remain. `net <file> NAME` / `component <file> REF` misses exit 0 with a stderr note only.
-- **PDN impedance / anti-resonance and stdlib SVG rendering are not built** — the EMC review is a
-  pre-compliance risk analyzer (never a compliance verdict), and `view live` still renders through
-  the optional `kicad-cli`.
+- **ERC power checks are net-name + power-port based by design.** The pin-type conflict
+  matrix shipped in 0.9.0 (`ERC_PIN_CONFLICT` — the high-signal cells of KiCad's default
+  matrix — plus `ERC_POWER_IN_UNDRIVEN`), type-confidence-gated like every type-based rule;
+  the remaining KiCad matrix cells (unspecified-vs-anything etc.) are deliberately not
+  flagged (documented in `checks/erc.py`).
+- ~~`diff`/`pinmap` findings have no published JSON Schema~~ — closed post-0.8.0: every JSON
+  payload family now ships a canonical schema (`diff`/`pinmap`/`draw-result` joined
+  `findings`/`netlist`/`schematic`/`ops`/`sim`/`proposals`/`datasheet-facts`), all mirrored
+  byte-identically into the wheel and CI-gated.
+- **PDN impedance / anti-resonance is not built** — the EMC review is a pre-compliance risk
+  analyzer (never a compliance verdict). Stdlib SVG rendering shipped in 0.9.0 as
+  `akcli render` (connectivity-true, synthesized bodies); `view live`'s pixel-faithful canvas
+  still renders through the optional `kicad-cli`.
 - **Not on PyPI — by decision** (2026-07): distribution is GitHub Releases; the release workflow
   already supports PyPI trusted publishing whenever that decision changes.
 - **MCP server: deferred by decision** — agents drive the plain CLI today.
@@ -127,6 +136,7 @@ honest history:
 | v0.6.0 | **Simulation release:** `akcli sim` (deck/engine/models/assertions/sweeps/fit-diode), docs-conformance gate, bus aliases, `--resolve-mpn`, mypy calc/, live ngspice in CI |
 | v0.7.0 | **Identity release:** project renamed to `akcli` (KiCad-first repositioning), `akcli doctor` + akcli-setup skill, `akcli-` prefix on all skills, JLCPCB manufacturing-handoff docs, one kicad-cli discovery ladder, docs gate widened to INSTALL/ROADMAP, README restructured KiCad-first |
 | v0.8.0 | **Design review release:** the `akcli review` engine (M1–M9 below — signal/validation/PCB/EMC/domain/gerber detectors, datasheet-facts store, propose/diff/tree, deep-review gate, gerber package checks), design-integrity suite (contracts, sch↔PCB `verify`, library workspace, fab profiles, `release preflight`), deep `.kicad_pcb` + Altium `.PcbLib` reading, net-preserving re-layout (`arrange --groups`, `move_component` carry), `library check-lock`, `findings.schema.json`, and the working-tree-authoritative `--version` fix |
+| v0.9.0 | **Agent-contract release:** capabilities manifest (+op constraints, altium_live_wired honesty), QUERY_MISS exit 8, output throttling (`read`/`nets`/`component` `--match`/`--limit`, `read --summary`), write journal + `akcli log`, `ops validate` + PreToolUse draw guard, published diff/pinmap/draw-result schemas, `--fail-on` everywhere, remediation on ALL error codes, `--json` error envelope on every exit path, universal `schema_version` stamps (AST-enforced), `akcli render` SVG, ERC pin-conflict matrix, `check --pairs`, `draw --no-erc`, `/circuit-parts`, golden corpus + review-calibration baseline in CI, sim behavioral models + solver-trap diagnostics, `review testbench`, and the agent-loop eval harness (`tools/agent_eval/`) |
 
 ## v0.8.0 — Design review release (shipped)
 
@@ -166,7 +176,9 @@ in 0.8.0. Per-rule specification and provenance: [docs/review-rules.md](docs/rev
       via `calc eseries`; op-list/contract/sim drafts; schema-enforced "unconfirmed ⇒ no
       op-list"; layout fixes stay manual — akcli writes schematics only), `review diff`
       (fingerprint-aligned drift, `--fail-on-new`), `review tree` (rails → regulator via FB
-      divider → consumers). Backlog: auto-generated subcircuit SPICE testbenches, full
+      divider → consumers). The auto-generated subcircuit SPICE testbenches from this
+      backlog **shipped in 0.9.0** as `review testbench` (RC corner + divider-ratio
+      generators, cone extraction, recomputed bounds, ngspice verdicts). Backlog: full
       what-if parameter sweeps
 - [x] **M8 — deep-review gate + blocking policy:** `review validate` (four
       deterministic gates, failures quarantined with reasons, accepted = `llm_reviewed`
@@ -186,34 +198,50 @@ Three plugin skills teach the agent half of the loop: `akcli-datasheet-facts` (P
 
 ## Milestones ahead
 
-### v0.9 — Agent contract completeness & deeper verification
+### v0.9 — Agent contract completeness & deeper verification (shipped as 0.9.0)
 
 Goal: close the remaining "an agent can drive it blind" gaps, and grow `check` from ERC-lite toward
 a tunable rule engine reaching across artifacts.
 
-- [ ] Publish `diff.schema.json`, `pinmap.schema.json`, and a draw-result schema,
-      `schema_version`-stamped and mirrored into the package like the existing schemas (0.8.0
-      shipped `findings`/`netlist`/`schematic`/`proposals`/`datasheet-facts` schemas; these remain) (M)
-- [ ] Machine-detectable misses: `found: false` + distinct exit code for `net <file> NAME` and
-      `component <file> REF`; frozen `BRIDGE_BUSY`/`BRIDGE_TIMEOUT` codes (S)
-- [ ] `/circuit-parts` slash command wiring `jlc search → show → add → plan → draw` into one
-      documented flow (S)
-- [ ] PreToolUse hook in the plugin: run `validate_oplist` before any `draw`; warn on `--apply`
-      without a preceding `plan` (S)
-- [ ] Honest flags: `--no-erc` to skip the advisory `kicad-cli` run; machine-readable remediation
-      hints on `ERROR:` lines (S)
-- [ ] Full ERC pin-type conflict matrix (KiCad-style N×N, unconnected `POWER_IN`, open-collector
-      mixes) behind the existing typed-pins confidence demotion (partial driver-conflict logic exists) (M)
-- [ ] Differential-pair / bus continuity checks (`_P`/`_N`, `D+`/`D-`, `D0..D7`) over the existing
-      net model, configurable via `[check]` — the review EMC layer already ships a diff-pair *skew*
-      detector; this is the `check`-side continuity rule (M)
-- [ ] Golden-file regression corpus: frozen `check`/`net`/`diff --json` snapshots over real boards,
-      schema-validated in CI (M)
-- [ ] GitHub Action: run `check`/`review` on changed `.kicad_sch`/`.SchDoc`, `diff` against the base
-      ref, post SARIF annotations (M)
-- [ ] Sim deepening: behavioral model library growth (op-amps, MOSFETs), `SIM_UNDRIVEN_RAIL`-class
-      diagnostics expansion, waveform panel in the `view` dashboard; auto-generated subcircuit
-      testbenches from `review propose` sim drafts (M)
+- [x] Publish `diff.schema.json`, `pinmap.schema.json`, and a draw-result schema,
+      `schema_version`-stamped and mirrored into the package like the existing schemas —
+      **shipped in 0.9.0**, plus the previously-missing `netlist`/`schematic` wheel mirrors
+      and one `$id` host across all eleven schemas (M)
+- [x] Machine-detectable misses: `found: false` + exit `8` (`QUERY_MISS`) for `net <file> NAME`
+      and `component <file> REF`; frozen `BRIDGE_BUSY`/`BRIDGE_TIMEOUT` codes — **shipped
+      post-0.8.0** (S)
+- [x] `/circuit-parts` slash command wiring `jlc search → show → add → plan → draw` into one
+      documented, stage-gated flow — **shipped in 0.9.0** (S)
+- [x] PreToolUse hook in the plugin: `akcli ops validate` blocks a structurally invalid
+      `draw --apply`; a missing prior `plan` (checked against the workspace journal) warns —
+      **shipped in 0.9.0** (S)
+- [x] Honest flags: `draw --no-erc` skips the advisory `kicad-cli` run (logged, never
+      silent) and every failed op carries a machine-readable `remediation` field —
+      **shipped in 0.9.0** (S)
+- [x] ERC pin-type conflict matrix (`ERC_PIN_CONFLICT` — the high-signal KiCad cells — and
+      `ERC_POWER_IN_UNDRIVEN`) behind the typed-pins confidence demotion — **shipped
+      post-0.8.0**; the remaining matrix cells are documented non-goals in `checks/erc.py` (M)
+- [x] Differential-pair / bus continuity checks (`check --pairs`, default-on): `PAIR_INCOMPLETE`
+      (asymmetric — a lone `_N`/`_L` active-low name never fires), `PAIR_PIN_MISMATCH`, `BUS_GAP`;
+      configurable via `[check]` `pairs`/`pair_suffixes`/`bus_min_family` — **shipped
+      post-0.8.0**; the review EMC layer keeps the geometric *skew* detector (M)
+- [x] Golden-file regression corpus: frozen `nets`/`check`/`diff`/`review`/`render` snapshots
+      over the committed fixture boards, byte-compared in CI
+      (`tests/golden/` + `tools/golden_regen.py`) — **shipped in 0.9.0**; growing it with
+      real-world boards stays open (M)
+- [x] Sim deepening — `AKCLI_OPAMP` + `AKCLI_NMOS_SW`/`AKCLI_PMOS_SW` (engine-validated in
+      CI), the `SIM_ZERO_PASSIVE`/`SIM_STIMULUS_SHORTED` solver-trap warnings, and
+      **`review testbench`** — **shipped in 0.9.0**; the waveform panel in the `view`
+      dashboard moves to v0.10 (M)
+
+- [x] `--json` machine-readable failure envelope on every exit path (code recovery from
+      wrapped errors, remediation for every code incl. EXIT pseudo-codes) — **shipped in 0.9.0** (M)
+- [x] Universal `schema_version` stamps on every JSON object payload, enforced behaviorally AND
+      mechanically (AST scan) in CI — **shipped in 0.9.0** (S)
+- [x] Review-rule calibration baseline replayed in CI (`tools/corpus_replay.py` +
+      `tests/golden/corpus_replay_baseline.json`) — **shipped in 0.9.0** (S)
+- [x] Agent-loop eval harness (`tools/agent_eval/` — five ground-truthed design tasks, scored
+      through the real safety rails; references CI-pinned at 100%) — **shipped in 0.9.0** (M)
 
 **Exit criterion:** a schematic PR can be gated end-to-end (check + review + diff + intent + sim
 assertions), and a false finding is tuned or waived in config rather than ignored.
@@ -222,9 +250,14 @@ assertions), and a false finding is tuned or waived in config rather than ignore
 
 Goal: humans reviewing agent work get visuals and documents, not just JSON.
 
-- [ ] Pure-stdlib SVG schematic rendering from the normalized model (components, pin tips, wires,
-      junctions, labels) for install-free before/after review — today `view live` renders through
-      the optional `kicad-cli` (L)
+- [x] Pure-stdlib SVG schematic rendering from the normalized model (components, pin tips, wires,
+      junctions, labels) for install-free before/after review — **shipped in 0.9.0 as
+      `akcli render`** (connectivity-true, synthesized bodies, per-sheet blocks, deterministic);
+      pixel-faithful symbol artwork and a `view live` integration stay open (L)
+- [ ] GitHub Action: run `check`/`review` on changed `.kicad_sch`/`.SchDoc`, `diff` against the
+      base ref, post SARIF annotations (carried over from v0.9 — the CLI side of the gate is
+      complete) (M)
+- [ ] Waveform panel in the `view` dashboard (the open half of v0.9's sim deepening) (M)
 - [ ] `akcli doc <file> -o book.md`: pinout book composing per-IC/connector pin tables, rail
       summary (from `review tree`), and BOM (M)
 

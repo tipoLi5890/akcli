@@ -15,9 +15,10 @@ description: >-
 
 # akcli-setup — probe first, then repair exactly what is missing
 
-Never guess at an environment problem: `akcli doctor` probes every optional
-capability **the same way the features themselves discover it**, so its verdict
-matches what the failing command actually saw.
+Never guess at an environment problem: `akcli doctor` probes most optional
+capabilities **the same way the features themselves discover them**, so its
+verdict matches what the failing command actually saw. (Exception: `pdftotext`
+— see the table below.)
 
 ## (1) Probe
 
@@ -36,7 +37,7 @@ that specific features need:
 | `kicad-cli` | advisory ERC after `draw --apply`, `view live` SVG, parity tests | everything else works; those degrade gracefully |
 | `ngspice` (libngspice) | `akcli sim` execution | `sim --deck-only` still emits the SPICE deck |
 | `network` | the `jlc` family only | all analysis/authoring/sim stays offline |
-| `pdftotext` (poppler) | `review facts verify` quote checks | verify still runs; quoted facts report `FACTS_QUOTE_UNVERIFIED` (NOTE) instead of a real text match |
+| `pdftotext` (poppler) | `review facts verify` quote checks | verify still runs; quoted facts report `FACTS_QUOTE_UNVERIFIED` (NOTE) instead of a real text match — note: unlike the other rows, `akcli doctor` does not currently probe `pdftotext`; check for the binary manually (e.g. `pdftotext -v`) |
 | `config` (akcli.toml) | `pinmap` MCU pin, rails, waivers, custom grid | defaults apply |
 
 ## (2) Repair — per capability

@@ -1,0 +1,62 @@
+{
+ "protocol_version": 1,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {
+   "op": "place_component",
+   "lib_id": "Device:C",
+   "designator": "C1",
+   "x_mil": 1000,
+   "y_mil": 1200,
+   "value": "10u"
+  },
+  {
+   "op": "place_component",
+   "lib_id": "Device:L",
+   "designator": "L1",
+   "x_mil": 1500,
+   "y_mil": 900,
+   "rotation": 90,
+   "value": "10uH"
+  },
+  {
+   "op": "place_component",
+   "lib_id": "Device:C",
+   "designator": "C2",
+   "x_mil": 2000,
+   "y_mil": 1200,
+   "value": "10u"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C1.1",
+   "name": "VIN"
+  },
+  {
+   "op": "add_net_label",
+   "at": "L1.1",
+   "name": "VIN"
+  },
+  {
+   "op": "add_net_label",
+   "at": "L1.2",
+   "name": "VOUT"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C2.1",
+   "name": "VOUT"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C1.2",
+   "name": "GND"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C2.2",
+   "name": "GND"
+  }
+ ]
+}

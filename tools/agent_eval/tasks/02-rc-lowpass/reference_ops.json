@@ -1,0 +1,44 @@
+{
+ "protocol_version": 1,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {
+   "op": "place_component",
+   "lib_id": "Device:R",
+   "designator": "R1",
+   "x_mil": 1000,
+   "y_mil": 1000,
+   "rotation": 90,
+   "value": "1.6k"
+  },
+  {
+   "op": "place_component",
+   "lib_id": "Device:C",
+   "designator": "C1",
+   "x_mil": 1600,
+   "y_mil": 1400,
+   "value": "100n"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R1.1",
+   "name": "IN"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R1.2",
+   "name": "OUT"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C1.1",
+   "name": "OUT"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C1.2",
+   "name": "GND"
+  }
+ ]
+}

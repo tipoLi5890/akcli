@@ -43,10 +43,19 @@ checkout instead use `PYTHONPATH=src python3 -m akcli ...` or `bin/akcli ...`.
 ### (1) Read — normalize the schematic first
 
 ```bash
+akcli capabilities --json         # COLD-START: the full CLI surface manifest (commands, flags,
+                                  # exit/error tables, op vocabulary, schemas) in one document
+akcli read <file> --summary --json  # counts + metadata ONLY — start big boards here, never
+                                    # with a full dump (context-budget escape hatch)
 akcli read <file> --json          # full normalized Schematic/Pcb (carries schema_version)
 akcli read <file> --md            # human Markdown summary
+akcli nets <file> --match 'VDD*' --json  # filtered net listing (--limit N caps it; the JSON
+                                         # envelope carries total/matched/returned/truncated)
 akcli net  <file> [name] --json   # netlist: nets -> pin members, aliases, source names
-akcli component <file> <REF>      # one component's pin -> net (e.g. U3)
+                                  # (a named miss exits 8 with {"found": false})
+akcli component <file> <REF>      # one component's pin -> net (e.g. U3); omit REF to list all
+akcli render <file> -o out.svg    # install-free SVG — LOOK at the sheet (works on .SchDoc too)
+akcli log <dir-or-file>           # workspace write journal: what plan/draw/undo did here
 ```
 
 Inputs: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.PcbLib`, `.kicad_sch`, `.kicad_sym`, `.kicad_pcb`.
@@ -150,4 +159,5 @@ subcommand: `-C/--config`, `-v`/`-vv`, `-q/--quiet`, `--json`, `--no-color`, `--
 
 `/circuit-review` (check + optional diff) · `/circuit-pinmap` (pinmap, optional `--expected`) ·
 `/circuit-diff` (diff two revisions) · `/circuit-draw` (build + validate an op-list and draw;
-user-triggered only, it writes files).
+user-triggered only, it writes files) · `/circuit-parts` (jlc search → show → add → plan →
+draw: source a real part and place it; networked + writes files, user-triggered only).

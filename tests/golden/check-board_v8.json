@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.3",
+  "metadata": {
+    "passive_pin_ratio": 0.75,
+    "no_erc_suppressed": 0,
+    "unnamed_net_count": 0,
+    "frac_present": false,
+    "config_waived": "0 (0 demoted)",
+    "component_count": 5,
+    "pin_count": 8,
+    "undesignated_count": 0
+  },
+  "findings": [
+    {
+      "code": "ERC_NET_ALIAS",
+      "severity": "note",
+      "message": "net carries 2 explicit names (MID, VOUT); merged into one net by name (informational, not an error)",
+      "refs": [
+        "MID",
+        "VOUT"
+      ]
+    },
+    {
+      "code": "POWER_GROUND",
+      "severity": "info",
+      "message": "1 ground net(s): GND",
+      "refs": [
+        "GND"
+      ]
+    },
+    {
+      "code": "POWER_RAIL",
+      "severity": "info",
+      "message": "rail '+3V3' @ ~3.3V (from name): 2 consumer(s): #PWR01, R1",
+      "refs": [
+        "+3V3"
+      ]
+    },
+    {
+      "code": "POWER_RAIL",
+      "severity": "info",
+      "message": "rail 'MID': 3 consumer(s): C1, R1, R2",
+      "refs": [
+        "MID"
+      ]
+    },
+    {
+      "code": "NET_WIRE_CORNER_ON_PIN",
+      "severity": "note",
+      "message": "a wire corners exactly on R2 pin 1 tip at (2000,2350) — the pin joins BOTH legs of the corner; if that is unintended, move the corner off the pin",
+      "refs": [
+        "R2.1"
+      ],
+      "pos": [
+        2000.0,
+        2350.0
+      ],
+      "anchors": [
+        {
+          "kind": "pin",
+          "id": "R2.1",
+          "pos": [
+            2000.0,
+            2350.0
+          ]
+        }
+      ]
+    }
+  ]
+}

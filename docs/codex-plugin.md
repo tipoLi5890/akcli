@@ -65,14 +65,15 @@ optional metadata; removing it does not change behavior.
 
 ## Skills ⇄ Claude slash commands
 
-Claude Code exposes four slash commands (`/circuit-review`, `/circuit-diff`,
-`/circuit-pinmap`, `/circuit-draw`) from `commands/`. Codex plugins have no separate
+Claude Code exposes five slash commands (`/circuit-review`, `/circuit-diff`,
+`/circuit-pinmap`, `/circuit-draw`, `/circuit-parts`) from `commands/`. Codex plugins have no separate
 `commands` concept — **skills are the callable units**. The same workflows are covered by the
 skills, which Codex loads on demand:
 
 | Claude command | Codex skill that covers it |
 |---|---|
 | `/circuit-review` | `akcli-schematic-review` |
+| `/circuit-parts` | `akcli-parts-sourcing` (+ `akcli-schematic-authoring` for the placement) |
 | `/circuit-diff` | `akcli-schematic-review` (revision-diff step) / `akcli-circuit-design` |
 | `/circuit-pinmap` | `akcli-schematic-review` (pinmap step) / `akcli-circuit-design` |
 | `/circuit-draw` | `akcli-schematic-authoring` |
