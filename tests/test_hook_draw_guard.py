@@ -33,13 +33,25 @@ BAD_OPS = {
 }
 
 
+def _hook_env() -> dict:
+    # Start from the real environment (Windows needs SYSTEMROOT etc. for a
+    # child Python to even start) and pin the knobs the contract depends on:
+    # AKCLI names the CLI explicitly, so PATH content is irrelevant to what
+    # the tests prove. sys.executable may contain backslashes/spaces — the
+    # hook must split it correctly on every platform.
+    import os
+    env = dict(os.environ)
+    env.update({"PYTHONPATH": SRC,
+                "AKCLI": f'"{sys.executable}" -m akcli'
+                if " " in sys.executable else f"{sys.executable} -m akcli",
+                "AKCLI_JLC_CACHE": "off"})
+    return env
+
+
 def run_hook(payload: dict, cwd: Path) -> subprocess.CompletedProcess:
-    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": SRC,
-           "AKCLI": f"{sys.executable} -m akcli",
-           "AKCLI_JLC_CACHE": "off"}
     return subprocess.run(
         [sys.executable, str(HOOK)], input=json.dumps(payload),
-        capture_output=True, text=True, cwd=cwd, env=env, timeout=60)
+        capture_output=True, text=True, cwd=cwd, env=_hook_env(), timeout=60)
 
 
 def bash_payload(command: str) -> dict:
@@ -92,10 +104,9 @@ def test_silent_after_plan(workspace: Path, monkeypatch):
 
 
 def test_fails_open_on_garbage_stdin(workspace: Path):
-    env = {"PATH": "/usr/bin:/bin", "PYTHONPATH": SRC}
     proc = subprocess.run([sys.executable, str(HOOK)], input="not json",
                           capture_output=True, text=True, cwd=workspace,
-                          env=env, timeout=60)
+                          env=_hook_env(), timeout=60)
     assert proc.returncode == 0
 
 

@@ -283,7 +283,10 @@ def _cmd_nets(args: argparse.Namespace) -> int:
     ordered, meta = _match_limit(ordered, args, key=lambda n: n.name or "")
     if args.json:
         _emit(_dumps(_stamp({
-            "source": str(path),
+            # as_posix(): forward slashes on every platform, so the golden
+            # nets snapshots (invoked with repo-relative paths) are stable
+            # across OSes — Windows str(Path) would emit backslashes here.
+            "source": path.as_posix(),
             **meta,
             "nets": [{"name": n.name, "stable_id": n.stable_id,
                       "members": sorted(f"{d}.{p}" for d, p in n.members)}

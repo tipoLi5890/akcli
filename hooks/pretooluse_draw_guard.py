@@ -32,7 +32,15 @@ def _akcli_argv() -> list[str] | None:
     """How to invoke akcli here, or None (fail open)."""
     env = os.environ.get("AKCLI")
     if env:
-        return shlex.split(env)
+        # posix=False on Windows: POSIX splitting eats the backslashes in
+        # "C:\...\python.exe -m akcli", so the child could never start and
+        # the guard would silently fail open on every call. Non-POSIX mode
+        # keeps surrounding quotes on a token — strip them.
+        tokens = shlex.split(env, posix=(os.name != "nt"))
+        if os.name == "nt":
+            tokens = [t[1:-1] if len(t) >= 2 and t[0] == t[-1] == '"' else t
+                      for t in tokens]
+        return tokens
     exe = shutil.which("akcli")
     if exe:
         return [exe]

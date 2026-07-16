@@ -32,6 +32,14 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+### Fixed
+- **Windows CI portability**: the PreToolUse draw guard now splits the `AKCLI` command with
+  non-POSIX rules on Windows (POSIX splitting ate the backslashes in `C:\...\python.exe`,
+  silently failing the guard open on every call), and `nets --json` emits its `source` path
+  with forward slashes (`as_posix()`) so the golden nets snapshots are byte-stable across
+  platforms; the hook tests inherit the real environment (a child Python needs `SYSTEMROOT`
+  on Windows) while still pinning `AKCLI` explicitly.
+
 ## [0.9.0] - 2026-07-16
 
 ### Added
