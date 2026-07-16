@@ -60,7 +60,7 @@ def test_nets_text(capsys):
 def test_nets_json(capsys):
     assert main(["nets", str(V8), "--json"]) == EXIT["OK"]
     doc = json.loads(capsys.readouterr().out)
-    assert doc["source"] == str(V8)
+    assert doc["source"] == V8.as_posix()   # forward slashes on every OS
     by_name = {n["name"]: n for n in doc["nets"]}
     assert by_name["GND"]["members"] == ["#PWR02.1", "C1.2", "R2.2"]
     assert all("stable_id" in n for n in doc["nets"])
