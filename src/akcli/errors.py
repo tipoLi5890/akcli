@@ -40,6 +40,8 @@ ERROR_CODES: frozenset[str] = frozenset(
         "HIERARCHICAL_UNSUPPORTED",
         "PROTOCOL_MISMATCH",
         "TARGET_LOCKED",
+        "GROUP_UNKNOWN",
+        "GROUP_NO_ORIGIN",
         # safety / IO
         "PATH_OUTSIDE_ROOT",
         # external tooling
@@ -98,6 +100,8 @@ _CODE_EXIT: dict[str, int] = {
     "HIERARCHICAL_UNSUPPORTED": EXIT["OPLIST"],
     "PROTOCOL_MISMATCH": EXIT["OPLIST"],
     "TARGET_LOCKED": EXIT["OPLIST"],
+    "GROUP_UNKNOWN": EXIT["OPLIST"],
+    "GROUP_NO_ORIGIN": EXIT["OPLIST"],
     # usage / config errors -> 2
     "PATH_OUTSIDE_ROOT": EXIT["USAGE"],
     "BAD_CONFIG": EXIT["USAGE"],
@@ -183,6 +187,12 @@ REMEDIATION: dict[str, str] = {
         "`akcli ops template <op>` stamps the supported protocol_version",
     "VERIFY_FAILED":
         "nothing was written; fix the connectivity findings above and re-run",
+    "GROUP_UNKNOWN":
+        "the op tags a group the envelope's 'groups' map does not declare; "
+        "add the entry with an origin ([x_mil, y_mil]) or drop the 'group' tag",
+    "GROUP_NO_ORIGIN":
+        "declare the group's origin as 'origin': [x_mil, y_mil] (50-mil grid "
+        "recommended); grouped op coordinates are relative to it",
     # safety / IO
     "PATH_OUTSIDE_ROOT":
         "the path escapes the working root; use a path inside the project "

@@ -36,6 +36,7 @@ _CORE_OPS: frozenset[str] = frozenset(
         "set_component_transform",
         "set_component_parameters",
         "add_wire",
+        "route_net",
         "add_junction",
         "add_no_connect",
         "add_net_label",
@@ -43,7 +44,10 @@ _CORE_OPS: frozenset[str] = frozenset(
         "add_bus",
         "add_bus_entry",
         "add_text",
+        "add_rectangle",
+        "add_text_box",
         "add_sheet",
+        "set_title_block",
         "delete_component",
         "delete_object",
         "move_component",
@@ -51,7 +55,7 @@ _CORE_OPS: frozenset[str] = frozenset(
     }
 )
 _SUGAR_OPS: frozenset[str] = frozenset({"place_gnd", "place_vcc"})
-OP_NAMES: frozenset[str] = _CORE_OPS | _SUGAR_OPS  # 18 ops total
+OP_NAMES: frozenset[str] = _CORE_OPS | _SUGAR_OPS  # 22 ops total
 
 
 # --------------------------------------------------------------------------- #
@@ -74,7 +78,10 @@ def parse_mid_anchor(s: object) -> tuple[str, str] | None:
 # Optional per-op fields with template placeholders (kept in sync with
 # schemas/ops.schema.json by test_ops_kit.test_tables_match_schema).
 _OP_OPTIONAL: dict[str, dict] = {
-    "place_component": {"rotation": 0, "mirror": "none", "unit": 1,
+    # x_mil/y_mil live here (not in required) because of the anchor
+    # alternative; the template teaches the canonical absolute form.
+    "place_component": {"x_mil": 0, "y_mil": 0,
+                        "rotation": 0, "mirror": "none", "unit": 1,
                         "value": "<value>", "footprint": "<Lib:Footprint>",
                         "symbol_source": "<extra.kicad_sym>"},
     "set_component_transform": {"rotation": 0, "mirror": "none"},
@@ -82,6 +89,7 @@ _OP_OPTIONAL: dict[str, dict] = {
                                  "footprint": "<Lib:Footprint>",
                                  "parameters": {"<KEY>": "<VALUE>"}},
     "add_wire": {},
+    "route_net": {"style": "auto", "label": "<NET_NAME>", "scope": "local"},
     "add_bus": {},
     "add_junction": {},
     "add_no_connect": {},
@@ -90,13 +98,22 @@ _OP_OPTIONAL: dict[str, dict] = {
     "place_gnd": {"lib_id": "power:GND", "net_name": "GND", "rotation": 0},
     "place_vcc": {"lib_id": "power:VCC", "net_name": "VCC", "rotation": 0},
     "add_bus_entry": {"size": [100, 100]},
-    "add_text": {"angle": 0},
+    "add_text": {"angle": 0, "key": "<stable-key>"},
+    "add_rectangle": {"stroke_width_mil": 0, "fill": "none",
+                      "key": "<stable-key>"},
+    "add_text_box": {"angle": 0, "key": "<stable-key>"},
     "add_sheet": {"pins": [{"name": "<pin>", "type": "input",
                             "side": "left", "offset_mil": 0}]},
+    # 13 fields accepted (title/date/rev/company/comment1..9); the template
+    # shows the common ones. At least ONE field is required (validator check).
+    "set_title_block": {"title": "<title>", "date": "<YYYY-MM-DD>",
+                        "rev": "<rev>", "company": "<company>",
+                        "comment1": "<comment>"},
     "delete_component": {"cascade": False},
     # delete_object takes EXACTLY ONE of uuid | match; the template shows uuid.
     "delete_object": {"uuid": "<object-uuid>"},
-    "move_component": {"unit": 1, "carry_labels": False, "carry_wires": False},
+    "move_component": {"x_mil": 0, "y_mil": 0, "unit": 1,
+                       "carry_labels": False, "carry_wires": False},
     "rename_net": {"scope": "local"},
 }
 
@@ -108,6 +125,8 @@ _FIELD_PLACEHOLDER: dict[str, object] = {
     "y_mil": 0,
     "vertices": ["<REF.PIN>", [0, 0]],
     "at": [0, 0],
+    "start": [0, 0],
+    "end": [1000, 800],
     "pin": "<REF.PIN>",
     "name": "<NET_NAME>",
     "net": "<NET_NAME>",
@@ -123,11 +142,15 @@ _TEMPLATE_OVERRIDES: dict[str, dict[str, object]] = {
     "add_bus": {"vertices": [[0, 0], [100, 0]]},
     "rename_net": {"from": "<OLD_NET>", "to": "<NEW_NET>"},
     "connect_and_label": {"from": "<REF.PIN>", "to": "<REF.PIN>"},
+    "route_net": {"from": "<REF.PIN>", "to": "<REF.PIN>"},
     "place_pwr_flag": {"at": "mid(<REF.PIN>,<REF.PIN>)"},
     "add_sheet": {"name": "<sheet-name>", "file": "<child.kicad_sch>",
                   "size": [1000, 800]},
+    "add_text_box": {"size": [1000, 600]},
     "terminate_unused_unit": {"unit": 2, "in_plus": "<PIN>",
                               "in_minus": "<PIN>", "out": "<PIN>"},
+    "place_array": {"designator_prefix": "R", "count": 4,
+                    "values": ["<v1>", "<v2>", "<v3>", "<v4>"]},
 }
 
 
@@ -138,6 +161,15 @@ def _placeholder(name: str, field: str) -> object:
     return _FIELD_PLACEHOLDER.get(field, f"<{field}>")
 
 
+# Optional macro fields ACCEPTED but left out of the template skeleton: the
+# template teaches the canonical absolute form; the anchor alternative is
+# documented in the schema (exactly-one is enforced at expansion).
+_MACRO_TEMPLATE_OMIT: dict[str, frozenset[str]] = {
+    "place_decoupling": frozenset({"anchor", "offset_mil"}),
+    "place_pullup": frozenset({"anchor", "offset_mil"}),
+}
+
+
 def op_template(name: str, *, include_optional: bool = True) -> dict:
     """A fill-in-the-blanks skeleton for one op (see ``akcli ops template``)."""
     if name in MACRO_OPS:
@@ -145,8 +177,10 @@ def op_template(name: str, *, include_optional: bool = True) -> dict:
         for field in MACRO_REQUIRED.get(name, []):
             op[field] = _placeholder(name, field)
         if include_optional:
+            omit = _MACRO_TEMPLATE_OMIT.get(name, frozenset())
             for field, placeholder in MACRO_OPTIONAL.get(name, {}).items():
-                op.setdefault(field, placeholder)
+                if field not in omit:
+                    op.setdefault(field, placeholder)
         return op
     if name not in OP_NAMES:
         raise KeyError(name)
@@ -168,12 +202,15 @@ MACRO_OPS: frozenset[str] = frozenset({
     "place_divider", "place_decoupling", "place_pullup",
     "place_led_indicator", "place_rc_filter", "place_crystal",
     "connect_and_label", "place_pwr_flag", "terminate_unused_unit",
+    "place_array",
 })
 
 MACRO_REQUIRED: dict[str, list[str]] = {
     "place_divider": ["x_mil", "y_mil", "top_net", "mid_net", "bottom_net"],
-    "place_decoupling": ["x_mil", "y_mil", "power_net"],
-    "place_pullup": ["x_mil", "y_mil", "net", "rail_net"],
+    # single-part macros take EITHER x_mil+y_mil OR anchor (+offset_mil),
+    # exactly like place_component — enforced at expansion time.
+    "place_decoupling": ["power_net"],
+    "place_pullup": ["net", "rail_net"],
     "place_led_indicator": ["x_mil", "y_mil", "net"],
     "place_rc_filter": ["x_mil", "y_mil", "in_net", "out_net"],
     "place_crystal": ["x_mil", "y_mil", "in_net", "out_net"],
@@ -181,14 +218,18 @@ MACRO_REQUIRED: dict[str, list[str]] = {
     "place_pwr_flag": ["at"],
     "terminate_unused_unit": ["designator", "lib_id", "unit", "at",
                               "in_plus", "in_minus", "out"],
+    "place_array": ["lib_id", "designator_prefix", "count", "x_mil", "y_mil"],
 }
 MACRO_OPTIONAL: dict[str, dict] = {
     "place_divider": {"designators": ["R1", "R2"], "values": ["10k", "10k"],
                       "spacing_mil": 400, "lib_id": "Device:R"},
-    "place_decoupling": {"designator": "C1", "value": "100n",
-                         "gnd_net": "GND", "lib_id": "Device:C"},
-    "place_pullup": {"designator": "R1", "value": "10k",
-                     "lib_id": "Device:R"},
+    "place_decoupling": {"x_mil": 0, "y_mil": 0, "anchor": "<REF.PIN>",
+                         "offset_mil": [0, 0], "designator": "C1",
+                         "value": "100n", "gnd_net": "GND",
+                         "lib_id": "Device:C"},
+    "place_pullup": {"x_mil": 0, "y_mil": 0, "anchor": "<REF.PIN>",
+                     "offset_mil": [0, 0], "designator": "R1",
+                     "value": "10k", "lib_id": "Device:R"},
     "place_led_indicator": {"designators": ["R1", "D1"], "r_value": "330",
                             "gnd_net": "GND", "mid_net": "",
                             "spacing_mil": 400},
@@ -200,6 +241,9 @@ MACRO_OPTIONAL: dict[str, dict] = {
     "connect_and_label": {"orientation": 0, "scope": "local"},
     "place_pwr_flag": {"rotation": 90},
     "terminate_unused_unit": {"vcc": "VCC", "gnd": "GND"},
+    "place_array": {"start_index": 1, "pitch_mil": 400, "direction": "right",
+                    "value": "<value>", "values": ["<v1>", "<v2>"],
+                    "rotation": 0, "footprint": "<Lib:Footprint>"},
 }
 
 
@@ -250,18 +294,39 @@ def _expand_divider(idx: int, op: dict) -> list[dict]:
     ]
 
 
+def _macro_position(idx: int, name: str, op: dict, place: dict) -> None:
+    """Fill ``place`` with the macro's position: x/y OR anchor (+offset_mil).
+
+    Single-part macros mirror place_component's exactly-one rule; the anchor
+    form ("decoupling cap on U1.VCC") passes straight through to the emitted
+    place_component, which resolves it at execution time.
+    """
+    if op.get("anchor") is not None:
+        if "x_mil" in op or "y_mil" in op:
+            _macro_fail(idx, name,
+                        "give either x_mil/y_mil or anchor (+offset_mil), not both")
+        place["anchor"] = op["anchor"]
+        if "offset_mil" in op:
+            place["offset_mil"] = op["offset_mil"]
+        return
+    if "offset_mil" in op:
+        _macro_fail(idx, name, "offset_mil requires anchor")
+    place["x_mil"] = _macro_num(idx, name, op, "x_mil")
+    place["y_mil"] = _macro_num(idx, name, op, "y_mil")
+
+
 def _expand_decoupling(idx: int, op: dict) -> list[dict]:
     """One bypass capacitor with its rail + ground labels on the pins."""
-    x = _macro_num(idx, "place_decoupling", op, "x_mil")
-    y = _macro_num(idx, "place_decoupling", op, "y_mil")
     lib_id = _macro_str(idx, "place_decoupling", op, "lib_id", "Device:C")
     desig = _macro_str(idx, "place_decoupling", op, "designator", "C1")
     value = _macro_str(idx, "place_decoupling", op, "value", "100n")
     power = _macro_str(idx, "place_decoupling", op, "power_net")
     gnd = _macro_str(idx, "place_decoupling", op, "gnd_net", "GND")
+    place = {"op": "place_component", "lib_id": lib_id, "designator": desig,
+             "value": value}
+    _macro_position(idx, "place_decoupling", op, place)
     return [
-        {"op": "place_component", "lib_id": lib_id, "designator": desig,
-         "x_mil": x, "y_mil": y, "value": value},
+        place,
         {"op": "add_net_label", "name": power, "at": f"{desig}.1"},
         {"op": "add_net_label", "name": gnd, "at": f"{desig}.2"},
     ]
@@ -278,14 +343,14 @@ def _macro_desigs(idx: int, name: str, op: dict, key: str,
 
 def _expand_pullup(idx: int, op: dict) -> list[dict]:
     """One resistor from a signal to a rail (labels on both pins)."""
-    x = _macro_num(idx, "place_pullup", op, "x_mil")
-    y = _macro_num(idx, "place_pullup", op, "y_mil")
     desig = _macro_str(idx, "place_pullup", op, "designator", "R1")
+    place = {"op": "place_component",
+             "lib_id": _macro_str(idx, "place_pullup", op, "lib_id", "Device:R"),
+             "designator": desig,
+             "value": _macro_str(idx, "place_pullup", op, "value", "10k")}
+    _macro_position(idx, "place_pullup", op, place)
     return [
-        {"op": "place_component",
-         "lib_id": _macro_str(idx, "place_pullup", op, "lib_id", "Device:R"),
-         "designator": desig, "x_mil": x, "y_mil": y,
-         "value": _macro_str(idx, "place_pullup", op, "value", "10k")},
+        place,
         {"op": "add_net_label",
          "name": _macro_str(idx, "place_pullup", op, "rail_net"),
          "at": f"{desig}.1"},
@@ -489,6 +554,59 @@ def _expand_terminate_unused_unit(idx: int, op: dict) -> list[dict]:
     ]
 
 
+_ARRAY_DIRECTIONS: dict[str, tuple[int, int]] = {
+    "right": (1, 0), "down": (0, 1), "left": (-1, 0), "up": (0, -1),
+}
+_ARRAY_MAX_COUNT = 200
+
+
+def _expand_array(idx: int, op: dict) -> list[dict]:
+    """N identical parts in a row/column at a fixed pitch (R networks, LEDs,
+    connector loads ...). Expands to ``count`` ``place_component`` ops named
+    ``<prefix><start_index>..``; a colliding prefix is caught by the standard
+    duplicate-placement lint. Labels/wiring are left to other ops (macro
+    philosophy: placement sugar, connectivity stays explicit).
+    """
+    name = "place_array"
+    x = _macro_num(idx, name, op, "x_mil")
+    y = _macro_num(idx, name, op, "y_mil")
+    pitch = _macro_num(idx, name, op, "pitch_mil", 400)
+    lib_id = _macro_str(idx, name, op, "lib_id")
+    prefix = _macro_str(idx, name, op, "designator_prefix")
+    count = op.get("count")
+    if (not isinstance(count, int) or isinstance(count, bool)
+            or not 1 <= count <= _ARRAY_MAX_COUNT):
+        _macro_fail(idx, name,
+                    f"count must be an integer 1..{_ARRAY_MAX_COUNT}")
+    start = op.get("start_index", 1)
+    if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+        _macro_fail(idx, name, "start_index must be an integer >= 0")
+    direction = op.get("direction", "right")
+    if not _in(direction, frozenset(_ARRAY_DIRECTIONS)):
+        _macro_fail(idx, name,
+                    "direction must be one of right, down, left, up")
+    values = op.get("values")
+    if values is not None and (
+            not isinstance(values, list) or len(values) != count
+            or not all(isinstance(v, str) and v for v in values)):
+        _macro_fail(idx, name, f"values must be {count} non-empty strings")
+    ux, uy = _ARRAY_DIRECTIONS[direction]
+    out: list[dict] = []
+    for k in range(count):
+        o: dict = {"op": "place_component", "lib_id": lib_id,
+                   "designator": f"{prefix}{start + k}",
+                   "x_mil": x + k * pitch * ux, "y_mil": y + k * pitch * uy}
+        v = values[k] if values is not None else op.get("value")
+        if isinstance(v, str) and v and not v.startswith("<"):
+            o["value"] = v
+        if "rotation" in op:
+            o["rotation"] = op["rotation"]
+        if "footprint" in op:
+            o["footprint"] = op["footprint"]
+        out.append(o)
+    return out
+
+
 _MACRO_EXPANDERS = {
     "place_divider": _expand_divider,
     "place_decoupling": _expand_decoupling,
@@ -499,6 +617,7 @@ _MACRO_EXPANDERS = {
     "connect_and_label": _expand_connect_and_label,
     "place_pwr_flag": _expand_pwr_flag,
     "terminate_unused_unit": _expand_terminate_unused_unit,
+    "place_array": _expand_array,
 }
 
 
@@ -547,7 +666,14 @@ def expand_macros(doc: dict) -> dict:
             for f in MACRO_REQUIRED[op["op"]]:
                 if f not in op:
                     _macro_fail(idx, op["op"], f"missing required field {f!r}")
-            out.extend(_MACRO_EXPANDERS[op["op"]](idx, op))
+            expanded = _MACRO_EXPANDERS[op["op"]](idx, op)
+            # A grouped macro stays group-local through expansion: the tag
+            # rides onto every child so resolve_groups translates the children
+            # (and the writer persists their membership).
+            if isinstance(op.get("group"), str):
+                for child in expanded:
+                    child.setdefault("group", op["group"])
+            out.extend(expanded)
         else:
             out.append(op)
     for i, d, u, first in _duplicate_placements(out):
@@ -561,6 +687,118 @@ def expand_macros(doc: dict) -> dict:
     return new
 
 
+# ---------------------------------------------------------------------------
+# Functional groups — envelope ``groups`` + a per-op ``group`` tag.
+#
+#   "groups": {"POWER": {"origin": [1000, 1000], "title": "Power supply"}}
+#   {"op": "place_component", "group": "POWER", "x_mil": 400, "y_mil": 300}
+#
+# A grouped op's coordinates are GROUP-LOCAL; :func:`resolve_groups` translates
+# them by the group's origin (absolute = local + origin). Moving a whole module
+# is a one-line origin edit. Resolution runs AFTER :func:`expand_macros` (which
+# propagates ``group`` onto every expanded child op, so macro-internal offsets
+# stay group-local) and BEFORE :func:`validate_oplist`. Only ``[x, y]`` points
+# translate — ``"REF.PIN"`` / ``"mid()"`` anchors are position-independent.
+# The ``group`` tag stays on each op so the writer can persist membership as a
+# hidden ``Group`` symbol property.
+# ---------------------------------------------------------------------------
+_GROUP_META_FIELDS = ("origin", "title", "frame")
+
+# Ops whose x_mil/y_mil pair is group-local (x/y may be absent on a future
+# anchor-relative placement — translate only what is present).
+_GROUP_XY_OPS: frozenset[str] = frozenset({"place_component", "move_component"})
+# Ops whose "at" (and add_no_connect's "pin") translates when it is a point.
+_GROUP_AT_OPS: frozenset[str] = frozenset({
+    "add_junction", "add_bus_entry", "add_text", "add_text_box", "add_sheet",
+    "add_net_label", "place_power_port", "place_gnd", "place_vcc",
+})
+_GROUP_VERTEX_OPS: frozenset[str] = frozenset({"add_wire", "add_bus"})
+
+
+def _shift_point(v, ox, oy) -> list:
+    return [v[0] + ox, v[1] + oy]
+
+
+def _translate_op_coords(op: dict, ox, oy) -> dict:
+    """A copy of ``op`` with its group-local ``[x, y]`` coordinates translated."""
+    name = op.get("op")
+    out = dict(op)
+    if name in _GROUP_XY_OPS:
+        for key in ("x_mil", "y_mil"):
+            v = out.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[key] = v + (ox if key == "x_mil" else oy)
+    elif name in _GROUP_AT_OPS:
+        if _is_point(out.get("at")):
+            out["at"] = _shift_point(out["at"], ox, oy)
+    elif name == "add_no_connect":
+        if _is_point(out.get("pin")):
+            out["pin"] = _shift_point(out["pin"], ox, oy)
+    elif name == "add_rectangle":
+        for key in ("start", "end"):
+            if _is_point(out.get(key)):
+                out[key] = _shift_point(out[key], ox, oy)
+    elif name == "route_net":
+        for key in ("from", "to"):
+            if _is_point(out.get(key)):
+                out[key] = _shift_point(out[key], ox, oy)
+    elif name in _GROUP_VERTEX_OPS and isinstance(out.get("vertices"), list):
+        out["vertices"] = [
+            _shift_point(v, ox, oy) if _is_point(v) else v
+            for v in out["vertices"]
+        ]
+    return out
+
+
+def _group_origin(groups: object, name: str, idx: int) -> tuple:
+    if not isinstance(groups, dict) or name not in groups:
+        raise AkcliError(
+            "GROUP_UNKNOWN",
+            f"[{idx}] op tags group {name!r} but the envelope 'groups' map has "
+            f"no such entry")
+    meta = groups[name]
+    origin = meta.get("origin") if isinstance(meta, dict) else None
+    if not _is_point(origin):
+        raise AkcliError(
+            "GROUP_NO_ORIGIN",
+            f"group {name!r} needs an 'origin': [x_mil, y_mil]")
+    return origin[0], origin[1]
+
+
+def resolve_groups(doc: dict) -> dict:
+    """Translate every grouped op's coordinates by its group origin.
+
+    Returns a new document (the input is never mutated); a document with no
+    grouped ops passes through untouched. Resolution is a pure, deterministic
+    vector add, so op uuids stay stable for identical input. The returned
+    document carries a ``_groups_resolved`` marker making a second call a
+    no-op — group tags remain on the ops (the writer persists them), so
+    without the marker a re-resolve would double-translate.
+
+    Raises :class:`AkcliError` (``GROUP_UNKNOWN`` / ``GROUP_NO_ORIGIN``,
+    exit 6) on a bad group reference, mirroring ``expand_macros``' contract.
+    """
+    if not isinstance(doc, dict) or doc.get("_groups_resolved"):
+        return doc
+    ops = doc.get("ops")
+    if not isinstance(ops, list) or not any(
+            isinstance(o, dict) and isinstance(o.get("group"), str)
+            for o in ops):
+        return doc
+    groups = doc.get("groups")
+    out: list = []
+    for idx, op in enumerate(ops):
+        if isinstance(op, dict) and isinstance(op.get("group"), str):
+            ox, oy = _group_origin(groups, op["group"], idx)
+            out.append(_translate_op_coords(op, ox, oy))
+        else:
+            out.append(op)
+    new = dict(doc)
+    new["ops"] = out
+    new["_groups_resolved"] = True
+    return new
+
+
 _VALID_ROTATIONS: frozenset[int] = frozenset({0, 90, 180, 270})
 _VALID_MIRRORS: frozenset[str] = frozenset({"none", "x", "y"})
 _VALID_SCOPES: frozenset[str] = frozenset({"local", "global", "hierarchical"})
@@ -570,10 +808,14 @@ _VALID_TARGETS: frozenset[str] = frozenset({"kicad", "altium"})
 # delete_object is special: it needs EXACTLY ONE of uuid | match (checked in
 # _validate_op), so neither is in its required list.
 _OP_REQUIRED: dict[str, list[str]] = {
-    "place_component": ["lib_id", "designator", "x_mil", "y_mil"],
+    # place/move take EITHER x_mil+y_mil OR anchor (+offset_mil) — the
+    # exactly-one rule lives in _validate_op, so neither form is in `required`
+    # (mirrors the delete_object uuid|match precedent).
+    "place_component": ["lib_id", "designator"],
     "set_component_transform": ["designator"],
     "set_component_parameters": ["designator"],
     "add_wire": ["vertices"],
+    "route_net": ["from", "to"],
     "add_junction": ["at"],
     "add_no_connect": ["pin"],
     "add_net_label": ["name", "at"],
@@ -581,12 +823,15 @@ _OP_REQUIRED: dict[str, list[str]] = {
     "add_bus": ["vertices"],
     "add_bus_entry": ["at"],
     "add_text": ["text", "at"],
+    "add_rectangle": ["start", "end"],
+    "add_text_box": ["text", "at", "size"],
     "add_sheet": ["name", "file", "at", "size"],
+    "set_title_block": [],
     "place_gnd": ["at"],
     "place_vcc": ["at"],
     "delete_component": ["designator"],
     "delete_object": [],
-    "move_component": ["designator", "x_mil", "y_mil"],
+    "move_component": ["designator"],
     "rename_net": ["from", "to"],
 }
 
@@ -596,7 +841,8 @@ _OP_REQUIRED: dict[str, list[str]] = {
 # vertices (op-specific, checked in the wire block) · match (selector object).
 _OP_FIELDS: dict[str, dict[str, str]] = {
     "place_component": {"lib_id": "str", "designator": "str", "x_mil": "num",
-                        "y_mil": "num", "rotation": "rotation",
+                        "y_mil": "num", "anchor": "anchor_ref",
+                        "offset_mil": "point", "rotation": "rotation",
                         "mirror": "mirror", "unit": "posint", "value": "str",
                         "footprint": "str", "symbol_source": "str"},
     "set_component_transform": {"designator": "str", "rotation": "rotation",
@@ -605,6 +851,8 @@ _OP_FIELDS: dict[str, dict[str, str]] = {
                                  "value": "str", "footprint": "str",
                                  "parameters": "dict"},
     "add_wire": {"vertices": "vertices"},
+    "route_net": {"from": "endpoint", "to": "endpoint", "style": "route_style",
+                  "label": "str", "scope": "scope"},
     "add_bus": {"vertices": "vertices"},
     "add_junction": {"at": "point"},
     "add_no_connect": {"pin": "endpoint"},
@@ -617,22 +865,38 @@ _OP_FIELDS: dict[str, dict[str, str]] = {
     "place_vcc": {"lib_id": "str", "net_name": "str", "at": "anchor",
                   "rotation": "rotation"},
     "add_bus_entry": {"at": "point", "size": "point"},
-    "add_text": {"text": "str", "at": "point", "angle": "num"},
+    "add_text": {"text": "str", "at": "point", "angle": "num", "key": "str"},
+    "add_rectangle": {"start": "point", "end": "point",
+                      "stroke_width_mil": "num", "fill": "fill",
+                      "key": "str"},
+    "add_text_box": {"text": "str", "at": "point", "size": "point",
+                     "angle": "num", "key": "str"},
     "add_sheet": {"name": "str", "file": "str", "at": "point", "size": "point",
                   "pins": "sheetpins"},
+    "set_title_block": {"title": "str", "date": "str", "rev": "str", "company": "str", "comment1": "str", "comment2": "str", "comment3": "str", "comment4": "str", "comment5": "str", "comment6": "str", "comment7": "str", "comment8": "str", "comment9": "str"},
     "delete_component": {"designator": "str", "cascade": "bool"},
     "delete_object": {"uuid": "str", "match": "match"},
     "move_component": {"designator": "str", "x_mil": "num", "y_mil": "num",
+                       "anchor": "anchor_ref", "offset_mil": "point",
                        "unit": "posint", "carry_labels": "bool",
                        "carry_wires": "bool"},
     "rename_net": {"from": "str", "to": "str", "scope": "scope"},
 }
 
 # delete_object match selector: object kinds it can address by name/position.
+# NOTE rectangle has start/end, not an (at) anchor — a rectangle matches by
+# kind (count semantics) or by uuid, never by the `at` selector.
 _MATCH_KINDS: frozenset[str] = frozenset({
     "wire", "bus", "label", "global_label", "hierarchical_label",
-    "junction", "no_connect", "text", "bus_entry",
+    "junction", "no_connect", "text", "bus_entry", "rectangle", "text_box",
 })
+
+# add_rectangle / graphic fill styles (mirror the KiCad tokens).
+_VALID_FILLS: frozenset[str] = frozenset({"none", "outline", "background"})
+
+# route_net corner styles: hv = horizontal-first L, vh = vertical-first L,
+# z = 3 segments, auto = hv unless its corner sits on a pin tip.
+_VALID_ROUTE_STYLES: frozenset[str] = frozenset({"auto", "hv", "vh", "z"})
 
 # add_sheet pin electrical types + edge sides (mirror the KiCad tokens).
 _SHEET_PIN_TYPES: frozenset[str] = frozenset({
@@ -712,6 +976,12 @@ def _is_anchor(v: object) -> bool:
     return _is_endpoint(v)
 
 
+def _is_anchor_ref(v: object) -> bool:
+    # relative-placement anchor: "REF.PIN" (pin tip) or bare "REF" (origin)
+    return (isinstance(v, str) and bool(v) and not v.startswith("mid(")
+            and not v.startswith(".") and not v.endswith("."))
+
+
 def _check_rotation(idx: int, name: str, op: dict, key: str, out: list[OpError]) -> None:
     if key in op and not _in(op[key], _VALID_ROTATIONS):
         out.append(OpError(idx, name, "BAD_ANGLE", f"{key} {op[key]!r} not in {{0,90,180,270}}"))
@@ -730,6 +1000,11 @@ _KIND_CHECKS: dict[str, tuple] = {
     "anchor": (_is_anchor,
                'an [x, y] point, "REF.PIN" or "mid(REF.PIN,REF.PIN)"'),
     "dict": (lambda v: isinstance(v, dict), "an object"),
+    "fill": (lambda v: _in(v, _VALID_FILLS),
+             'one of "none", "outline", "background"'),
+    "anchor_ref": (_is_anchor_ref, '"REF" or "REF.PIN"'),
+    "route_style": (lambda v: _in(v, _VALID_ROUTE_STYLES),
+                    'one of "auto", "hv", "vh", "z"'),
 }
 
 
@@ -810,6 +1085,13 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
         out.append(OpError(idx, None, "OP_UNSUPPORTED", "op must be a JSON object"))
         return out
     name = op.get("op")
+    # "group" is a universally-allowed optional tag (see resolve_groups) —
+    # validated here once instead of polluting every per-op field table.
+    if "group" in op and not isinstance(op["group"], str):
+        out.append(OpError(idx, name if isinstance(name, str) else None,
+                           "OP_UNSUPPORTED",
+                           "group must be a string (a key of the envelope "
+                           "'groups' map)"))
     if _in(name, MACRO_OPS):
         # macros are part of the document vocabulary: a not-yet-expanded
         # op-list must validate; plan/draw expand them before execution
@@ -819,8 +1101,9 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
                                    f"missing required field {req!r}"))
         known = set(MACRO_REQUIRED.get(name, [])) | set(MACRO_OPTIONAL.get(name, {}))
         for field in op:
-            if field != "op" and field not in known and not field.startswith("_"):
-                _unknown_field(idx, name, field, known, out)
+            if field in ("op", "group") or field in known or field.startswith("_"):
+                continue
+            _unknown_field(idx, name, field, known, out)
         return out
     if not _in(name, OP_NAMES):
         hint = difflib.get_close_matches(
@@ -839,11 +1122,35 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
         out.append(OpError(idx, name, "OP_UNSUPPORTED",
                            "delete_object needs exactly one of 'uuid' or 'match'"))
 
+    if name == "set_title_block" and not any(
+            f in op for f in _OP_FIELDS["set_title_block"]):
+        out.append(OpError(idx, name, "OP_UNSUPPORTED",
+                           "set_title_block needs at least one field "
+                           "(title/date/rev/company/comment1..9)"))
+
+    if name in ("place_component", "move_component"):
+        # exactly one position form: x_mil+y_mil (absolute) XOR anchor
+        # (+offset_mil, world-frame offset from a "REF"/"REF.PIN" anchor)
+        if "anchor" in op:
+            if "x_mil" in op or "y_mil" in op:
+                out.append(OpError(idx, name, "OP_UNSUPPORTED",
+                                   f"{name} takes either x_mil/y_mil or "
+                                   "anchor (+offset_mil), not both"))
+        else:
+            for req in ("x_mil", "y_mil"):
+                if req not in op:
+                    out.append(OpError(idx, name, "OP_UNSUPPORTED",
+                                       f"{name} missing required field {req!r} "
+                                       "(or place relative: anchor + offset_mil)"))
+            if "offset_mil" in op:
+                out.append(OpError(idx, name, "OP_UNSUPPORTED",
+                                   f"{name}.offset_mil requires anchor"))
+
     # field-TYPE table: unknown fields (did-you-mean) + per-field kind checks.
     # Keys starting with "_" are ignored (annotation escape, schema-compatible).
     fields = _OP_FIELDS.get(name, {})
     for field, value in op.items():
-        if field == "op" or field.startswith("_"):
+        if field in ("op", "group") or field.startswith("_"):
             continue
         kind = fields.get(field)
         if kind is None:
@@ -902,6 +1209,33 @@ def validate_oplist(doc: dict) -> list[OpError]:
     if not _in(tf, _VALID_TARGETS):
         errs.append(OpError(-1, None, "OP_UNSUPPORTED",
                             f"target_format {tf!r} not in {{kicad,altium}}"))
+
+    groups = doc.get("groups")
+    if groups is not None:
+        if not isinstance(groups, dict):
+            errs.append(OpError(-1, None, "OP_UNSUPPORTED",
+                                "'groups' must be an object of "
+                                "{name: {origin: [x_mil, y_mil], ...}}"))
+        else:
+            for gname, meta in groups.items():
+                if not isinstance(meta, dict) or not _is_point(meta.get("origin")):
+                    errs.append(OpError(-1, None, "GROUP_NO_ORIGIN",
+                                        f"group {gname!r} needs an 'origin': "
+                                        "[x_mil, y_mil]"))
+                    continue
+                if "title" in meta and not isinstance(meta["title"], str):
+                    errs.append(OpError(-1, None, "OP_UNSUPPORTED",
+                                        f"groups[{gname!r}].title must be a string"))
+                if "frame" in meta and not isinstance(meta["frame"], bool):
+                    errs.append(OpError(-1, None, "OP_UNSUPPORTED",
+                                        f"groups[{gname!r}].frame must be true or false"))
+                for k in meta:
+                    if k not in _GROUP_META_FIELDS and not k.startswith("_"):
+                        hint = difflib.get_close_matches(k, _GROUP_META_FIELDS, n=1)
+                        suggestion = f" (did you mean {hint[0]!r}?)" if hint else ""
+                        errs.append(OpError(-1, None, "OP_UNSUPPORTED",
+                                            f"groups[{gname!r}]: unknown field "
+                                            f"{k!r}{suggestion}"))
 
     ops = doc.get("ops")
     if not isinstance(ops, list):

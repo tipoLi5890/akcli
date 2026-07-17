@@ -92,3 +92,26 @@ def test_cli_render_default_output(tmp_path: Path, capsys):
     with contextlib.redirect_stderr(buf):
         assert main(["render", str(target)]) == EXIT["OK"]
     assert (tmp_path / "b.kicad_sch.svg").exists()
+
+
+# --------------------------------------------------------------------------- #
+# --grid overlay (coordinate-readable previews)
+# --------------------------------------------------------------------------- #
+def test_grid_overlay_lines_labels_origin():
+    from akcli import render_svg
+    from akcli.model import Component, NetPrimitives, Pin, Schematic
+
+    comp = Component(designator="R1", library_ref="Device:R",
+                     x_mil=1000, y_mil=1000,
+                     pins=[Pin(number="1", name=None, x_mil=1000, y_mil=850),
+                           Pin(number="2", name=None, x_mil=1000, y_mil=1150)])
+    sch = Schematic(source_path="x", source_format="kicad",
+                    components=[comp], nets=[])
+    plain = render_svg.render(sch, NetPrimitives())
+    grid = render_svg.render(sch, NetPrimitives(), grid=True)
+    assert 'class="grid"' not in plain
+    assert 'class="grid"' in grid
+    # captions carry world-mil values the op-list uses
+    assert 'class="gridlabel"' in grid and ">1000<" in grid
+    # deterministic: same input, same bytes
+    assert grid == render_svg.render(sch, NetPrimitives(), grid=True)

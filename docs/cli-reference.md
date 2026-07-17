@@ -137,6 +137,21 @@ It mirrors the writer's `geometry.pin_world`, so a printed coordinate is byte-fo
 `draw` will place that pin — the exact point wires, labels, and power ports must land on. An
 unresolvable `lib_id` is `SYMBOL_NOT_FOUND` (exit `6`). `--json` emits the table as objects.
 
+### `akcli bbox <lib_id> [--at X Y] [--rotation {0,90,180,270}] [--mirror {none,x,y}] [--symbols PATH ...]`
+The spacing-planning sibling of `pins`: per unit, the drawn-**body box** and the **full box**
+(body UNION pin tips) in world mils for a hypothetical placement, plus width/height and the
+documented 400-mil spacing convention. Pin-only symbols (power stubs) fall back to the pin box
+and say so (`pin_only`). Same transform chain as the writer, so the boxes can never disagree
+with where `draw` puts the part. `--json` emits the boxes as objects.
+
+### `akcli groups <sch> [--frame [--apply]] [--margin MIL] [--symbols PATH ...]`
+Functional-group inspection + visual frames. List mode reports every group recovered from the
+hidden `Group` symbol property (written by grouped ops — see the groups envelope in
+[docs/op-list-authoring.md](op-list-authoring.md)): members, world bounding box, and whether its
+frame is present. `--frame` (dry-run unless `--apply`) draws one border rectangle + title per
+group through the standard draw pipeline (`.bak`, verify gate, journal, `undo`); frames carry a
+stable `key`, so a re-run after parts move **replaces** the stale border in place.
+
 ### `akcli check <file>`
 Run the design checks (ERC-lite + power + BOM hygiene + nets + layout) and print findings.
 - `-C/--config` supplies rails, MCU designator, the schematic grid, `[[erc_waiver]]`
@@ -312,7 +327,7 @@ UniqueID, then `(value, footprint, pin-count)` signature, then refdes. `--json` 
 `schemas/diff.schema.json` (summary counts, rename map, per-component and per-net changes with
 match method + confidence).
 
-### `akcli arrange <target.kicad_sch> [--apply] [--grid MIL] [--margin MIL] [--symbols PATH ...]`
+### `akcli arrange <target.kicad_sch> [--apply] [--groups [FILE]] [--frames] [--grid MIL] [--margin MIL] [--symbols PATH ...]`
 Resolve symbol overlaps by nudging **free** components — parts with no wire
 endpoint or label anchor on any pin (moving anchored parts would strand their
 connectivity, which is exactly what `check --nets` flags). Greedy first-fit in
@@ -321,6 +336,15 @@ Dry-run by default; `--apply` writes through the draw pipeline (`.bak` +
 connectivity re-verify), so `akcli undo` reverts an arrange. `--symbols`
 supplies extra symbol sources for the write pipeline (same semantics as
 `draw --symbols`).
+
+With `--groups` each functional block relocates into its own shelf-packed
+region as **rigid, net-preserving bundles** (moves carry labels/wires; power
+satellites ride their host). `--groups FILE` takes a TOML/JSON
+`{group: [refdes, ...]}` map; **bare `--groups`** derives the map from the
+sheet's hidden `Group` properties — the file itself is the module map.
+`--frames` redraws each group's border + title after packing (keyed uuids
+replace stale frames; one `undo` reverts the arrange together with its
+frames).
 
 ### `akcli verify <file_a> <file_b> [--strict]`
 Two modes, dispatched by the **second** file's type:
@@ -444,14 +468,17 @@ membership-derived `stable_id`, so re-exports diff cleanly. `--json` wraps the r
 in a `{schema_version, source, format, content}` envelope (the `content` string is byte-identical
 to the plain output); for a structured net-by-net document use `akcli net --json`.
 
-### `akcli plan <target.kicad_sch> --ops FILE [--symbols PATH ...] [--no-net-diff]`
+### `akcli plan <target.kicad_sch> --ops FILE [--symbols PATH ...] [--no-net-diff] [--render OUT.svg]`
 Validate an op-list against `protocol_version` and `schemas/ops.schema.json`, resolve it against the
 target `.kicad_sch` (symbols from repeatable `--symbols` sources and the target's inline cache), and
 print what *would* change. Never writes. Includes the **Net changes** block (below);
-`--no-net-diff` skips it.
+`--no-net-diff` skips it. `--render OUT.svg` renders the WOULD-BE sheet from the same temp
+dry-apply the net diff uses (coordinate-grid overlay included) — **look before you `--apply`**;
+a refused op-list honestly skips the render, and a renderer failure is a warning that never
+changes the verdict. The `--json` payload carries `preview: {path, bytes}` (or `null`).
 
-### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets] [--allow-open] [--no-erc]`
-Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 18 ops + 9 macros (see
+### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets] [--allow-open] [--no-erc] [--render OUT.svg]`
+Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 22 ops + 10 macros (see
 `schemas/ops.schema.json`), including `delete_component` (with `cascade`) / `delete_object` /
 `move_component` / `rename_net`, hierarchical `add_sheet` (below), and multi-unit placement via
 `place_component`'s optional `"unit"` field.
@@ -534,10 +561,11 @@ status: dry-run — 2 replacement(s) pending; re-run with --apply
   unavailable nicks); `--json` lists the actions (minus the raw symbol text).
 
 ### `akcli ops <list|template OP|validate FILE> [--required-only]`
-Op-list authoring kit: `list` prints the 18-op vocabulary with required fields
-and per-executor support, plus the **9 macro ops** (`connect_and_label`,
+Op-list authoring kit: `list` prints the 22-op vocabulary with required fields
+and per-executor support, plus the **10 macro ops** (`connect_and_label`,
 `place_pwr_flag`, `terminate_unused_unit`, `place_divider`, `place_decoupling`,
-`place_pullup`, `place_led_indicator`, `place_rc_filter`, `place_crystal`)
+`place_pullup`, `place_led_indicator`, `place_rc_filter`, `place_crystal`,
+`place_array`)
 that expand to core ops before validation; `template` emits a fill-in JSON
 op-list skeleton for any op or macro (guide:
 [docs/op-list-authoring.md](op-list-authoring.md)). A mistyped op or
@@ -647,7 +675,7 @@ for `{name, model_card, sim_params, params, note}`. `--apply SCH --designator RE
 run** printing the op-list unless `--write`, which commits through the KiCad writer with a rotated
 `.bak`). This closes the datasheet → model loop with [`jlc datasheet`](jlc.md).
 
-### `akcli render <file> [-o FILE]`
+### `akcli render <file> [-o FILE] [--grid]`
 Render a schematic to **SVG with no EDA install** — the same normalized model every check runs
 on, so an Altium `.SchDoc` renders as readily as a `.kicad_sch`. **Connectivity-true, not
 pixel-faithful**: wires, buses, bus entries, junctions, labels (scope-colored), No-ERC marks,
@@ -657,6 +685,9 @@ Deterministic output (same input bytes → same SVG bytes). `-o -` writes to std
 output is `<input>.svg` next to the input. `--json` emits
 `{render_version, source, output, components, wires, labels, junctions, bytes}`. The
 visual-feedback channel after a `draw --apply`: render, then *look* at what you placed.
+`--grid` overlays world-mil gridlines (major every 500 mil), coordinate captions and an origin
+cross — the numbers on the image are exactly the numbers op-lists use (`plan/draw --render`
+previews always include it).
 
 ### `akcli log [PATH] [--limit N] [--cmd NAME]`
 Query the **workspace write journal**. Every write-path command (`plan`, `draw`, `arrange`,

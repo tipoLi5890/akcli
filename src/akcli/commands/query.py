@@ -433,6 +433,177 @@ def _cmd_pins(args: argparse.Namespace) -> int:
     return EXIT["OK"]
 
 
+def _cmd_bbox(args: argparse.Namespace) -> int:
+    """Print a symbol's world bounding boxes for a (hypothetical) placement.
+
+    Placement-planning helper (the sibling of ``akcli pins``): reports, per
+    unit, the drawn-body box and the full box (body UNION pin tips) in world
+    mils for the given ``--at``/``--rotation``/``--mirror`` — so an agent can
+    reserve space and pick spacings BEFORE placing. Uses the same transform
+    chain as the writer (``geometry.world_box_from_extent`` / ``pin_world``),
+    so the boxes can never disagree with where ``draw`` puts the part.
+    Pin-only symbols (no drawn body, e.g. power stubs) fall back to the pin
+    bounding box and say so via ``pin_only``.
+    """
+    lib_id = getattr(args, "lib_id", None)
+    if not lib_id:
+        raise _ExitWith(EXIT["USAGE"], "ERROR: missing lib_id (e.g. Device:R)")
+
+    from .. import model as _model
+    from .. import units as _units
+    from ..readers import kicad_lib
+    from ..writers import geometry
+    from ..writers.lib_cache import _coerce_sources
+
+    cfg = _load_cfg(args, None)
+    libs = _coerce_sources(_draw_symbol_sources(args, cfg))
+    sym = kicad_lib.resolve(lib_id, libs)          # raises SYMBOL_NOT_FOUND
+
+    at = getattr(args, "at", None) or [0.0, 0.0]
+    rot = int(getattr(args, "rotation", 0) or 0)
+    mirror = getattr(args, "mirror", None) or "none"
+    origin_nm = (_units.mil_to_nm(at[0]), _units.mil_to_nm(at[1]))
+    inst = _model.Component(
+        designator="?", library_ref=lib_id,
+        x_mil=at[0], y_mil=at[1], rotation=rot, mirror=mirror,
+    )
+
+    def _r(v: float):
+        iv = round(v)
+        return iv if abs(v - iv) < 1e-6 else round(v, 3)
+
+    def _box_mil(box_nm) -> list:
+        return [_r(_units.nm_to_mil(v)) for v in box_nm]
+
+    part_count = max(1, sym.part_count or 1)
+    units_out: list[dict] = []
+    for unit in range(1, part_count + 1):
+        ext = kicad_lib.body_extent_mil(sym, unit)
+        body_nm = (None if ext is None
+                   else geometry.world_box_from_extent(ext, rot, mirror, origin_nm))
+        pts = [geometry.pin_world(sym, inst, p)
+               for p in kicad_lib.unit_pins(sym, unit)]
+        boxes = ([body_nm] if body_nm is not None else []) + [
+            (x, y, x, y) for (x, y) in pts]
+        if not boxes:                       # neither body nor pins: origin point
+            boxes = [(origin_nm[0], origin_nm[1], origin_nm[0], origin_nm[1])]
+        full_nm = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                   max(b[2] for b in boxes), max(b[3] for b in boxes))
+        full = _box_mil(full_nm)
+        units_out.append({
+            "unit": unit,
+            "body_box": None if body_nm is None else _box_mil(body_nm),
+            "full_box": full,
+            "width_mil": _r(full[2] - full[0]),
+            "height_mil": _r(full[3] - full[1]),
+            "pin_only": body_nm is None,
+        })
+
+    if args.json:
+        _emit(_dumps(_stamp({
+            "lib_id": lib_id, "at": [at[0], at[1]], "rotation": rot,
+            "mirror": mirror, "unit_count": part_count,
+            "recommended_min_spacing_mil": 400,
+            "units": units_out,
+        })))
+    else:
+        head = f"{lib_id}  @({_r(at[0])},{_r(at[1])}) rot={rot} mirror={mirror}"
+        if part_count > 1:
+            head += f"  [{part_count} units]"
+        out = [head,
+               f"  {'unit':>4}  {'body_box (x0,y0,x1,y1) mil':<30} "
+               f"{'full_box (body+pins)':<30} {'w x h':<14}"]
+        for u in units_out:
+            body = ("(pin-only)" if u["body_box"] is None
+                    else str(tuple(u["body_box"])))
+            out.append(f"  {u['unit']:>4}  {body:<30} "
+                       f"{str(tuple(u['full_box'])):<30} "
+                       f"{u['width_mil']}x{u['height_mil']}")
+        out.append("  keep neighboring parts >= 400 mil apart "
+                   "(see `akcli pins` for exact pin coordinates)")
+        _emit("\n".join(out))
+    return EXIT["OK"]
+
+
+def _cmd_groups(args: argparse.Namespace) -> int:
+    """`groups <sch>` — functional groups on a sheet; ``--frame`` draws borders.
+
+    List mode reports every group recovered from the hidden ``Group`` symbol
+    property: members, world bounding box, and whether its visual frame is
+    present. ``--frame`` (dry-run unless ``--apply``) emits the border
+    rectangle + title ops through the standard draw pipeline — keyed uuids
+    make a re-run replace stale frames in place after parts move.
+    """
+    path = _require_path(args.path, "schematic .kicad_sch")
+    if not str(path).lower().endswith(".kicad_sch"):
+        raise _ExitWith(EXIT["USAGE"], "ERROR: groups works on .kicad_sch")
+    from ..groupframe import group_report
+    if getattr(args, "frame", False):
+        return _cmd_groups_frame(args, path)
+    rows = group_report(path)
+    if args.json:
+        _emit(_dumps(_stamp({"source": str(path), "groups": rows})))
+        return EXIT["OK"]
+    if not rows:
+        _emit("no functional groups (no 'Group' symbol properties on this "
+              "sheet; place with a group tag or pass --groups to arrange)")
+        return EXIT["OK"]
+    out = [f"  {'group':<16} {'members':>7}  {'box (x0,y0,x1,y1) mil':<28} "
+           f"{'w x h':<12} frame"]
+    for r in rows:
+        box = ",".join(f"{v:g}" for v in r["box_mil"])
+        out.append(f"  {r['name']:<16} {len(r['members']):>7}  ({box})"
+                   f"{'':<4} {r['width_mil']:g}x{r['height_mil']:g}"
+                   f"{'':<4} {'yes' if r['has_frame'] else 'no'}")
+        out.append(f"    {', '.join(r['members'])}")
+    _emit("\n".join(out))
+    return EXIT["OK"]
+
+
+def _cmd_groups_frame(args: argparse.Namespace, path) -> int:
+    from ..groupframe import FRAME_MARGIN_MIL, plan_frames
+    margin = getattr(args, "margin", None) or FRAME_MARGIN_MIL
+    ops_list = plan_frames(path, margin_mil=margin)
+    do_apply = bool(getattr(args, "apply", False))
+    if not ops_list:
+        _emit("no functional groups to frame")
+        return EXIT["OK"]
+    from ..writers import kicad as kwriter
+    oplist = {"protocol_version": 1, "target_format": "kicad",
+              "target_file": path.name, "ops": ops_list}
+    cfg = _load_cfg(args, path)
+    findings: list = []
+    results = kwriter.apply(
+        oplist, str(path), apply=do_apply,
+        sources=_draw_symbol_sources(args, cfg), verify_out=findings,
+        backup_dir=(path.parent if do_apply else None),
+        allow_open=bool(getattr(args, "allow_open", False)))
+    from ..errors import EXIT as _EXIT
+    ok = (all(r.status == "ok" for r in results)
+          and not any(f.severity.value in ("error", "critical") for f in findings))
+    if do_apply and ok:
+        from .. import journal as _journal
+        _journal.record(path, "groups-frame", "applied",
+                        op_count=len(ops_list), backup=f"{path.name}.bak")
+    frames = len(ops_list) // 2
+    if args.json:
+        _emit(_dumps(_stamp({
+            "source": str(path), "applied": bool(do_apply and ok),
+            "frames": frames,
+            "ops": [r.to_dict() for r in results],
+        })))
+    elif not ok:
+        for r in results:
+            if r.status != "ok":
+                _emit(f"ERROR [{r.op_index}] {r.op}: {r.error_code}: {r.message}")
+    elif do_apply:
+        _emit(f"groups --frame: drew {frames} frame(s) on {path.name} "
+              f"(backup {path.name}.bak; `akcli undo` reverts)")
+    else:
+        _emit(f"dry-run: {frames} frame(s) planned — re-run with --apply")
+    return EXIT["OK"] if ok else _EXIT["OPLIST"]
+
+
 def _cmd_export(args: argparse.Namespace) -> int:
     path = _require_path(args.path)
     sch = _load_schematic(path)
@@ -514,6 +685,38 @@ def register(sub, common) -> None:
     p.add_argument("--symbols", metavar="PATH", action="append",
                    help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
     p.set_defaults(handler=_cmd_pins)
+
+    p = sub.add_parser("bbox", parents=[common],
+                       help="print a symbol's world bounding boxes for a "
+                            "placement (spacing planning; sibling of `pins`)")
+    p.add_argument("lib_id", nargs="?", help="symbol lib_id, e.g. Device:R or Timer:NE555P")
+    p.add_argument("--at", nargs=2, type=float, metavar=("X", "Y"),
+                   help="placement origin in mils (default: 0 0)")
+    p.add_argument("--rotation", type=int, choices=[0, 90, 180, 270], default=0,
+                   help="placement rotation (default: 0)")
+    p.add_argument("--mirror", choices=["none", "x", "y"], default="none",
+                   help="placement mirror (default: none)")
+    p.add_argument("--symbols", metavar="PATH", action="append",
+                   help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
+    p.set_defaults(handler=_cmd_bbox)
+
+    p = sub.add_parser("groups", parents=[common],
+                       help="list a sheet's functional groups (from the Group "
+                            "property); --frame draws border+title per group")
+    p.add_argument("path", nargs="?", help="input .kicad_sch")
+    p.add_argument("--frame", action="store_true",
+                   help="draw/refresh a border rectangle + title per group "
+                        "(dry-run unless --apply; keyed uuids replace stale "
+                        "frames in place)")
+    p.add_argument("--apply", action="store_true",
+                   help="with --frame: actually write (default is a dry-run)")
+    p.add_argument("--margin", type=float, metavar="MIL",
+                   help="frame padding around the group box (default 200)")
+    p.add_argument("--symbols", metavar="PATH", action="append",
+                   help="extra symbol source for the write pipeline")
+    p.add_argument("--allow-open", dest="allow_open", action="store_true",
+                   help="write even when a KiCad GUI lock file is present")
+    p.set_defaults(handler=_cmd_groups)
 
     p = sub.add_parser("export", parents=[common], help="emit a netlist")
     p.add_argument("path", nargs="?", help="input schematic")

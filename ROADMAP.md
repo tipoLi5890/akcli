@@ -12,11 +12,11 @@ Windows live bridge into a running Altium instance) — not a symmetric conversi
 repositioning (2026-07) reshaped this roadmap: the Altium-interop items that earlier milestones
 treated as release-critical now live in a demand-driven optional track.
 
-## Where we are (v0.9.0)
+## Where we are (v0.10.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 
-- **KiCad authoring:** `plan`/`draw` from a `protocol_version 1` op-list — **18 ops + 9 macros**
+- **KiCad authoring:** `plan`/`draw` from a `protocol_version 1` op-list — **22 ops + 10 macros**
   (incl. hierarchical `add_sheet`, `rename_net`, cascade delete, multi-unit placement, `mid()`
   anchors), `akcli new` blank-sheet bootstrap, deterministic UUIDv5 idempotency, atomic apply with a
   rotated backup stack (`undo --list`/`--steps`), a pure-Python connectivity gate, a before/after
@@ -25,6 +25,12 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   and wire endpoints (`carry_labels`/`carry_wires`), and `arrange --groups` relocates whole
   functional blocks as rigid bundles; `library check-lock` refuses a write under an open KiCad GUI.
   `relink-symbols` refreshes stale embedded libraries behind a net-equivalence gate.
+  **Modular authoring (v0.10)**: functional-group envelope with group-local coordinates and a
+  persisted `Group` property, `akcli groups`/`--frame` self-refreshing module borders,
+  bare `arrange --groups --frames`, relative placement (`anchor`+`offset_mil`), `place_array`,
+  pin-safe `route_net` L/Z auto-routing, `add_rectangle`/`add_text_box` annotation graphics with
+  stable `key`s, `set_title_block`, `akcli bbox` spacing planning, `plan/draw --render` look-
+  before-apply previews and `render --grid` coordinate overlays, plus group layout lints.
 - **Verification:** ERC-lite / power / BOM / nets / geometry / layout / libsync checks,
   **design-intent assertions** (`nets --intent-snapshot` → `check --intent`, per-net modes +
   wildcards), checker-agnostic `[[waiver]]` config + `--fail-on`, SARIF/JUnit output, structured

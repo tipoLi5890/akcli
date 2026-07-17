@@ -75,8 +75,19 @@ Windows 即時驅動（需執行中的 Altium 22+）；離線時，Altium 僅供
 有兩種編輯在結構上就是**net 保留**的：`move_component` 可以連同符號的 net label 與
 wire 端點一起搬移（`carry_labels`／`carry_wires`），而 `arrange` 就建立在這個原語之上——
 `arrange board.kicad_sch --apply` 會微調自由（未接線）的符號，直到互不重疊；
-`arrange --groups blocks.toml`（`group-name → [refdes]` 對照表）則會把整個功能區塊
-當成剛性整體搬動。`akcli library check-lock hardware/kicad/board` 會回報哪些檔案
+`arrange --groups`（可帶 `group-name → [refdes]` 對照表，或不帶檔案直接從圖面的
+`Group` 屬性推導）則會把整個功能區塊當成剛性整體搬動，`--frames` 打包後順帶更新模組邊框。
+
+**模組化繪圖是一級公民**：op-list 可宣告功能群組
+（`"groups": {"POWER": {"origin": [1000, 1000], "title": "電源模組"}}`）並在 op 上標
+`"group"` — 座標即為群組內相對座標（搬整個模組＝只改一個 origin），巨集自動繼承標籤，
+成員關係以隱藏的 `Group` 屬性存進圖面。`akcli groups board.kicad_sch` 列出所有模組；
+`--frame --apply` 為每個群組畫出可自我更新的邊框＋標題。相對擺放
+（`"anchor": "U1.VCC"` ＋ `offset_mil`）、`place_array` 陣列、`route_net` 避開 pin 的
+L/Z 自動走線、`akcli bbox` 佔位查詢，以及 `plan --render preview.svg`
+（**apply 前先看圖**，含世界座標網格）補齊整條流程。
+
+`akcli library check-lock hardware/kicad/board` 會回報哪些檔案
 正被 KiCad GUI 開啟中（有的話 exit 6），讓外部自動化能在寫入前先把關。
 
 ## 執行檢查（ERC、power、pinmap、BOM、diff）
@@ -300,7 +311,7 @@ codex plugin install akcli@akcli
 
 ## 路線圖
 
-目前已提供（v0.9.x）：KiCad 寫入／繪製（18 種 op + 9 種巨集，含階層 `add_sheet`、net-diff
+目前已提供（v0.10.x）：KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet`、net-diff
 安全護欄、`new`／多層 `undo`，輸出經 KiCad 自身 netlister 仲裁）、net 保留的 **`arrange
 --groups`**／`move_component` carry re-layout、advisory 的 **`akcli review`** 引擎
 （跨 signal／validation／pcb／emc／domain／gerber 偵測家族的 analyze、datasheet **facts**

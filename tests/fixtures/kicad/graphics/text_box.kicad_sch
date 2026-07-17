@@ -1,0 +1,31 @@
+(kicad_sch
+	(version 20231120)
+	(generator "eeschema")
+	(uuid "33333333-4444-5555-6666-777777777777")
+	(paper "A4")
+	(lib_symbols)
+	(text_box "Module notes\nline two"
+		(exclude_from_sim no)
+		(at 25.4 25.4 0)
+		(size 50.8 25.4)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(fill
+			(type none)
+		)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left top)
+		)
+		(uuid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+)

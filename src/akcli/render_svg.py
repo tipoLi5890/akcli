@@ -46,7 +46,13 @@ _STYLE = (
     ".sheet-title{fill:#000;font-size:70px;font-weight:bold}"
     ".noerc{stroke:#c00;stroke-width:6}"
     ".frame{fill:none;stroke:#bbb;stroke-width:3;stroke-dasharray:20,20}"
+    ".grid{stroke:#d5d5e0;stroke-width:2;stroke-dasharray:8,16}"
+    ".gridlabel{fill:#9a9ab0;font-size:38px}"
+    ".origin{stroke:#c08;stroke-width:5}"
 )
+
+_GRID_STEP_MIL = 500.0     # major gridline pitch (10x the 50-mil pin grid)
+_GRID_LABEL_EVERY = 1000.0  # coordinate captions on every 1000-mil line
 
 
 @dataclass
@@ -170,8 +176,45 @@ def _body_rect(c: Component) -> tuple[float, float, float, float]:
     return x0, y0, w, h
 
 
+def _render_grid(scene: _SheetScene, x, y, out: list[str]) -> None:
+    """World-coordinate gridlines + captions so an agent can READ positions.
+
+    The whole authoring model is coordinate-driven (mils, 50-mil grid), but a
+    plain render gives a multimodal agent no way to tell where (1000, 1600)
+    is. Major lines every 500 mil, coordinate captions every 1000, and an
+    origin cross when (0, 0) is in view — all in world mils, exactly the
+    numbers op-lists use.
+    """
+    import math
+    b = scene.bounds
+    if b.empty:
+        return
+    pad = 100.0
+    x0, x1 = b.min_x - pad, b.max_x + pad
+    y0, y1 = b.min_y - pad, b.max_y + pad
+    gx = math.floor(x0 / _GRID_STEP_MIL) * _GRID_STEP_MIL
+    while gx <= x1:
+        out.append(f'<line class="grid" x1="{x(gx)}" y1="{y(y0)}" '
+                   f'x2="{x(gx)}" y2="{y(y1)}"/>')
+        if gx % _GRID_LABEL_EVERY == 0:
+            out.append(f'<text class="gridlabel" x="{x(gx + 10)}" '
+                       f'y="{y(y0 - 15)}">{_fmt(gx)}</text>')
+        gx += _GRID_STEP_MIL
+    gy = math.floor(y0 / _GRID_STEP_MIL) * _GRID_STEP_MIL
+    while gy <= y1:
+        out.append(f'<line class="grid" x1="{x(x0)}" y1="{y(gy)}" '
+                   f'x2="{x(x1)}" y2="{y(gy)}"/>')
+        if gy % _GRID_LABEL_EVERY == 0:
+            out.append(f'<text class="gridlabel" x="{x(x0 - 90)}" '
+                       f'y="{y(gy - 10)}">{_fmt(gy)}</text>')
+        gy += _GRID_STEP_MIL
+    if x0 <= 0 <= x1 and y0 <= 0 <= y1:
+        out.append(f'<path class="origin" d="M {x(-60)} {y(0)} L {x(60)} {y(0)} '
+                   f'M {x(0)} {y(-60)} L {x(0)} {y(60)}"/>')
+
+
 def _render_sheet(scene: _SheetScene, dx: float, dy: float,
-                  out: list[str]) -> None:
+                  out: list[str], *, grid: bool = False) -> None:
     def x(v: float) -> str:
         return _fmt(v + dx)
 
@@ -180,6 +223,8 @@ def _render_sheet(scene: _SheetScene, dx: float, dy: float,
 
     b = scene.bounds
     out.append(f'<g data-sheet="{escape(scene.name or "/", {chr(34): "&quot;"})}">')
+    if grid:
+        _render_grid(scene, x, y, out)
     if scene.name:
         out.append(f'<text class="sheet-title" x="{x(b.min_x)}" '
                    f'y="{y(b.min_y - 80)}">{escape(scene.name)}</text>')
@@ -227,8 +272,12 @@ def _render_sheet(scene: _SheetScene, dx: float, dy: float,
     out.append("</g>")
 
 
-def render(sch: Schematic, prims: NetPrimitives) -> str:
-    """Render the schematic + its primitives to an SVG document string."""
+def render(sch: Schematic, prims: NetPrimitives, *, grid: bool = False) -> str:
+    """Render the schematic + its primitives to an SVG document string.
+
+    ``grid=True`` overlays world-mil gridlines, coordinate captions and an
+    origin cross (see :func:`_render_grid`) — for coordinate-driven review.
+    """
     scenes = _split_sheets(sch, prims)
 
     total_w = max((s.bounds.width for s in scenes), default=0.0)
@@ -244,7 +293,7 @@ def render(sch: Schematic, prims: NetPrimitives) -> str:
 
     body: list[str] = []
     for scene, (dx, dy) in zip(scenes, offsets):
-        _render_sheet(scene, dx, dy, body)
+        _render_sheet(scene, dx, dy, body, grid=grid)
 
     return "\n".join([
         f'<svg xmlns="http://www.w3.org/2000/svg" '

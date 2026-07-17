@@ -28,7 +28,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
         from ..readers import altium_sch
         prims = altium_sch.read_primitives(str(path))
 
-    svg = render_svg.render(sch, prims)
+    svg = render_svg.render(sch, prims, grid=bool(getattr(args, "grid", False)))
 
     out_arg = getattr(args, "output", None)
     if out_arg == "-":
@@ -64,4 +64,8 @@ def register(sub, common) -> None:
     p.add_argument("-o", "--output", metavar="FILE",
                    help="output SVG path ('-' = stdout; default: "
                         "<input>.svg next to the input)")
+    p.add_argument("--grid", action="store_true",
+                   help="overlay world-mil gridlines + coordinate captions + "
+                        "origin cross (read placement coordinates off the "
+                        "image; plan/draw --render previews include it)")
     p.set_defaults(handler=_cmd_render)

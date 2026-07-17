@@ -9,7 +9,7 @@ limits below mechanically via `akcli capabilities --json` (`.ops.constraints`:
 hardcoding them from this doc. Scaffolding helpers:
 
 ```bash
-akcli ops list                    # the 18-op vocabulary + 9 macros + required fields + support
+akcli ops list                    # the 22-op vocabulary + 10 macros + required fields + support
 akcli ops template place_component        # fill-in JSON skeleton (all fields)
 akcli ops template add_wire --required-only
 akcli ops validate ops.json               # cheap structural check (envelope+ops+macros) before plan/draw; the PreToolUse hook runs this automatically before draw --apply
@@ -31,6 +31,7 @@ where `draw` will place that pin. Use it instead of guessing pin offsets.
   "protocol_version": 1,
   "target_format": "kicad",
   "target_file": "board.kicad_sch",
+  "groups": { "POWER": { "origin": [1000, 1000], "title": "Power supply" } },
   "ops": [ ... ]
 }
 ```
@@ -38,6 +39,8 @@ where `draw` will place that pin. Use it instead of guessing pin offsets.
 - `protocol_version` is checked first; an executor rejects a higher major with
   `PROTOCOL_MISMATCH` rather than guessing.
 - `target_file` may be overridden by the CLI's positional target.
+- `groups` (optional) declares functional modules — see
+  [Modular design with functional groups](#modular-design-with-functional-groups).
 
 ## Coordinate contract (memorize this)
 
@@ -64,10 +67,11 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 
 | Op | Required | Notes |
 |---|---|---|
-| `place_component` | `lib_id, designator, x_mil, y_mil` | optional `unit` places ONE unit of a multi-unit part (each unit is its own instance sharing the designator); `value`/`footprint` set the properties; the symbol must resolve from `--symbols`/config/`symbol_source` |
+| `place_component` | `lib_id, designator` + position | position is exactly ONE of `x_mil`+`y_mil` (absolute) or `anchor` (+`offset_mil`): `"anchor": "U1.3"` is that pin's world tip, bare `"U1"` the component origin — resolved at execution time, so the anchor may be placed earlier in the SAME list; `offset_mil` is a world-frame `[dx, dy]`, the result grid-snaps. Optional `unit` places ONE unit of a multi-unit part; `value`/`footprint` set the properties; the symbol must resolve from `--symbols`/config/`symbol_source` |
 | `set_component_transform` | `designator` | rotation/mirror of an existing instance |
 | `set_component_parameters` | `designator` | `reference`, `value`, `footprint`, free-form `parameters` map |
 | `add_wire` | `vertices` | even, orthogonal list of `[x,y]` / `"REF.PIN"`; one segment per consecutive pair |
+| `route_net` | `from, to` | deterministic orthogonal auto-route between two endpoints: coaxial -> straight; else an L whose corner provably avoids every placed pin tip (a coincident corner silently merges nets), falling back to a 3-segment z. `style: auto\|hv\|vh\|z`; optional `label` names the net ONCE at the longest segment's midpoint — the non-coaxial `connect_and_label` |
 | `add_bus` | `vertices` | as `add_wire`, bus graphics |
 | `add_junction` | `at` | usually unnecessary — the executor auto-inserts junctions at 3+-way meets and pin taps |
 | `add_no_connect` | `pin` | `"REF.PIN"` or `[x,y]` |
@@ -75,11 +79,14 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 | `place_power_port` | `lib_id, net_name, at` | auto-allocates the `#PWR` reference; merges by name everywhere; `at` also takes `"REF.PIN"` / `"mid(...)"` |
 | `place_gnd` / `place_vcc` | `at` | sugar over `place_power_port` |
 | `add_bus_entry` | `at` | optional `size` (default 2.54 mm @ 45°); each entry end must land on a bus or a wire, else `DANGLING_BUS_ENTRY` gates the write |
-| `add_text` | `text, at` | the only graphic op; optional free `angle` |
+| `add_text` | `text, at` | free-floating text; optional free `angle`; optional `key` = stable replacement handle |
+| `add_rectangle` | `start, end` | top-level graphic border box (module frames); optional `stroke_width_mil`/`fill` (`none\|outline\|background`) and `key`. Connectivity-neutral; delete by uuid or kind (it has no `at`) |
+| `add_text_box` | `text, at, size` | bordered multi-line note box (`at` = TOP-LEFT, `\n` for line breaks); optional `angle`/`key`. Connectivity-neutral; grammar fixture-verified against a real KiCad |
+| `set_title_block` | at least one of `title, date, rev, company, comment1..9` | find-or-create edit of the title block (kept after `paper`, before `lib_symbols`); unchanged values replay as a no-op note |
 | `rename_net` | `from, to` | rewrites matching label texts (`label`/`global_label`/`hierarchical_label`) **and** power-port net Values; optional `scope` restricts to one label kind (power Values only rewritten when unscoped); 0 matches = replay-safe note; the match count is reported. KiCad only (`altium: false`) |
 | `delete_component` | `designator` | removes ALL instances; attached wires are left for the connectivity gate to flag — delete them explicitly, or set `"cascade": true` to also delete wires ending on any deleted pin's coordinate plus labels/no-connects anchored there; an anchored junction is removed only when fewer than two surviving wires still pass through it (a pure-X crossing of untouched wires keeps its junction — deleting it would silently split their net). Cascaded uuids are reported; absent target = replay-safe no-op |
 | `delete_object` | `uuid` **or** `match` | remove ONE top-level object (wire/label/junction/text/...). `match: {kind, name?, at?}` addresses it without a uuid — exactly-one semantics (0 matches = replay-safe note, >1 = error listing the candidate uuids); `match.at` is exact mils, NOT grid-snapped |
-| `move_component` | `designator, x_mil, y_mil` | one instance (optional `unit`); its properties travel along; wires do NOT stretch |
+| `move_component` | `designator` + position | destination is `x_mil`+`y_mil` OR `anchor` (+`offset_mil`), like `place_component`. One instance (optional `unit`); its properties travel along; wires do NOT stretch unless `carry_labels`/`carry_wires` |
 | `add_sheet` | `name, file, at, size` | hierarchical sheet: `(sheet …)` with `Sheetname`/`Sheetfile`, deterministic uuids, and edge-computed sheet pins from optional `pins:[{name, type, side, offset_mil}]` (`type: input\|output\|bidirectional\|tri_state\|passive`, `side: left\|right\|top\|bottom`). `at`=TOP-LEFT corner, mils. Wires attach to a sheet pin **by coordinate** (`at`+`offset_mil` along the side, grid-snapped) — there is NO `Sheet.Pin` endpoint. KiCad only (`altium: false`); the child `.kicad_sch` is authored separately (`akcli new`) |
 
 ### Macro ops (expanded before validation)
@@ -98,8 +105,9 @@ label (the facing-pin pattern below).
 | `place_pwr_flag` | `at` | `place_power_port power:PWR_FLAG` at `at` (`[x,y]` or `mid(REF.PIN,REF.PIN)`), default `rotation: 90`. Place it **MID-WIRE** — on-pin placement overlaps the other symbol's body (`check --layout` flags `LAYOUT_POWER_ON_PIN`). The flag never names a net |
 | `terminate_unused_unit` | `designator, lib_id, unit, at, in_plus, in_minus, out` | `place_component` of the given unit + `power:<gnd>` port on `REF.<in_plus>` + `power:<vcc>` port on `REF.<in_minus>` + `add_no_connect` on `REF.<out>` (`vcc` default `VCC`, `gnd` default `GND`) — silences KiCad's `missing_input_pin` on spare op-amp/comparator units |
 | `place_divider` | `x_mil, y_mil, top_net, mid_net, bottom_net` | 2 resistors (`designators`/`values`/`spacing_mil`/`lib_id` optional) + 4 pin-anchored labels; the shared `mid_net` label on both inner pins IS the connection |
-| `place_decoupling` | `x_mil, y_mil, power_net` | 1 capacitor (`designator`/`value`/`gnd_net`/`lib_id` optional) + rail/ground labels on its pins |
-| `place_pullup` | `x_mil, y_mil, net, rail_net` | 1 resistor (`designator`/`value`/`lib_id` optional) with rail on pin 1, signal on pin 2 |
+| `place_decoupling` | `power_net` + position | 1 capacitor (`designator`/`value`/`gnd_net`/`lib_id` optional) + rail/ground labels on its pins. Position is `x_mil`+`y_mil` OR `anchor` (+`offset_mil`) — `"anchor": "U1.VCC"` drops the cap next to the pin it decouples |
+| `place_pullup` | `net, rail_net` + position | 1 resistor (`designator`/`value`/`lib_id` optional) with rail on pin 1, signal on pin 2; same position forms as `place_decoupling` |
+| `place_array` | `lib_id, designator_prefix, count, x_mil, y_mil` | N identical parts in a row/column at `pitch_mil` (default 400) stepping `direction: right\|down\|left\|up`, named `<prefix><start_index>..`; shared `value` or per-element `values` (length = count). Placement sugar — labels/wiring stay explicit |
 | `place_led_indicator` | `x_mil, y_mil, net` | series R + LED to `gnd_net` (`designators`/`r_value`/`mid_net`/`spacing_mil` optional); the internal node label joins R.2 to the LED anode |
 | `place_rc_filter` | `x_mil, y_mil, in_net, out_net` | series R + shunt C to `gnd_net` (`designators`/`r_value`/`c_value`/`spacing_mil` optional) |
 | `place_crystal` | `x_mil, y_mil, in_net, out_net` | crystal + two load caps to `gnd_net` (`designators`/`value`/`load_c`/`spacing_mil` optional) — ST AN2867 topology |
@@ -108,6 +116,70 @@ label (the facing-pin pattern below).
 place_divider` emits a skeleton. `akcli calc <akcli-design-calc> --ops` emits these
 macros directly (placeholder net names — edit them, then `akcli plan`), and
 the validator accepts un-expanded macro documents.
+
+## Modular design with functional groups
+
+Real designs are drawn module by module (power, MCU, sensing, ...) with each
+module's parts placed together. The `groups` envelope makes that the native
+authoring model:
+
+```json
+{
+  "protocol_version": 1,
+  "target_format": "kicad",
+  "target_file": "board.kicad_sch",
+  "groups": {
+    "POWER": { "origin": [1000, 1000], "title": "Power supply" },
+    "MCU":   { "origin": [4000, 1000] }
+  },
+  "ops": [
+    { "op": "place_component", "group": "POWER", "lib_id": "Regulator_Linear:AMS1117-3.3",
+      "designator": "U1", "x_mil": 400, "y_mil": 300 },
+    { "op": "place_decoupling", "group": "POWER", "anchor": "U1.VI",
+      "offset_mil": [-300, 100], "power_net": "VIN", "designator": "C1" }
+  ]
+}
+```
+
+- **Group-local coordinates.** Any op may carry `"group": "<NAME>"`; its
+  `[x, y]` coordinates are then relative to that group's `origin`
+  (`absolute = local + origin`). Design each module around its own `(0, 0)`;
+  **moving a whole module is a one-line origin edit** (on a NOT-yet-applied
+  list — see the idempotency rules below for applied files). Pin anchors
+  (`"REF.PIN"`, `"mid()"`, relative-placement `anchor`) are
+  position-independent and never translate.
+- **Macros inherit the tag.** A grouped macro's expansion stays group-local
+  and every child op keeps the membership.
+- **Membership persists in the sheet** as a hidden `Group` symbol property —
+  the file itself is the module map. `akcli groups <sch>` lists every group
+  with members and world bounding box; `akcli arrange <sch> --groups` (bare,
+  no file) re-packs the modules from the properties alone.
+- **Visual frames.** `akcli groups <sch> --frame --apply` draws one border
+  rectangle + title per group (padded, grid-snapped outward). Frames carry a
+  stable `key`, so after parts move a re-run **replaces** the stale border in
+  place — never accumulates. `arrange --groups --frames` refreshes them right
+  after packing.
+- **Advisory lints.** `check --layout` warns when two groups' extents overlap
+  (`LAYOUT_GROUP_OVERLAP`) and notes a frame that no longer contains its
+  members (`LAYOUT_FRAME_STALE`).
+- Errors: an op tagging an undeclared group fails `GROUP_UNKNOWN`; a declared
+  group without an `origin` fails `GROUP_NO_ORIGIN` (both exit 6, before
+  anything is written).
+
+The full modular loop:
+
+```
+akcli new board.kicad_sch
+akcli bbox Device:R --symbols mylib.kicad_sym     # reserve space per part
+# author ops.json: declare groups -> place with group-local coords /
+#   anchors / place_array -> route_net between modules
+akcli plan board.kicad_sch --ops ops.json --render preview.svg
+#   LOOK at preview.svg (grid overlay = world mils), then:
+akcli draw board.kicad_sch --ops ops.json --apply --strict-nets
+akcli groups board.kicad_sch --frame --apply       # visual module borders
+akcli check board.kicad_sch                        # incl. group layout lints
+akcli arrange board.kicad_sch --groups --frames --apply   # re-pack later
+```
 
 ## Validator strictness (what `plan` rejects)
 
@@ -130,6 +202,13 @@ silently place nothing:
   `INTERNAL` — never a traceback, and never a partial write.
 
 ## Execution pipeline (what happens to your ops)
+
+Macros expand first (each child inherits its macro's `group` tag), THEN
+group-local coordinates resolve to absolute, THEN the validator runs — so a
+structurally bad group reference fails before anything touches the target.
+`plan`/`draw --render OUT.svg` additionally renders the would-be sheet from
+the same temp dry-apply the net diff uses (grid overlay included), so you can
+LOOK at the result before `--apply`.
 
 1. `akcli plan <target> --ops ops.json` — validate + resolve, print what would
    change **plus the "Net changes" block** (the op-list is dry-applied to a
@@ -174,6 +253,14 @@ into a refusal.
   converges byte-identically after one apply.**
 - Because identity includes `op_index`, never reorder or insert ops mid-list
   in a file you already applied — extend with a NEW delta op-list instead.
+- The same rule covers **group origins**: editing an origin and re-running an
+  ALREADY-applied list re-derives every member's coordinates (new positions,
+  same uuids — the parts move but their labels/wires do not follow). Move an
+  applied module with `move_component` (+`carry_labels`/`carry_wires`) in a
+  delta list, or `akcli arrange --groups`, then refresh frames.
+- Graphics/notes with a `key` (`add_rectangle`, `add_text`, `add_text_box`)
+  are exempt from the coordinate seed: the same key always replaces the same
+  node, wherever it is and wherever the op sits in the list.
 - Deletes are replay-safe no-ops when the target is already gone.
 
 ## Connectivity is name-based — and only dangling is a hard gate

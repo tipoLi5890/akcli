@@ -88,12 +88,24 @@ akcli draw board.kicad_sch --ops ops.json --apply --strict-nets  # atomic write 
 `.kicad_sym` libraries behind a net-equivalence safety gate. Altium *write/draw* is available only
 through the optional Windows live driver (Altium 22+ running); offline, Altium is analysis-only.
 
+**Modular authoring is first-class**: an op-list may declare functional groups
+(`"groups": {"POWER": {"origin": [1000, 1000], "title": "Power supply"}}`) and tag ops with
+`"group"` — coordinates become group-local (moving a module = one origin edit), macros inherit
+the tag, and membership persists in the sheet as a hidden `Group` property. `akcli groups
+board.kicad_sch` lists the modules; `--frame --apply` draws a self-refreshing border + title per
+group. Relative placement (`"anchor": "U1.VCC"` + `offset_mil`), `place_array` rows,
+`route_net` L/Z auto-routing with pin-safe corners, `akcli bbox` spacing planning and
+`plan --render preview.svg` (look at the would-be sheet, world-mil grid overlay, before
+`--apply`) round out the flow.
+
 Two edits are **net-preserving by construction**: `move_component` can carry a symbol's net labels
 and wire endpoints with it (`carry_labels`/`carry_wires`), and `arrange` builds on that primitive —
 `arrange board.kicad_sch --apply` nudges free (unwired) symbols apart until nothing overlaps, and
-`arrange --groups blocks.toml` relocates whole functional blocks (a `group-name → [refdes]` map) as
-rigid bundles. `akcli library check-lock hardware/kicad/board` reports which files the KiCad GUI
-holds open (exit 6 if any) so external automation can gate before a write.
+`arrange --groups` relocates whole functional blocks as rigid bundles (from a `group-name →
+[refdes]` TOML/JSON map, or bare `--groups` straight from the sheet's `Group` properties;
+`--frames` refreshes the borders after packing). `akcli library check-lock hardware/kicad/board`
+reports which files the KiCad GUI holds open (exit 6 if any) so external automation can gate
+before a write.
 
 ## Run checks (ERC, power, pinmap, BOM, diff)
 
@@ -341,7 +353,7 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Roadmap
 
-Shipped today (v0.9.x): KiCad write/draw from an 18-op + 9-macro vocabulary (hierarchical
+Shipped today (v0.10.x): KiCad write/draw from an 22-op + 10-macro vocabulary (hierarchical
 `add_sheet`, net-diff safety rails, `new`/multi-level `undo`, output arbitrated against KiCad's own
 netlister), net-preserving **`arrange --groups`** / `move_component` carry re-layout, an advisory
 **`akcli review`** engine (analyze across signal/validation/pcb/emc/domain/gerber detector families,

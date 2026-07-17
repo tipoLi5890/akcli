@@ -152,12 +152,19 @@ def _pts(points: list[tuple[int, int]]) -> SNode:
     return _list(_atom("pts"), *[_xy(p) for p in points])
 
 
-def _stroke() -> SNode:
+def _stroke(width_nm: int = 0) -> SNode:
+    # width 0 keeps the historical bare "0" atom so existing files replay
+    # byte-identically; a non-zero width renders as a KiCad mm string.
+    width = _atom("0") if not width_nm else _mm(width_nm)
     return _list(
         _atom("stroke"),
-        _list(_atom("width"), _atom("0")),
+        _list(_atom("width"), width),
         _list(_atom("type"), _atom("default")),
     )
+
+
+def _fill(type_: str = "none") -> SNode:
+    return _list(_atom("fill"), _list(_atom("type"), _atom(type_)))
 
 
 def _effects(hide: bool = False, justify: str | None = None) -> SNode:
@@ -441,6 +448,39 @@ def _pin_at_point(
     return None
 
 
+def _resolve_anchor_origin(
+    doc: SNode, ctx: dict, anchor: str, opname: str,
+) -> tuple[int, int]:
+    """World coordinate (nm) of a relative-placement anchor.
+
+    ``"REF.PIN"`` resolves to that pin's electrical tip (the same machinery
+    wires use); a bare ``"REF"`` resolves to the component's ``(at)`` origin.
+    The anchor may have been placed earlier in the SAME op-list — resolution
+    happens at execution time against the live document, never as an ops.py
+    pre-pass (a second geometry engine would inevitably diverge).
+    """
+    if "." in anchor:
+        ref, pin_number = anchor.rsplit(".", 1)
+        return _resolve_pin_world(doc, ctx, ref, pin_number)
+    sym = _symbol_by_ref(doc, anchor)
+    if sym is None:
+        fail("VERIFY_FAILED",
+             f"{opname}: anchor {anchor!r}: no placed component {anchor!r}")
+    at = sym.find("at")
+    return _at_nm(at) if at is not None else (0, 0)
+
+
+def _anchored_pos_nm(doc: SNode, ctx: dict, op: dict, opname: str) -> tuple[int, int]:
+    """Grid-snapped world position for an anchor (+world-frame offset_mil) op."""
+    base = _resolve_anchor_origin(doc, ctx, str(op["anchor"]), opname)
+    off = op.get("offset_mil") or [0, 0]
+    return geometry.grid_snap_nm(
+        (base[0] + geometry.mil_to_nm(float(off[0])),
+         base[1] + geometry.mil_to_nm(float(off[1]))),
+        _GRID_NM,
+    )
+
+
 def _resolve_endpoint(doc: SNode, ctx: dict, ep: object) -> tuple[int, int]:
     """Resolve a wire/port endpoint to integer-nm coordinates.
 
@@ -600,16 +640,7 @@ def _body_box_world(
     ext = kicad_lib.body_extent_mil(symdef, unit)
     if ext is None:
         return None
-    x0, y0, x1, y1 = ext
-    pts = [
-        geometry.transform_point(
-            (geometry.mil_to_nm(cx), -geometry.mil_to_nm(cy)),
-            comp.rotation, comp.mirror, origin,
-        )
-        for (cx, cy) in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
-    ]
-    return (min(p[0] for p in pts), min(p[1] for p in pts),
-            max(p[0] for p in pts), max(p[1] for p in pts))
+    return geometry.world_box_from_extent(ext, comp.rotation, comp.mirror, origin)
 
 
 def _autoplace_ref_value(sym: SNode, symdef, unit: int, ctxpos: tuple[int, int],
@@ -771,6 +802,9 @@ def _place_symbol(
     sym = _make_symbol(lib_id, pos_nm, rotation, mirror, sym_uuid, pin_numbers, pin_uuids, unit)
     _append_top_idempotent(doc, sym, sym_uuid)
     instances.write_instance(doc, sym, designator, path)
+    # New pins invalidate the route_net corner-avoidance memo (ops run in
+    # order; a later route must see THIS part's pins).
+    ctx.pop("pin_tips", None)
     return sym_uuid
 
 
@@ -784,10 +818,13 @@ def _op_place_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
     rotation = int(op.get("rotation", 0))
     mirror = op.get("mirror", "none")
     unit = int(op.get("unit", 1))
-    pos = geometry.grid_snap_nm(
-        (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
-        _GRID_NM,
-    )
+    if isinstance(op.get("anchor"), str):
+        pos = _anchored_pos_nm(doc, ctx, op, "place_component")
+    else:
+        pos = geometry.grid_snap_nm(
+            (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
+            _GRID_NM,
+        )
     uid = _place_symbol(
         doc, ctx, sources, op["lib_id"], op["designator"],
         pos, rotation, mirror, idx, path, unit,
@@ -797,6 +834,11 @@ def _op_place_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
         _set_property(sym, "Value", str(op["value"]))
     if op.get("footprint") is not None and sym is not None:
         _set_property(sym, "Footprint", str(op["footprint"]))
+    if isinstance(op.get("group"), str) and sym is not None:
+        # Functional-group membership persists in the sheet as a hidden
+        # property, so `akcli groups` / `arrange --groups` can recover the
+        # module map without the original op-list.
+        _set_property(sym, "Group", op["group"])
     if sym is not None:
         _autoplace_ref_value(sym, _ctx_symdef(doc, ctx, op["lib_id"]), unit, pos, ctx)
     return [uid]
@@ -847,8 +889,21 @@ def _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="wire") -> list[str]:
     verts = op["vertices"]
     pts = [_resolve_endpoint(doc, ctx, v) for v in verts]
     root = _root_uuid(doc)
+    return _emit_wire_segments(doc, root, idx, pts, tag)
+
+
+def _emit_wire_segments(
+    doc: SNode, root: str | None, idx: int,
+    pts: list[tuple[int, int]], tag: str,
+) -> list[str]:
+    """One ``(wire ...)``/``(bus ...)`` node per consecutive point pair.
+
+    Shared by ``add_wire``/``add_bus`` and ``route_net`` — the uuid seed is
+    the segment's coordinates, so identical geometry replays byte-identically
+    regardless of which op produced it.
+    """
     created: list[str] = []
-    for n, (a, b) in enumerate(zip(pts, pts[1:])):
+    for a, b in zip(pts, pts[1:]):
         if a == b:
             continue
         uid = instances.deterministic_uuid(root, f"{tag}:{a[0]}:{a[1]}:{b[0]}:{b[1]}", idx)
@@ -860,6 +915,102 @@ def _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="wire") -> list[str]:
 
 def _op_add_bus(doc, op, idx, src_libs, path, ctx) -> list[str]:
     return _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="bus")
+
+
+def _pin_tip_set(doc: SNode, ctx: dict) -> set[tuple[int, int]]:
+    """Every placed pin's world tip, memoized per apply (invalidated on place).
+
+    route_net's corner rule consults this so an auto-picked L-corner never
+    lands ON a pin — a coincident corner would silently merge that pin's net
+    into the route (the trap docs teach by hand; the router avoids it by
+    construction).
+    """
+    tips = ctx.get("pin_tips")
+    if tips is None:
+        tips = set()
+        for sym in _placed_symbols(doc):
+            lib_id = _inst_lib_id(sym)
+            if not lib_id:
+                continue
+            try:
+                symdef = _ctx_symdef(doc, ctx, lib_id)
+            except AkcliError:
+                continue
+            unit = _symbol_unit(sym)
+            comp = _instance_component(sym, lib_id)
+            for pin in kicad_lib.unit_pins(symdef, unit):
+                tips.add(geometry.pin_world(symdef, comp, pin))
+        ctx["pin_tips"] = tips
+    return tips
+
+
+def _route_points(
+    a: tuple[int, int], b: tuple[int, int], style: str,
+    tips: set[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Deterministic orthogonal route from ``a`` to ``b``.
+
+    Coaxial endpoints -> one straight segment. Otherwise an L with corner
+    ``hv`` = (b.x, a.y) (run horizontal first) or ``vh`` = (a.x, b.y);
+    ``auto`` prefers ``hv``, swaps to ``vh`` when that corner sits on a pin
+    tip, and falls back to a 3-segment ``z`` (longer axis split at its
+    grid-snapped midpoint) when both corners are pins. Collision-aware
+    routing is explicitly out of scope — geometry stays advisory; the
+    connectivity gate and the NET_WIRE_CORNER_ON_PIN lint are the safety net.
+    """
+    if a[0] == b[0] or a[1] == b[1]:
+        return [a, b]
+    c_hv = (b[0], a[1])
+    c_vh = (a[0], b[1])
+    if style == "hv":
+        return [a, c_hv, b]
+    if style == "vh":
+        return [a, c_vh, b]
+    if style == "auto":
+        if c_hv not in tips:
+            return [a, c_hv, b]
+        if c_vh not in tips:
+            return [a, c_vh, b]
+    # style "z", or auto with both L-corners on pin tips
+    dx, dy = abs(b[0] - a[0]), abs(b[1] - a[1])
+    if dx >= dy:
+        mx = _snap_within_nm((a[0] + b[0]) // 2, a[0], b[0])
+        return [a, (mx, a[1]), (mx, b[1]), b]
+    my = _snap_within_nm((a[1] + b[1]) // 2, a[1], b[1])
+    return [a, (a[0], my), (b[0], my), b]
+
+
+def _op_route_net(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Orthogonal auto-route between two endpoints (+ optional mid-wire label).
+
+    The non-coaxial companion of the ``wire_net``/``connect_and_label``
+    pattern: resolves both endpoints (pin tips exact, points grid-snapped),
+    synthesizes the L/Z vertices via :func:`_route_points`, and emits the
+    segments through the shared wire path — same seeds, byte-identical
+    re-apply. ``label`` names the net once at the longest segment's midpoint,
+    snapped along the wire axis and clamped into the span.
+    """
+    a = _resolve_endpoint(doc, ctx, op["from"])
+    b = _resolve_endpoint(doc, ctx, op["to"])
+    if a == b:
+        fail("VERIFY_FAILED", "route_net: from and to resolve to the same point")
+    pts = _route_points(a, b, op.get("style", "auto"), _pin_tip_set(doc, ctx))
+    root = _root_uuid(doc)
+    created = _emit_wire_segments(doc, root, idx, pts, "wire")
+    if op.get("label"):
+        (ax, ay), (bx, by) = max(
+            zip(pts, pts[1:]),
+            key=lambda s: abs(s[1][0] - s[0][0]) + abs(s[1][1] - s[0][1]))
+        if ay == by:   # horizontal segment: snap along X, read along the wire
+            p = (_snap_within_nm((ax + bx) // 2, ax, bx), ay)
+            orientation = 0
+        else:
+            p = (ax, _snap_within_nm((ay + by) // 2, ay, by))
+            orientation = 90
+        created.append(_emit_net_label(
+            doc, root, idx, str(op["label"]), p, orientation,
+            op.get("scope", "local")))
+    return created
 
 
 def _op_add_junction(doc, op, idx, src_libs, path, ctx) -> list[str]:
@@ -923,10 +1074,19 @@ def _op_add_net_label(doc, op, idx, src_libs, path, ctx) -> list[str]:
         orientation = 0 if axis == "x" else 90
     else:
         orientation = 0
-    tag = {"local": "label", "global": "global_label", "hierarchical": "hierarchical_label"}[scope]
     root = _root_uuid(doc)
-    uid = instances.deterministic_uuid(root, f"{tag}:{op['name']}:{p[0]}:{p[1]}", idx)
-    children = [_atom(tag), _atom(_q(str(op["name"])))]
+    return [_emit_net_label(doc, root, idx, str(op["name"]), p, orientation, scope)]
+
+
+def _emit_net_label(
+    doc: SNode, root: str | None, idx: int, name: str,
+    p: tuple[int, int], orientation: int, scope: str,
+) -> str:
+    """Emit one net-label node (shared by ``add_net_label`` and ``route_net``)."""
+    tag = {"local": "label", "global": "global_label",
+           "hierarchical": "hierarchical_label"}[scope]
+    uid = instances.deterministic_uuid(root, f"{tag}:{name}:{p[0]}:{p[1]}", idx)
+    children = [_atom(tag), _atom(_q(name))]
     if tag != "label":
         children.append(_list(_atom("shape"), _atom("input")))
     children += [
@@ -935,7 +1095,7 @@ def _op_add_net_label(doc, op, idx, src_libs, path, ctx) -> list[str]:
         _uuid_node(uid),
     ]
     _append_top_idempotent(doc, _list(*children), uid)
-    return [uid]
+    return uid
 
 
 def _existing_pwr_ref_for_op(doc: SNode, root: str | None, op_index: int) -> str | None:
@@ -990,6 +1150,8 @@ def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
     sym = _symbol_by_uuid(doc, uid)
     if sym is not None:
         _set_property(sym, "Value", str(net_name))
+        if isinstance(op.get("group"), str):
+            _set_property(sym, "Group", op["group"])
         _autoplace_ref_value(sym, _ctx_symdef(doc, ctx, lib_id), 1, pos, ctx)
     return [uid]
 
@@ -1017,7 +1179,7 @@ def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     angle = float(op.get("angle", 0))
     root = _root_uuid(doc)
-    uid = instances.deterministic_uuid(root, f"text:{p[0]}:{p[1]}", idx)
+    uid = _annotation_uuid(root, "text", op, f"{p[0]}:{p[1]}", idx)
     node = _list(
         _atom("text"),
         _atom(_q(str(op["text"]))),
@@ -1027,6 +1189,177 @@ def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
     )
     _append_top_idempotent(doc, node, uid)
     return [uid]
+
+
+def _annotation_uuid(root: str | None, tag: str, op: dict,
+                     coord_seed: str, idx: int) -> str:
+    """Deterministic uuid for a graphic/annotation node.
+
+    Default seed follows the wire convention (coordinates + op index). An
+    optional ``key`` gives the node a STABLE handle independent of both its
+    coordinates and its position in the op-list: re-emitting the same key
+    replaces the node in place (``_append_top_idempotent``), which is what
+    lets a group frame refresh itself after parts move instead of piling up.
+    """
+    key = op.get("key")
+    if isinstance(key, str) and key:
+        return instances.deterministic_uuid(root, f"{tag}:key:{key}", 0)
+    return instances.deterministic_uuid(root, f"{tag}:{coord_seed}", idx)
+
+
+def _op_add_rectangle(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Emit a top-level graphic ``(rectangle ...)`` (SPEC §2.2, add_rectangle).
+
+    Pure annotation — netbuild never reads graphics, so a rectangle is
+    connectivity-neutral by construction. The primary customer is the
+    functional-group frame (``akcli groups --frame``), which draws a border
+    box around a module's bounding box; a ``key`` keeps the frame's uuid
+    stable so a refresh replaces it in place.
+    """
+    a = _point_nm(op["start"])
+    b = _point_nm(op["end"])
+    width_nm = geometry.mil_to_nm(float(op.get("stroke_width_mil", 0) or 0))
+    root = _root_uuid(doc)
+    uid = _annotation_uuid(root, "rectangle", op,
+                           f"{a[0]}:{a[1]}:{b[0]}:{b[1]}", idx)
+    node = _list(
+        _atom("rectangle"),
+        _list(_atom("start"), _mm(a[0]), _mm(a[1])),
+        _list(_atom("end"), _mm(b[0]), _mm(b[1])),
+        _stroke(width_nm),
+        _fill(str(op.get("fill", "none"))),
+        _uuid_node(uid),
+    )
+    _append_top_idempotent(doc, node, uid)
+    return [uid]
+
+
+def _op_add_text_box(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Emit a bordered note box ``(text_box ...)`` (SPEC §2.2, add_text_box).
+
+    Multi-line annotation with a border — module notes, design rationale,
+    bring-up instructions. Grammar is fixture-verified against a real KiCad
+    (tests/fixtures/kicad/text_box.kicad_sch, accepted by kicad-cli export +
+    ERC): content, exclude_from_sim, at, size, stroke, fill, effects
+    (left/top justified), uuid. ``at`` is the TOP-LEFT corner; connectivity-
+    neutral like every graphic; an optional ``key`` gives a stable handle.
+    """
+    p = _point_nm(op["at"])
+    size = op["size"]
+    size_nm = (geometry.mil_to_nm(float(size[0])),
+               geometry.mil_to_nm(float(size[1])))
+    angle = float(op.get("angle", 0))
+    root = _root_uuid(doc)
+    uid = _annotation_uuid(root, "text_box", op, f"{p[0]}:{p[1]}", idx)
+    node = _list(
+        _atom("text_box"),
+        _atom(_q(str(op["text"]))),
+        _list(_atom("exclude_from_sim"), _atom("no")),
+        _at(p, angle),
+        _list(_atom("size"), _mm(size_nm[0]), _mm(size_nm[1])),
+        _stroke(),
+        _fill(),
+        _effects(justify="left top"),
+        _uuid_node(uid),
+    )
+    _append_top_idempotent(doc, node, uid)
+    return [uid]
+
+
+_TITLE_BLOCK_SIMPLE = ("title", "date", "rev", "company")
+
+
+def _unescape_atom(s: str) -> str:
+    """Undo ``_q``'s quoting/escaping on a freshly-written atom token.
+
+    A PARSED atom's ``.value`` is already unquoted; a node this same apply
+    wrote carries the quoted token — normalize both for comparison.
+    """
+    if not (len(s) >= 2 and s[0] == '"' and s[-1] == '"'):
+        return s
+    body = s[1:-1]
+    out: list[str] = []
+    i = 0
+    esc = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"'}
+    while i < len(body):
+        if body[i] == "\\" and i + 1 < len(body):
+            out.append(esc.get(body[i + 1], "\\" + body[i + 1]))
+            i += 2
+        else:
+            out.append(body[i])
+            i += 1
+    return "".join(out)
+
+
+def _set_tb_field(tb: SNode, tag: str, comment_n: int | None, value: str) -> int:
+    """Set/replace one title_block child; 1 when the stored value changed."""
+    val_idx = 1 if comment_n is None else 2
+    for c in tb.children or []:
+        if not c.is_list or not (c.children or []) or c.children[0].value != tag:
+            continue
+        kids = c.children
+        if comment_n is not None and not (
+                len(kids) >= 2 and str(kids[1].value) == str(comment_n)):
+            continue
+        if len(kids) > val_idx and _unescape_atom(str(kids[val_idx].value)) == value:
+            return 0
+        atom = _atom(_q(value))
+        if len(kids) > val_idx:
+            kids[val_idx] = atom
+        else:
+            c.children.append(atom)                # type: ignore[union-attr]
+            c.ws.insert(len(c.ws) - 1, " ")        # type: ignore[union-attr]
+        return 1
+    kids = [_atom(tag)]
+    if comment_n is not None:
+        kids.append(_atom(str(comment_n)))
+    kids.append(_atom(_q(value)))
+    node = _list(*kids)
+    k = len(tb.children or [])
+    tb.children.append(node)                       # type: ignore[union-attr]
+    tb.ws.insert(k, _doc_child_indent(tb))         # type: ignore[union-attr]
+    return 1
+
+
+def _op_set_title_block(doc, op, idx, src_libs, path, ctx) -> list[str]:
+    """Set/replace title-block fields (SPEC §2.2, set_title_block).
+
+    Find-or-create of the single ``(title_block ...)`` node — inserted after
+    ``(paper ...)`` and before ``(lib_symbols ...)``, the position eeschema
+    expects (elsewhere triggers a repair prompt). The node has no uuid, so
+    idempotency is find-or-replace-by-tag; an op that changes nothing raises
+    a replay-safe note. Pure metadata: netbuild never reads the title block,
+    so the op is connectivity-neutral by construction.
+    """
+    tb = doc.find("title_block")
+    if tb is None:
+        tb = _list(_atom("title_block"))
+        pos = None
+        for i, c in enumerate(doc.children or []):
+            if c.is_list and (c.children or []) and c.children[0].value == "paper":
+                pos = i + 1
+                break
+        if pos is None:
+            for i, c in enumerate(doc.children or []):
+                if (c.is_list and (c.children or [])
+                        and c.children[0].value == "lib_symbols"):
+                    pos = i
+                    break
+        if pos is None:
+            pos = len(doc.children or [])
+        doc.children.insert(pos, tb)               # type: ignore[union-attr]
+        doc.ws.insert(pos, _doc_child_indent(doc))  # type: ignore[union-attr]
+    changed = 0
+    for fname in _TITLE_BLOCK_SIMPLE:
+        if op.get(fname) is not None:
+            changed += _set_tb_field(tb, fname, None, str(op[fname]))
+    for n in range(1, 10):
+        v = op.get(f"comment{n}")
+        if v is not None:
+            changed += _set_tb_field(tb, "comment", n, str(v))
+    if not changed:
+        raise _Note("title_block already matches (nothing to change)")
+    return []
 
 
 # --------------------------------------------------------------------------- #
@@ -1429,10 +1762,13 @@ def _op_move_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
     sym = next((s for s in _symbols_by_ref(doc, ref) if _symbol_unit(s) == unit), None)
     if sym is None:
         fail("VERIFY_FAILED", f"move_component: no placed instance of {ref!r} unit {unit}")
-    new = geometry.grid_snap_nm(
-        (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
-        _GRID_NM,
-    )
+    if isinstance(op.get("anchor"), str):
+        new = _anchored_pos_nm(doc, ctx, op, "move_component")
+    else:
+        new = geometry.grid_snap_nm(
+            (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
+            _GRID_NM,
+        )
     at = sym.find("at")
     old = _at_nm(at) if at is not None else (0, 0)
     rot = _fnum_at(at, 3)
@@ -1497,6 +1833,7 @@ _HANDLERS = {
     "set_component_parameters": _op_set_component_parameters,
     "add_wire": _op_add_wire,
     "add_bus": _op_add_bus,
+    "route_net": _op_route_net,
     "add_junction": _op_add_junction,
     "add_no_connect": _op_add_no_connect,
     "add_net_label": _op_add_net_label,
@@ -1505,7 +1842,10 @@ _HANDLERS = {
     "place_vcc": _op_place_power_port,
     "add_bus_entry": _op_add_bus_entry,
     "add_text": _op_add_text,
+    "add_rectangle": _op_add_rectangle,
+    "add_text_box": _op_add_text_box,
     "add_sheet": _op_add_sheet,
+    "set_title_block": _op_set_title_block,
     "delete_component": _op_delete_component,
     "delete_object": _op_delete_object,
     "move_component": _op_move_component,

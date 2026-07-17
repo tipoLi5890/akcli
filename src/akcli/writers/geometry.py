@@ -183,6 +183,28 @@ def pin_world(sym: SymbolDef, inst: Component, pin: Pin) -> tuple[int, int]:
     return transform_point(local, inst.rotation, inst.mirror, origin)
 
 
+def world_box_from_extent(
+    ext_mil: tuple[float, float, float, float],
+    rotation: int, mirror: str, origin_nm: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    """World (nm, +Y down) AABB of a lib-frame (mil, +Y up) body extent.
+
+    ``ext_mil`` is ``kicad_lib.body_extent_mil``'s ``(x0, y0, x1, y1)``. The
+    four corners get the library Y-flip, then the instance rotate-then-mirror
+    about ``origin_nm`` — the same chain as :func:`pin_world`, so a body box
+    computed here can never disagree with the pins' world coordinates. Shared
+    by the writer's property autoplacement, the layout lint and ``akcli bbox``
+    (one transform, no parity drift).
+    """
+    x0, y0, x1, y1 = ext_mil
+    pts = [
+        transform_point((mil_to_nm(cx), -mil_to_nm(cy)), rotation, mirror, origin_nm)
+        for (cx, cy) in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
+    ]
+    return (min(p[0] for p in pts), min(p[1] for p in pts),
+            max(p[0] for p in pts), max(p[1] for p in pts))
+
+
 def grid_snap_nm(
     pt: tuple[int, int], grid: int = DEFAULT_GRID_NM
 ) -> tuple[int, int]:

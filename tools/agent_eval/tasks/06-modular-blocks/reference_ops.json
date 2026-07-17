@@ -1,0 +1,64 @@
+{
+ "protocol_version": 1,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "groups": {
+  "DIVIDER": {"origin": [1000, 1000], "title": "Divider"},
+  "FILTER": {"origin": [3500, 1000], "title": "Filter"}
+ },
+ "ops": [
+  {
+   "op": "place_component",
+   "group": "DIVIDER",
+   "lib_id": "Device:R",
+   "designator": "R1",
+   "x_mil": 0,
+   "y_mil": 0,
+   "value": "5.1k"
+  },
+  {
+   "op": "place_component",
+   "group": "DIVIDER",
+   "lib_id": "Device:R",
+   "designator": "R2",
+   "x_mil": 0,
+   "y_mil": 600,
+   "value": "10k"
+  },
+  {
+   "op": "place_component",
+   "group": "FILTER",
+   "lib_id": "Device:C",
+   "designator": "C1",
+   "anchor": "R2.1",
+   "offset_mil": [2500, 0],
+   "value": "100n"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R1.1",
+   "name": "VIN"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R1.2",
+   "name": "VMID"
+  },
+  {
+   "op": "add_net_label",
+   "at": "R2.2",
+   "name": "GND"
+  },
+  {
+   "op": "add_net_label",
+   "at": "C1.2",
+   "name": "GND"
+  },
+  {
+   "op": "route_net",
+   "from": "R2.1",
+   "to": "C1.1",
+   "label": "VMID"
+  }
+ ]
+}

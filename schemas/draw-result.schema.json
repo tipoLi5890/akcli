@@ -48,6 +48,15 @@
         "risk": {"type": "boolean"},
         "lines": {"type": "array", "items": {"type": "string"}}
       }
+    },
+    "preview": {
+      "type": ["object", "null"],
+      "description": "Present when --render OUT.svg was given and the dry-apply succeeded: the WOULD-BE sheet rendered to SVG before anything touches the target. null when not requested or when the (non-fatal) render failed.",
+      "required": ["path", "bytes"],
+      "properties": {
+        "path": {"type": "string"},
+        "bytes": {"type": "integer", "minimum": 0}
+      }
     }
   }
 }

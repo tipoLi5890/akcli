@@ -31,6 +31,11 @@
       "altium": true,
       "notes": "orthogonal; may emit many segments"
     },
+    "route_net": {
+      "kicad": true,
+      "altium": false,
+      "notes": "deterministic L/Z auto-route, corner avoids pin tips; optional mid-wire label"
+    },
     "add_junction": {
       "kicad": true,
       "altium": true,
@@ -65,6 +70,21 @@
       "kicad": true,
       "altium": true,
       "notes": "free angle allowed"
+    },
+    "add_rectangle": {
+      "kicad": true,
+      "altium": false,
+      "notes": "top-level graphic (group frames); connectivity-neutral"
+    },
+    "add_text_box": {
+      "kicad": true,
+      "altium": false,
+      "notes": "bordered multi-line note box; connectivity-neutral"
+    },
+    "set_title_block": {
+      "kicad": true,
+      "altium": false,
+      "notes": "title/date/rev/company/comment1..9; >=1 field; connectivity-neutral"
     },
     "add_sheet": {
       "kicad": true,

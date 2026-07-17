@@ -30,7 +30,44 @@ All notable changes to `akcli` are documented here. The format is based on
 
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
-## [Unreleased]
+## [0.10.0] - 2026-07-17
+
+### Added — modular schematic authoring (functional groups & layout experience)
+- **Functional groups**: op-list envelope `groups` (`{NAME: {origin, title?, frame?}}`) + a
+  universal per-op `group` tag — grouped coordinates are GROUP-LOCAL (resolved by the new
+  `ops.resolve_groups` pre-pass after macro expansion; pin anchors never translate; macros
+  propagate the tag), membership persists as a hidden `Group` symbol property, new error codes
+  `GROUP_UNKNOWN` / `GROUP_NO_ORIGIN` with remediation.
+- **`akcli groups <sch>`** — list modules (members, world bbox, frame state) recovered from the
+  sheet; **`--frame --apply`** draws a border rectangle + title per group through the standard
+  draw pipeline, self-refreshing via stable annotation `key`s (re-run replaces, never
+  accumulates).
+- **`arrange --groups` (bare)** derives the module map from `Group` properties (a FILE still
+  overrides); **`--frames`** redraws borders after packing; net-preservation unchanged.
+- **Relative placement**: `place_component`/`move_component` (and `place_decoupling`/
+  `place_pullup`) take `anchor` (`"REF.PIN"` or bare `"REF"`) + world-frame `offset_mil` as the
+  position — resolved at execution time, so the anchor may be placed earlier in the same list.
+- **`place_array` macro** — N identical parts in a row/column at a fixed pitch with per-element
+  values; prefix collisions land in the standard duplicate lint.
+- **`route_net` core op** — deterministic orthogonal L/Z auto-route whose corner provably avoids
+  every placed pin tip (a coincident corner silently merges nets); optional mid-wire `label`.
+- **Graphics/annotation ops**: `add_rectangle` (border boxes) and `add_text_box` (bordered
+  multi-line notes, grammar fixture-verified against a real kicad-cli), both
+  connectivity-neutral with optional stable `key` handles; `add_text` gains `key` too.
+- **`set_title_block`** — edit title/date/rev/company/comment1..9 (previously write-once via
+  `new --title`); find-or-create keeps the node where eeschema expects it.
+- **`plan`/`draw --render OUT.svg`** — render the WOULD-BE sheet from the same temp dry-apply
+  the net diff uses (look before `--apply`); non-fatal by contract; `--json` gains
+  `preview: {path, bytes}`.
+- **`akcli bbox <lib_id>`** — body box + full box (body ∪ pin tips) per unit for a hypothetical
+  placement, via the new shared `geometry.world_box_from_extent` (autoplacement, layout lint and
+  bbox can no longer drift apart).
+- **`render --grid`** — world-mil gridlines + coordinate captions + origin cross;
+  `--render` previews always include it.
+- **Layout lints**: `LAYOUT_GROUP_OVERLAP` (WARNING), `LAYOUT_FRAME_STALE` (NOTE),
+  `LAYOUT_TEXTBOX_OVER_SYMBOL` (NOTE) — all advisory, fire-and-clear tested.
+- **Agent eval**: new `06-modular-blocks` task exercising groups + anchors + `route_net`
+  through the real rails (reference scores 1.0). Vocabulary now **22 ops + 10 macros**.
 
 ### Fixed
 - **Windows CI portability**: the PreToolUse draw guard now splits the `AKCLI` command with

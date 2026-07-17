@@ -103,7 +103,7 @@ returns `{created, target, paper, title, status}`.)
 
 ## (4) Op-list authoring patterns
 
-Document shape and the op vocabulary (18 ops + 9 macros) are defined in `schemas/ops.schema.json`
+Document shape and the op vocabulary (22 ops + 10 macros) are defined in `schemas/ops.schema.json`
 (see also `docs/op-list-authoring.md` and `akcli ops list`/`ops template <op>`); per-executor support is in
 `schemas/ops.capabilities.json`. Envelope: `{"protocol_version": 1,
 "target_format": "kicad", "ops": [...]}`. The validator is strict: unknown

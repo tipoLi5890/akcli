@@ -19,8 +19,10 @@ def test_protocol_version_and_op_names():
     assert "place_component" in ops.OP_NAMES
     assert "place_gnd" in ops.OP_NAMES and "place_vcc" in ops.OP_NAMES
     # 13 original + delete_component / delete_object / move_component +
-    # rename_net + add_sheet (hierarchical sheet authoring)
-    assert len(ops.OP_NAMES) == 18
+    # rename_net + add_sheet + graphics (add_rectangle/add_text_box) +
+    # route_net + set_title_block
+    # (graphic annotation / group frames)
+    assert len(ops.OP_NAMES) == 22
     assert {"delete_component", "delete_object", "move_component",
             "rename_net", "add_sheet"} <= ops.OP_NAMES
 

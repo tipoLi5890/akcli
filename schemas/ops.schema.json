@@ -9,6 +9,23 @@
     "target_format": { "enum": ["kicad", "altium"] },
     "target_file": { "type": "string" },
     "run_id": { "type": "string" },
+    "groups": {
+      "type": "object",
+      "description": "Functional groups (modules). Any op may carry an optional 'group': '<NAME>' tag referencing an entry here; the op's [x, y] coordinates are then GROUP-LOCAL and akcli translates them by the group's origin before validation (absolute = local + origin). Pin anchors ('REF.PIN', 'mid()') are position-independent and never translate. Membership is persisted on placed symbols as a hidden 'Group' property.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "origin": { "$ref": "#/$defs/point",
+                      "description": "[x_mil, y_mil] world origin of the group's local coordinate frame." },
+          "title": { "type": "string",
+                     "description": "Human-readable module title (used by group frames)." },
+          "frame": { "type": "boolean",
+                     "description": "Hint that this group wants a visual border frame (see `akcli groups frame`)." }
+        },
+        "required": ["origin"],
+        "additionalProperties": false
+      }
+    },
     "ops": { "type": "array", "items": { "$ref": "#/$defs/op" } }
   },
   "$defs": {
@@ -37,6 +54,11 @@
     "scope": { "enum": ["local", "global", "hierarchical"] },
     "strpair": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
     "strtriple": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 },
+    "anchorref": {
+      "type": "string",
+      "description": "Relative-placement anchor: 'REF.PIN' (that pin's world coordinate) or bare 'REF' (the component origin). Resolved by the writer against the live document, so the anchor may be placed earlier in the SAME op-list. offset_mil is a world-frame [dx, dy] from the anchor; the result grid-snaps. Exactly one of x_mil/y_mil or anchor per op.",
+      "pattern": "^[^.()\\s]+(\\.[^.()\\s]+)?$"
+    },
     "op": {
       "type": "object",
       "required": ["op"],
@@ -48,6 +70,8 @@
             "designator": { "type": "string" },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
+            "anchor": { "$ref": "#/$defs/anchorref" },
+            "offset_mil": { "$ref": "#/$defs/point" },
             "rotation": { "$ref": "#/$defs/rotation" },
             "mirror": { "$ref": "#/$defs/mirror" },
             "unit": { "type": "integer", "minimum": 1,
@@ -56,7 +80,8 @@
             "footprint": { "type": "string" },
             "symbol_source": { "type": "string" }
           },
-          "required": ["op", "lib_id", "designator", "x_mil", "y_mil"]
+          "required": ["op", "lib_id", "designator"],
+          "description": "Position is exactly one of x_mil+y_mil (absolute) or anchor (+offset_mil, relative to a placed pin/component)."
         },
         {
           "properties": {
@@ -75,7 +100,7 @@
               "type": "object",
               "description": "Selector alternative to uuid; must match exactly one object (0 = replay-safe note, >1 = error listing candidates).",
               "properties": {
-                "kind": { "enum": ["wire", "bus", "label", "global_label", "hierarchical_label", "junction", "no_connect", "text", "bus_entry"] },
+                "kind": { "enum": ["wire", "bus", "label", "global_label", "hierarchical_label", "junction", "no_connect", "text", "bus_entry", "rectangle", "text_box"] },
                 "name": { "type": "string" },
                 "at": { "$ref": "#/$defs/point" }
               },
@@ -95,11 +120,14 @@
             "designator": { "type": "string" },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
+            "anchor": { "$ref": "#/$defs/anchorref" },
+            "offset_mil": { "$ref": "#/$defs/point" },
             "unit": { "type": "integer", "minimum": 1 },
             "carry_labels": { "type": "boolean" },
             "carry_wires": { "type": "boolean" }
           },
-          "required": ["op", "designator", "x_mil", "y_mil"]
+          "required": ["op", "designator"],
+          "description": "Destination is exactly one of x_mil+y_mil (absolute) or anchor (+offset_mil)."
         },
         {
           "properties": {
@@ -127,6 +155,20 @@
             "vertices": { "type": "array", "items": { "$ref": "#/$defs/endpoint" }, "minItems": 2 }
           },
           "required": ["op", "vertices"]
+        },
+        {
+          "properties": {
+            "op": { "const": "route_net" },
+            "from": { "$ref": "#/$defs/endpoint" },
+            "to": { "$ref": "#/$defs/endpoint" },
+            "style": { "enum": ["auto", "hv", "vh", "z"],
+                       "description": "Corner style: hv = horizontal-first L, vh = vertical-first L, z = 3 segments; auto (default) picks hv unless its corner lands on a pin tip, then vh, then z." },
+            "label": { "type": "string",
+                       "description": "Optional net name placed ONCE at the longest segment's midpoint (the wire_net pattern for non-coaxial pins)." },
+            "scope": { "$ref": "#/$defs/scope" }
+          },
+          "required": ["op", "from", "to"],
+          "description": "Deterministic orthogonal auto-route between two endpoints: coaxial -> straight wire; otherwise an L/Z whose corner provably avoids every placed pin tip (a coincident corner would silently merge nets)."
         },
         {
           "properties": {
@@ -212,9 +254,34 @@
             "op": { "const": "add_text" },
             "text": { "type": "string" },
             "at": { "$ref": "#/$defs/point" },
-            "angle": { "type": "number" }
+            "angle": { "type": "number" },
+            "key": { "type": "string", "description": "Stable replacement handle: re-emitting the same key replaces this node in place regardless of coordinates or op-list position (group titles use group_title:<name>)." }
           },
           "required": ["op", "text", "at"]
+        },
+        {
+          "properties": {
+            "op": { "const": "add_rectangle" },
+            "start": { "$ref": "#/$defs/point", "description": "One corner [x, y] mil of the box." },
+            "end": { "$ref": "#/$defs/point", "description": "The opposite corner [x, y] mil." },
+            "stroke_width_mil": { "type": "number", "description": "Border line width in mils (0 = KiCad default)." },
+            "fill": { "enum": ["none", "outline", "background"] },
+            "key": { "type": "string", "description": "Stable replacement handle: re-emitting the same key replaces this node in place regardless of coordinates or op-list position (group frames use group_frame:<name>)." }
+          },
+          "required": ["op", "start", "end"],
+          "description": "Top-level graphic rectangle (pure annotation, connectivity-neutral): module borders / group frames. Delete by uuid or by kind (it has no `at` anchor, so the match `at` selector never hits a rectangle)."
+        },
+        {
+          "properties": {
+            "op": { "const": "add_text_box" },
+            "text": { "type": "string", "description": "Note content; \\n for line breaks." },
+            "at": { "$ref": "#/$defs/point", "description": "TOP-LEFT corner [x, y] mil of the box." },
+            "size": { "$ref": "#/$defs/point", "description": "[width, height] mil." },
+            "angle": { "type": "number" },
+            "key": { "type": "string", "description": "Stable replacement handle (see add_rectangle.key)." }
+          },
+          "required": ["op", "text", "at", "size"],
+          "description": "Bordered multi-line note box (module notes / design rationale). Pure annotation, connectivity-neutral; grammar fixture-verified against a real KiCad."
         },
         {
           "properties": {
@@ -244,6 +311,27 @@
         },
         {
           "properties": {
+            "op": { "const": "set_title_block" },
+            "title": { "type": "string" },
+            "date": { "type": "string" },
+            "rev": { "type": "string" },
+            "company": { "type": "string" },
+            "comment1": { "type": "string" },
+            "comment2": { "type": "string" },
+            "comment3": { "type": "string" },
+            "comment4": { "type": "string" },
+            "comment5": { "type": "string" },
+            "comment6": { "type": "string" },
+            "comment7": { "type": "string" },
+            "comment8": { "type": "string" },
+            "comment9": { "type": "string" }
+          },
+          "required": ["op"],
+          "minProperties": 2,
+          "description": "Set/replace title-block fields (at least one required). Find-or-create keeps the node where eeschema expects it (after paper, before lib_symbols); connectivity-neutral; unchanged values replay as a no-op note."
+        },
+        {
+          "properties": {
             "op": { "const": "place_divider" },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
@@ -262,26 +350,32 @@
             "op": { "const": "place_decoupling" },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
+            "anchor": { "$ref": "#/$defs/anchorref" },
+            "offset_mil": { "$ref": "#/$defs/point" },
             "power_net": { "type": "string" },
             "designator": { "type": "string" },
             "value": { "type": "string" },
             "gnd_net": { "type": "string" },
             "lib_id": { "type": "string" }
           },
-          "required": ["op", "x_mil", "y_mil", "power_net"]
+          "required": ["op", "power_net"],
+          "description": "Macro: one bypass cap + rail/gnd labels on its pins. Position is exactly one of x_mil+y_mil or anchor (+offset_mil) — e.g. anchor 'U1.VCC' drops the cap next to the pin it decouples."
         },
         {
           "properties": {
             "op": { "const": "place_pullup" },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
+            "anchor": { "$ref": "#/$defs/anchorref" },
+            "offset_mil": { "$ref": "#/$defs/point" },
             "net": { "type": "string" },
             "rail_net": { "type": "string" },
             "designator": { "type": "string" },
             "value": { "type": "string" },
             "lib_id": { "type": "string" }
           },
-          "required": ["op", "x_mil", "y_mil", "net", "rail_net"]
+          "required": ["op", "net", "rail_net"],
+          "description": "Macro: one pull-up/-down resistor + labels. Position is exactly one of x_mil+y_mil or anchor (+offset_mil)."
         },
         {
           "properties": {
@@ -326,6 +420,26 @@
             "spacing_mil": { "type": "number" }
           },
           "required": ["op", "x_mil", "y_mil", "in_net", "out_net"]
+        },
+        {
+          "properties": {
+            "op": { "const": "place_array" },
+            "lib_id": { "type": "string" },
+            "designator_prefix": { "type": "string" },
+            "count": { "type": "integer", "minimum": 1, "maximum": 200 },
+            "x_mil": { "type": "number" },
+            "y_mil": { "type": "number" },
+            "start_index": { "type": "integer", "minimum": 0 },
+            "pitch_mil": { "type": "number" },
+            "direction": { "enum": ["right", "down", "left", "up"] },
+            "value": { "type": "string" },
+            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1,
+                        "description": "Per-element values; length must equal count (checked at expansion)." },
+            "rotation": { "$ref": "#/$defs/rotation" },
+            "footprint": { "type": "string" }
+          },
+          "required": ["op", "lib_id", "designator_prefix", "count", "x_mil", "y_mil"],
+          "description": "Macro: N identical parts in a row/column at a fixed pitch, named <prefix><start_index>.. — placement sugar; labels/wiring stay explicit."
         },
         {
           "properties": {

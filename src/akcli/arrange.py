@@ -106,6 +106,28 @@ def _collect(root: sexpr.SNode) -> tuple[list[SymInfo], set[tuple[float, float]]
     return syms, anchors
 
 
+def groups_from_properties(path: str | Path) -> dict[str, list[str]]:
+    """``{group: [refdes, ...]}`` recovered from the hidden ``Group`` property.
+
+    The sheet itself is the group map: components placed with a ``group`` tag
+    carry the property, so ``arrange --groups`` (bare, no file) can re-pack
+    the modules without the original op-list. Power satellites (``#`` refs)
+    are skipped — they ride their host bundle anyway.
+    """
+    root = sexpr.parse(Path(path).read_text(encoding="utf-8", errors="replace"))
+    out: dict[str, list[str]] = {}
+    for sym in _krd._placed_symbols(root):
+        props = _krd._props(sym)
+        gname = props.get("Group")
+        ref = props.get("Reference")
+        if not gname or not ref or ref.startswith("#"):
+            continue
+        members = out.setdefault(gname, [])
+        if ref not in members:
+            members.append(ref)
+    return dict(sorted(out.items()))
+
+
 def _pad(b: _Box, m: float) -> _Box:
     return _Box(b.x0 - m, b.y0 - m, b.x1 + m, b.y1 + m, b.name, b.at)
 

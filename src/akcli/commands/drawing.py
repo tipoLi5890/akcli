@@ -171,7 +171,17 @@ def _cmd_arrange_groups(args: argparse.Namespace, target) -> int:
     connectivity and REFUSES to write on any net change (with .bak + undo).
     """
     from .. import arrange as arrmod
-    groups = _load_groups_file(args.groups)
+    if args.groups == "@properties":
+        # bare --groups: the sheet itself is the map (hidden Group property,
+        # written by grouped ops — see resolve_groups / `akcli groups`)
+        groups = arrmod.groups_from_properties(target)
+        if not groups:
+            raise _ExitWith(
+                EXIT["USAGE"],
+                "ERROR: no 'Group' symbol properties on this sheet; pass a "
+                "--groups FILE or place components with a group tag first")
+    else:
+        groups = _load_groups_file(args.groups)
     result = arrmod.plan_groups(
         target, groups,
         margin=getattr(args, "margin", None) or arrmod.GROUP_MARGIN_MIL,
@@ -215,9 +225,13 @@ def _cmd_arrange_groups(args: argparse.Namespace, target) -> int:
                     "applied" if code == EXIT["OK"] else "refused",
                     op_count=len(moves),
                     backup=(f"{target.name}.bak" if code == EXIT["OK"] else None))
+    frames_refreshed = 0
+    if code == EXIT["OK"] and getattr(args, "frames", False):
+        frames_refreshed = _refresh_frames(args, target, cfg)
     if args.json:
         _emit(_dumps(_stamp({
             **base, "applied": code == EXIT["OK"],
+            "frames_refreshed": frames_refreshed,
             "connectivity": [
                 {"code": f.code, "severity": f.severity.value, "message": f.message}
                 for f in findings],
@@ -225,11 +239,41 @@ def _cmd_arrange_groups(args: argparse.Namespace, target) -> int:
         return (EXIT["FINDINGS"] if unplaced else EXIT["OK"]) \
             if code == EXIT["OK"] else code
     if code == EXIT["OK"]:
-        _emit(f"arrange --groups: applied {len(moves)} move(s) to {target.name}")
+        _emit(f"arrange --groups: applied {len(moves)} move(s) to {target.name}"
+              + (f" — refreshed {frames_refreshed} frame(s)"
+                 if frames_refreshed else ""))
         return EXIT["FINDINGS"] if unplaced else EXIT["OK"]
     _emit("status: REFUSED — the re-layout would change connectivity "
           "(nothing written); see the findings above")
     return code
+
+
+def _refresh_frames(args: argparse.Namespace, target, cfg) -> int:
+    """Redraw every group frame after a re-layout (``arrange --groups --frames``).
+
+    Keyed frame uuids replace stale borders in place. Applied on top of the
+    arrange write with no extra backup rotation, so a single ``akcli undo``
+    reverts the arrange together with its frame refresh. Returns the number
+    of frames drawn (0 = nothing to frame / refresh refused).
+    """
+    from ..groupframe import plan_frames
+    from ..writers import kicad as kwriter
+    ops_list = plan_frames(target)
+    if not ops_list:
+        return 0
+    oplist = {"protocol_version": 1, "target_format": "kicad",
+              "target_file": target.name, "ops": ops_list}
+    findings: list = []
+    results = kwriter.apply(oplist, str(target), apply=True,
+                            sources=_draw_symbol_sources(args, cfg),
+                            verify_out=findings, backup_dir=None,
+                            allow_open=bool(getattr(args, "allow_open", False)))
+    if _draw_exit(results, findings) != EXIT["OK"]:
+        sys.stderr.write("WARNING: frame refresh failed; frames left unchanged\n")
+        return 0
+    from .. import journal as _journal
+    _journal.record(target, "groups-frame", "applied", op_count=len(ops_list))
+    return len(ops_list) // 2
 
 
 def _bak_name(name: str, level: int) -> str:
@@ -593,6 +637,7 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         try:
             oplist = opsmod.load_oplist(opsfile)
             oplist = opsmod.expand_macros(oplist)
+            oplist = opsmod.resolve_groups(oplist)
         except AkcliError as exc:
             errors.append({"op_index": None, "code": exc.code,
                            "message": exc.message or str(exc)})
@@ -658,7 +703,7 @@ def _ops_sha256(ops_path: str | None) -> str | None:
 
 
 def _draw_result_payload(*, applied: bool, status: str, ops: list[dict],
-                         connectivity: list, net_diff) -> dict:
+                         connectivity: list, net_diff, preview=None) -> dict:
     """The ONE author of the plan/draw ``--json`` payload.
 
     Every plan/draw exit path (normal run AND structural op-list refusal)
@@ -675,7 +720,34 @@ def _draw_result_payload(*, applied: bool, status: str, ops: list[dict],
             for f in connectivity
         ],
         "net_diff": net_diff,
+        "preview": preview,
     }
+
+
+def _render_preview(tmp_path, out_path) -> dict | None:
+    """Render the dry-applied temp copy to ``out_path`` (SVG).
+
+    The agent's look-before-apply channel: ``plan/draw --render OUT.svg``
+    shows the WOULD-BE sheet without touching the target. Non-fatal by
+    policy — a broken preview must never block a valid draw (same contract
+    as "net diff unavailable"), so any failure is a stderr warning + ``None``.
+    """
+    try:
+        from pathlib import Path
+        from .. import render_svg
+        from ..readers import kicad as kreader
+        sch = kreader.read_sch(str(tmp_path))
+        prims = kreader.read_primitives(str(tmp_path))
+        # previews are agent-facing: always include the coordinate grid so
+        # the next op-list's numbers can be read straight off the image
+        svg = render_svg.render(sch, prims, grid=True)
+        out = Path(out_path)
+        out.write_text(svg, encoding="utf-8")
+        return {"path": str(out), "bytes": len(svg.encode("utf-8"))}
+    except Exception as e:  # noqa: BLE001 — advisory surface, never fatal
+        sys.stderr.write(
+            f"WARNING: preview render unavailable: {type(e).__name__}: {e}\n")
+        return None
 
 
 def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
@@ -684,14 +756,17 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
     if not getattr(args, "ops", None):
         raise _ExitWith(EXIT["USAGE"], "ERROR: missing --ops <oplist.json>")
 
-    from ..ops import expand_macros, load_oplist, validate_oplist
+    from ..ops import expand_macros, load_oplist, resolve_groups, validate_oplist
     from ..writers import kicad as kwriter
 
-    # FileNotFound / malformed-JSON / bad-macro failures raise AkcliError and
-    # surface via cli.main — which renders them as a machine-readable
-    # {"error": {...}} envelope under --json (never a bare non-JSON stdout).
+    # FileNotFound / malformed-JSON / bad-macro / bad-group failures raise
+    # AkcliError and surface via cli.main — which renders them as a
+    # machine-readable {"error": {...}} envelope under --json (never a bare
+    # non-JSON stdout). Order matters: macros expand first (propagating each
+    # op's `group` tag), then group-local coordinates resolve to absolute.
     oplist = load_oplist(args.ops)
     oplist = expand_macros(oplist)
+    oplist = resolve_groups(oplist)
     errs = validate_oplist(oplist)
     if errs:
         if args.json:
@@ -723,11 +798,16 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
     # to a temp copy and compare netlists, so both dry-run and apply report the
     # net effect BEFORE the target is touched. When the diff cannot be computed
     # at all, --strict-nets fails CLOSED (a silently skipped gate is no gate).
+    # The SAME temp dry-apply also feeds the --render preview (one apply, two
+    # consumers) — with --no-net-diff the preview still gets its own dry-apply.
+    want_diff = not getattr(args, "no_net_diff", False) or strict
+    render_out = getattr(args, "render", None)
     net_lines = None
     net_risk = False
     net_equiv = True
     net_diff_err = None
-    if not getattr(args, "no_net_diff", False) or strict:
+    preview = None
+    if want_diff or render_out:
         from ..netdiff import diff as net_diff
         from ..netdiff import format_summary as net_summary
         from ..netdiff import has_risk as net_has_risk
@@ -737,15 +817,18 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         # the copy lives NEXT TO the target (never a TemporaryDirectory): a
         # hierarchical root must still resolve its child sheets on read-back
         tmp = target.parent / f".{target.name}.netdiff.{os.getpid()}.tmp"
+        dry_ok = False
+        had_exc = False
         try:
-            before_nets = kreader.read_sch(str(target)).nets
+            before_nets = kreader.read_sch(str(target)).nets if want_diff else None
             shutil.copy2(target, tmp)
             tmp_findings: list = []
             tmp_results = kwriter.apply(oplist, str(tmp), apply=True,
                                         sources=sources,
                                         verify_out=tmp_findings,
                                         backup_dir=None)
-            if _draw_exit(tmp_results, tmp_findings) == EXIT["OK"]:
+            dry_ok = _draw_exit(tmp_results, tmp_findings) == EXIT["OK"]
+            if want_diff and dry_ok:
                 after_nets = kreader.read_sch(str(tmp)).nets
                 nd = net_diff(before_nets, after_nets)
                 net_lines = net_summary(nd)      # [] iff nd.equivalent
@@ -755,8 +838,22 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
             # it, and the real apply refuses on its own (nothing is written),
             # so a "(none)" net diff here would be misleading
         except Exception as e:                   # noqa: BLE001
-            net_diff_err = f"{type(e).__name__}: {e}"
+            had_exc = True
+            if want_diff:
+                net_diff_err = f"{type(e).__name__}: {e}"
+            else:                                # preview-only dry-apply failed
+                sys.stderr.write("WARNING: preview render unavailable: "
+                                 f"{type(e).__name__}: {e}\n")
         finally:
+            # preview renders INSIDE the temp's lifetime (only OUT.svg persists);
+            # a refused op-list leaves the temp pristine, so rendering it would
+            # show the before-state as if it were the plan — skip it honestly.
+            if render_out and dry_ok:
+                preview = _render_preview(tmp, render_out)
+            elif render_out and not had_exc:
+                sys.stderr.write(
+                    "WARNING: preview skipped (op-list did not dry-apply "
+                    "cleanly; fix the errors below)\n")
             try:
                 tmp.unlink()
             except OSError:
@@ -832,7 +929,8 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
             connectivity=findings,
             net_diff=None if (net_lines is None or not show_diff) else {
                 "equivalent": net_equiv, "risk": net_risk, "lines": net_lines,
-            })))
+            },
+            preview=preview)))
     else:
         _emit(_draw_results_text(results, findings))
         if show_diff and net_lines is not None:
@@ -841,6 +939,8 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
                 _emit("  (none)")
             for ln in net_lines:
                 _emit(f"  {ln}")
+        if preview is not None:
+            _emit(f"preview: {preview['path']} ({preview['bytes']} bytes)")
         _emit(status_line)
 
     from .. import journal as _journal
@@ -873,9 +973,15 @@ def register(sub, common) -> None:
     p.add_argument("path", nargs="?", help="the .kicad_sch to arrange")
     p.add_argument("--apply", action="store_true",
                    help="write the moves (default: preview only)")
-    p.add_argument("--groups", metavar="FILE",
+    p.add_argument("--groups", metavar="FILE", nargs="?", const="@properties",
                    help="relocate functional blocks: a TOML/JSON map of "
-                        "group-name -> [refdes, ...] (net-preserving rigid moves)")
+                        "group-name -> [refdes, ...] (net-preserving rigid "
+                        "moves). Bare --groups derives the map from the "
+                        "sheet's hidden Group properties")
+    p.add_argument("--frames", action="store_true",
+                   help="with --groups: redraw each group's border frame + "
+                        "title after packing (keyed uuids replace stale "
+                        "frames in place)")
     p.add_argument("--group-gap", dest="group_gap", type=float, metavar="MIL",
                    help="vertical channel between groups (default 1200)")
     p.add_argument("--row-width", dest="row_width", type=float, metavar="MIL",
@@ -946,6 +1052,9 @@ def register(sub, common) -> None:
                    help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
     p.add_argument("--no-net-diff", action="store_true",
                    help="skip the before/after net connectivity diff")
+    p.add_argument("--render", metavar="OUT.svg",
+                   help="render the WOULD-BE sheet (dry-applied to a temp "
+                        "copy) to an SVG preview — look before you --apply")
     p.set_defaults(handler=_cmd_plan)
 
     p = sub.add_parser("draw", parents=[common],
@@ -970,4 +1079,7 @@ def register(sub, common) -> None:
     p.add_argument("--no-erc", dest="no_erc", action="store_true",
                    help="skip the advisory post-apply kicad-cli ERC run "
                         "(akcli's own connectivity gate still runs)")
+    p.add_argument("--render", metavar="OUT.svg",
+                   help="render the resulting sheet (dry-applied to a temp "
+                        "copy) to an SVG preview — look before you --apply")
     p.set_defaults(handler=_cmd_draw)

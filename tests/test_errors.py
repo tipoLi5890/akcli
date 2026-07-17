@@ -26,6 +26,8 @@ def test_required_codes_present():
         "SYMBOL_NOT_FOUND", "BAD_ANGLE", "NON_ORTHOGONAL_WIRE", "OFF_GRID",
         "OVERLAP", "VERIFY_FAILED", "OP_UNSUPPORTED", "HIERARCHICAL_UNSUPPORTED",
         "PROTOCOL_MISMATCH", "TARGET_LOCKED", "PATH_OUTSIDE_ROOT",
+        # functional groups (envelope `groups` + per-op `group` tag)
+        "GROUP_UNKNOWN", "GROUP_NO_ORIGIN",
         "KICAD_CLI_TIMEOUT", "KICAD_CLI_MISSING", "BAD_CONFIG",
         # binary-fetch integrity codes
         "BINFETCH_DOWNLOAD", "BINFETCH_CHECKSUM",

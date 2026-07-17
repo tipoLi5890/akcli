@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akcli"
-version = "0.9.0"
+version = "0.10.0"
 description = "AI-native KiCad schematic/PCB design agent: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc — no EDA install required."
 requires-python = ">=3.11"
 readme = "README.md"

@@ -32,6 +32,9 @@ LAYOUT_COINCIDENT_TEXT = "LAYOUT_COINCIDENT_TEXT"  # two texts share one anchor
 LAYOUT_POWER_ON_PIN = "LAYOUT_POWER_ON_PIN"        # power symbol anchored on a pin tip
 LAYOUT_LABEL_OVER_WIRE = "LAYOUT_LABEL_OVER_WIRE"  # label text crosses an unrelated wire
 LAYOUT_WIRE_THROUGH_SYMBOL = "LAYOUT_WIRE_THROUGH_SYMBOL"  # wire crosses a symbol body
+LAYOUT_GROUP_OVERLAP = "LAYOUT_GROUP_OVERLAP"      # two functional groups' extents intersect
+LAYOUT_FRAME_STALE = "LAYOUT_FRAME_STALE"          # a group frame no longer contains its members
+LAYOUT_TEXTBOX_OVER_SYMBOL = "LAYOUT_TEXTBOX_OVER_SYMBOL"  # note box drawn over a part
 
 # Text metrics (mil). KiCad default field/label text is 1.27 mm = 50 mil tall;
 # the stroke font advances roughly 0.9 * height per character. A global label
@@ -175,6 +178,7 @@ def run(path: str | Path) -> list[Finding]:
     sym_pin_nums: list[dict[tuple[float, float], str]] = []  # keyed tip -> pin number
     sym_power: list[bool] = []          # per symbol, is a (power) symbol
     sym_kind: list[str] = []            # short symbol name ("PWR_FLAG", "+3V3", "R")
+    sym_group: list[str | None] = []    # functional group (hidden Group property)
     sym_has_body: list[bool] = []       # body box is real graphics, not pin fallback
     port_pins: dict[tuple[float, float], str] = {}   # power-symbol pin tip -> ref
     raw = _krd._raw_lib_nodes(root)
@@ -222,6 +226,7 @@ def run(path: str | Path) -> list[Finding]:
         })
         sym_power.append(_krd._is_power(lib_id, raw))
         sym_kind.append(props.get("Value") or lib_id.split(":")[-1])
+        sym_group.append(props.get("Group"))
 
         if sym_power[-1]:
             for q in pin_world:
@@ -394,5 +399,89 @@ def run(path: str | Path) -> list[Finding]:
                 pos=pt,
                 anchors=[anchor("label", t, pt) for t in texts],
             ))
+
+    # ---- note boxes over parts (readability, advisory) --------------------- #
+    for c in root.children or []:
+        if (not c.is_list or not (c.children or [])
+                or c.children[0].value != "text_box"):
+            continue
+        at = c.find("at")
+        size = c.find("size")
+        if at is None or size is None:
+            continue
+        tx, ty = _mil(at, 1), _mil(at, 2)
+        tw, th = _mil(size, 1), _mil(size, 2)
+        tbox = _Box(min(tx, tx + tw), min(ty, ty + th),
+                    max(tx, tx + tw), max(ty, ty + th), "text_box", (tx, ty))
+        for i in range(n):
+            if sym_has_body[i] and _overlaps(tbox, sym_boxes[i]):
+                findings.append(Finding(
+                    LAYOUT_TEXTBOX_OVER_SYMBOL, Severity.NOTE,
+                    f"a text_box at {_fmt((tx, ty))} covers symbol "
+                    f"{sym_boxes[i].name} — move the note box clear of the "
+                    "part so both stay readable",
+                    refs=[sym_boxes[i].name],
+                    pos=(tx, ty),
+                ))
+
+    # ---- functional-group lints (advisory, like everything above) --------- #
+    group_union: dict[str, _Box] = {}
+    for i in range(n):
+        g = sym_group[i]
+        if not g:
+            continue
+        b = sym_full_boxes[i]
+        u = group_union.get(g)
+        group_union[g] = b if u is None else _Box(
+            min(u.x0, b.x0), min(u.y0, b.y0),
+            max(u.x1, b.x1), max(u.y1, b.y1), g, u.at)
+    gnames = sorted(group_union)
+    for a_i in range(len(gnames)):
+        for b_i in range(a_i + 1, len(gnames)):
+            ga, gb = gnames[a_i], gnames[b_i]
+            if _overlaps(group_union[ga], group_union[gb]):
+                ua, ub = group_union[ga], group_union[gb]
+                findings.append(Finding(
+                    LAYOUT_GROUP_OVERLAP, Severity.WARNING,
+                    f"functional groups {ga!r} and {gb!r} overlap "
+                    f"({_fmt((ua.x0, ua.y0))}-{_fmt((ua.x1, ua.y1))} vs "
+                    f"{_fmt((ub.x0, ub.y0))}-{_fmt((ub.x1, ub.y1))}) — "
+                    "re-pack with `akcli arrange --groups` or move one "
+                    "module's origin",
+                    refs=[ga, gb],
+                    pos=(ua.x0, ua.y0),
+                ))
+    if group_union:
+        from ..groupframe import frame_uuid
+        from ..writers.kicad import _root_uuid
+        root_uuid = _root_uuid(root)
+        expect = {frame_uuid(root_uuid, g): g for g in group_union}
+        for c in root.children or []:
+            if (not c.is_list or not (c.children or [])
+                    or c.children[0].value != "rectangle"):
+                continue
+            un = c.find("uuid")
+            uid = (str(un.children[1].value)
+                   if un is not None and len(un.children or []) >= 2 else "")
+            g = expect.get(uid)
+            if g is None:
+                continue
+            st, en = c.find("start"), c.find("end")
+            if st is None or en is None:
+                continue
+            rx0, ry0 = _mil(st, 1), _mil(st, 2)
+            rx1, ry1 = _mil(en, 1), _mil(en, 2)
+            rx0, rx1 = min(rx0, rx1), max(rx0, rx1)
+            ry0, ry1 = min(ry0, ry1), max(ry0, ry1)
+            u = group_union[g]
+            if u.x0 < rx0 or u.y0 < ry0 or u.x1 > rx1 or u.y1 > ry1:
+                findings.append(Finding(
+                    LAYOUT_FRAME_STALE, Severity.NOTE,
+                    f"group frame for {g!r} no longer contains all its "
+                    "members (parts moved since it was drawn) — refresh with "
+                    "`akcli groups <sch> --frame --apply`",
+                    refs=[g],
+                    pos=(rx0, ry0),
+                ))
 
     return findings

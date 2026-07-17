@@ -259,7 +259,7 @@ class NetPrimitives:
   of two exactly axis-aligned pins, snapped to grid along the wire axis (misaligned pins fail
   with `NON_ORTHOGONAL_WIRE`).
 
-### 2.2 Op vocabulary (13 LOCKED ops + 3 additive v0.2 ops + 1 additive v0.4 op + 1 additive hierarchical op)
+### 2.2 Op vocabulary (13 LOCKED ops + 3 additive v0.2 ops + 1 additive v0.4 op + 1 additive hierarchical op + 4 additive v0.10 ops)
 
 | op | purpose | KiCad writer | Altium live |
 |---|---|---|---|
@@ -279,6 +279,22 @@ class NetPrimitives:
 | `move_component` | move one instance (designator + optional `unit`); its properties travel along, wires are NOT stretched | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
 | `rename_net` (v0.4) | rewrite matching label texts + power-port net Values (`scope` restricts kind; 0 matches = replay-safe note) | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
 | `add_sheet` | hierarchical child-sheet reference: `(sheet …)` with `Sheetname`/`Sheetfile`, deterministic uuids, edge-computed sheet pins (`pins:[{name, type, side, offset_mil}]`); `at`=top-left mils; wires attach to a sheet pin BY COORDINATE (no `Sheet.Pin` endpoint); cross-sheet net = parent sheet-pin ↔ child same-name hierarchical label. Additive, `protocol_version` unchanged | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `route_net` (v0.10) | deterministic orthogonal auto-route between two endpoints: coaxial → straight; else L (`style: auto\|hv\|vh\|z`) whose corner avoids every placed pin tip (a coincident corner would silently merge nets), z fallback; optional `label` names the net once at the longest segment's midpoint | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `add_rectangle` (v0.10) | top-level graphic border box (`start`/`end`, optional `stroke_width_mil`/`fill`/`key`); connectivity-neutral; the group-frame primitive | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `add_text_box` (v0.10) | bordered multi-line note box (`text`/`at`=top-left/`size`, optional `angle`/`key`); grammar fixture-verified against a real kicad-cli | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+| `set_title_block` (v0.10) | find-or-create edit of `(title_block)` fields (`title/date/rev/company/comment1..9`, ≥1 required); node kept after `paper`, before `lib_symbols`; unchanged values = replay-safe note | ✅ | ⚠️ `OP_UNSUPPORTED` v1 |
+
+**Relative placement (v0.10, additive).** `place_component`/`move_component` (and the
+single-part macros `place_decoupling`/`place_pullup`) accept `anchor` (+`offset_mil`) as the
+position instead of `x_mil`/`y_mil` (exactly one form per op): `"REF.PIN"` = that pin's world
+tip, bare `"REF"` = the component origin, resolved at execution time against the live document
+(the anchor may be placed earlier in the same list); `offset_mil` is world-frame, the result
+grid-snaps.
+
+**Stable annotation keys (v0.10).** `add_rectangle`/`add_text`/`add_text_box` accept `key`: the
+uuid derives from the key alone (not coordinates, not op index), so re-emitting the same key
+replaces the node in place — group frames (`group_frame:<name>`/`group_title:<name>`) refresh
+instead of accumulating.
 
 `place_component` additionally takes an optional `"unit": N` (multi-unit parts: each unit is
 its own placed instance sharing the designator; `"REF.PIN"` resolves against the instance whose
@@ -306,9 +322,19 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
   "target_format": "kicad",
   "target_file": "board.kicad_sch",
   "run_id": "uuid-or-stable-key",
+  "groups": { "POWER": { "origin": [1000, 1000], "title": "Power supply" } },
   "ops": [ { "op": "place_component", "...": "..." } ]
 }
 ```
+
+**Functional groups (v0.10, additive).** The optional `groups` map declares modules:
+`{NAME: {origin: [x_mil, y_mil], title?, frame?}}`. Any op may carry `"group": "<NAME>"`; its
+`[x, y]` coordinates are then GROUP-LOCAL and resolve to absolute (`local + origin`) in a pure
+pre-pass after macro expansion and before validation (pin anchors never translate; macros
+propagate the tag onto expanded children). Membership persists on placed symbols as a hidden
+`Group` property — recoverable by `akcli groups`, `arrange --groups` (bare) and the layout
+lints. Errors: `GROUP_UNKNOWN` (op tags an undeclared group), `GROUP_NO_ORIGIN` (declared group
+without an origin), both exit 6.
 
 ### 2.4 Per-op result object (LOCKED)
 
