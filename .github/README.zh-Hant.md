@@ -311,7 +311,7 @@ codex plugin install akcli@akcli
 
 ## 路線圖
 
-目前已提供（v0.10.x）：KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet`、net-diff
+目前已提供（v0.11.x）：KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet`、net-diff
 安全護欄、`new`／多層 `undo`，輸出經 KiCad 自身 netlister 仲裁）、net 保留的 **`arrange
 --groups`**／`move_component` carry re-layout、advisory 的 **`akcli review`** 引擎
 （跨 signal／validation／pcb／emc／domain／gerber 偵測家族的 analyze、datasheet **facts**

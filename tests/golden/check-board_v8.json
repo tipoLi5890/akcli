@@ -45,6 +45,72 @@
       ]
     },
     {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R1 (10k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R1"
+      ],
+      "pos": [
+        2000.0,
+        2000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R1",
+          "pos": [
+            2000.0,
+            2000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R2 (10k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R2"
+      ],
+      "pos": [
+        2000.0,
+        2500.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R2",
+          "pos": [
+            2000.0,
+            2500.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "C1 (100n) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "C1"
+      ],
+      "pos": [
+        2600.0,
+        2500.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C1",
+          "pos": [
+            2600.0,
+            2500.0
+          ]
+        }
+      ]
+    },
+    {
       "code": "NET_WIRE_CORNER_ON_PIN",
       "severity": "note",
       "message": "a wire corners exactly on R2 pin 1 tip at (2000,2350) — the pin joins BOTH legs of the corner; if that is unintended, move the corner off the pin",

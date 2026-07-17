@@ -19,10 +19,27 @@ from ._shared import (
     _dumps,
     _emit,
     _ExitWith,
+    _load_cfg,
     _load_schematic,
     _require_path,
     _stamp,
 )
+
+
+def _bom_cfg(args, path) -> tuple[tuple[str, ...], int, float]:
+    """(no_part_prefixes, default_min_stock, extended_fee) from [bom]."""
+    from ..bom_policy import DEFAULT_NO_PART_PREFIXES
+    try:
+        cfg = _load_cfg(args, path)
+    except Exception:                       # noqa: BLE001 — config is optional
+        return DEFAULT_NO_PART_PREFIXES, 1, 3.0
+    tbl = getattr(cfg, "bom", None) or {}
+    classes = tbl.get("classes") or {}
+    np = classes.get("no_part")
+    prefixes = (tuple(str(x) for x in np) if isinstance(np, list) and np
+                else DEFAULT_NO_PART_PREFIXES)
+    return (prefixes, int(tbl.get("min_stock", 1)),
+            float(tbl.get("extended_fee", 3.0)))
 
 
 # Catalog depth for an *exact*-MPN resolution (datasheet --resolve-mpn / the
@@ -149,24 +166,53 @@ def _easyeda_lines(info) -> list[str]:
 
 
 def _cmd_jlc_bom(args: argparse.Namespace) -> int:
-    """`jlc bom <sch>` — BOM lines vs the JLCPCB catalog (stock/price/cost)."""
-    path = _require_path(args.path)
+    """`jlc bom <sch>...` — BOM lines vs the JLCPCB catalog (stock/price/cost)."""
+    raw_paths = getattr(args, "path", None) or []
+    if isinstance(raw_paths, str):
+        raw_paths = [raw_paths]
+    if not raw_paths:
+        raise _ExitWith(EXIT["USAGE"], "ERROR: missing input schematic")
+    paths = [_require_path(p) for p in raw_paths]
+    path = paths[0]
+    multi = len(paths) > 1
     sch = _load_schematic(path)
     from ..parts import bom_jlc, search as parts_search  # lazy: networked
     qty = max(1, getattr(args, "qty", 1) or 1)
+    prefixes, cfg_min_stock, extended_fee = _bom_cfg(args, path)
+    min_stock = getattr(args, "min_stock", None) or cfg_min_stock
+    offline = bool(getattr(args, "offline", False))
     fix_all = getattr(args, "fix_all", False)
     do_fix = getattr(args, "fix", False) or fix_all
     do_suggest = do_fix or getattr(args, "suggest", False)
+    if offline and do_suggest:
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: --suggest/--fix need the live catalog; "
+                        "drop --offline")
+    if offline:
+        sys.stderr.write("OFFLINE (degraded): catalog answers come from the "
+                         "HTTP cache only; misses are 'unverified'\n")
     if do_fix and not str(path).lower().endswith(".kicad_sch"):
         raise _ExitWith(EXIT["USAGE"],
                         "ERROR: --fix writes the schematic; it needs a .kicad_sch")
+    if multi and do_fix:
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: --fix works on one schematic at a time")
     cache = parts_search.default_cache_dir()
     try:
-        lines = bom_jlc.check(
-            sch, min_stock=getattr(args, "min_stock", 1) or 1, qty=qty,
-            cache_dir=cache)
-        if do_suggest:
-            bom_jlc.suggest_parts(lines, cache_dir=cache)
+        if multi:
+            boards = [(p.stem, _load_schematic(p)) for p in paths]
+            lines = bom_jlc.check_multi(
+                boards, min_stock=min_stock, qty=qty,
+                cache_dir=cache, no_part_prefixes=prefixes, offline=offline)
+        else:
+            lines = bom_jlc.check(
+                sch, min_stock=min_stock, qty=qty,
+                cache_dir=cache, no_part_prefixes=prefixes, offline=offline)
+        want_alts = getattr(args, "alternates", False)
+        if do_suggest or want_alts:
+            bom_jlc.suggest_parts(lines, cache_dir=cache,
+                                  include_risk=want_alts)
+            bom_jlc.basic_alternatives(lines, cache_dir=cache)
     except parts_search.JlcNetworkError as exc:
         sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
         return EXIT["TOOL_MISSING"]
@@ -213,11 +259,28 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
             sch = _load_schematic(path)
             try:
                 lines = bom_jlc.check(
-                    sch, min_stock=getattr(args, "min_stock", 1) or 1,
-                    qty=qty, cache_dir=cache)
+                    sch, min_stock=min_stock,
+                    qty=qty, cache_dir=cache, no_part_prefixes=prefixes)
             except parts_search.JlcNetworkError as exc:
                 sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
                 return EXIT["TOOL_MISSING"]
+    drift: list[dict] | None = None
+    lock_out = getattr(args, "lock", None)
+    if lock_out:
+        import json as _json
+        lock_doc = bom_jlc.make_lock(lines, qty=qty)
+        Path(lock_out).write_text(_json.dumps(lock_doc, indent=1) + "\n",
+                                  encoding="utf-8", newline="\n")
+        sys.stderr.write(f"wrote BOM lockfile: {lock_out}\n")
+    against = getattr(args, "against_lock", None)
+    if against:
+        import json as _json
+        try:
+            lock_doc = _json.loads(Path(against).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise _ExitWith(EXIT["USAGE"], f"ERROR: cannot read lockfile: {exc}")
+        drift = bom_jlc.diff_lock(lines, lock_doc)
+
     csv_out = getattr(args, "csv", None)
     if csv_out:
         text = bom_jlc.to_jlc_csv(lines)
@@ -226,12 +289,23 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
         else:
             Path(csv_out).write_text(text, encoding="utf-8", newline="\n")
             sys.stderr.write(f"wrote JLCPCB BOM CSV: {csv_out}\n")
-    agg = bom_jlc.totals(lines)
-    if csv_out == "-":
+    agg = bom_jlc.totals(lines, extended_fee=extended_fee)
+    md_out = getattr(args, "md", None)
+    if md_out:
+        text = bom_jlc.to_markdown(lines, agg, qty=qty)
+        if md_out == "-":
+            _emit(text)
+        else:
+            Path(md_out).write_text(text, encoding="utf-8", newline="\n")
+            sys.stderr.write(f"wrote BOM markdown report: {md_out}\n")
+    if csv_out == "-" or md_out == "-":
         pass
     elif args.json:
-        _emit(_dumps(_stamp({"qty": qty, "lines": [ln.to_dict() for ln in lines],
-                             "totals": agg})))
+        payload = {"qty": qty, "lines": [ln.to_dict() for ln in lines],
+                   "totals": agg}
+        if drift is not None:
+            payload["lock_drift"] = drift
+        _emit(_dumps(_stamp(payload)))
     else:
         rows = [("REFS", "QTY", "NEED", "VALUE", "PART", "STATUS",
                  "STOCK", "UNIT", "EXT", "B", "NOTE")]
@@ -257,9 +331,28 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
         _emit("\n".join(
             "  ".join(c.ljust(w) for c, w in zip(r[:-1], widths)) + "  " + r[-1]
             for r in rows).rstrip())
+        cls = agg.get("classes") or {}
         summary = (f"{agg['lines']} line(s): {agg['ok']} ok, "
                    f"{agg['problems']} problem(s), "
                    f"{agg['no_part_id']} without a part id")
+        if agg.get("mismatches"):
+            summary += f" · {agg['mismatches']} C-number MISMATCH(ES)"
+        extra = [f"{cls.get(k, 0)} {k}" for k in ("dnp", "external", "no-part")
+                 if cls.get(k)]
+        if extra:
+            summary += " · " + ", ".join(extra)
+        if agg.get("fitted_coverage") is not None:
+            summary += f" · fitted coverage {agg['fitted_coverage']:.0%}"
+        if offline and agg.get("unverified"):
+            summary += f" · {agg['unverified']} unverified (offline)"
+        if agg.get("extended_lines"):
+            summary += (f" · {agg['basic_lines']}B/{agg['extended_lines']}E "
+                        f"lines (ext. feeder fees ≈ ${agg['extended_fee_est']:.2f})")
+        if drift is not None:
+            for d in drift:
+                _emit(f"  DRIFT {d['kind']}: {d['refs']} — {d['detail']}")
+            _emit(f"lock drift: {len(drift)} change(s) vs {against}"
+                  if drift else f"lock drift: none vs {against}")
         if agg["priced_lines"]:
             summary += (f" · est. parts cost ${agg['est_cost']:.2f} "
                         f"for {qty} board(s)"
@@ -267,7 +360,7 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
                            if agg["priced_lines"] < agg["lines"] else ""))
         sys.stdout.flush()          # keep the table above the stderr summary
         sys.stderr.write(summary + "\n")
-    if agg["problems"] and not getattr(args, "exit_zero", False):
+    if (agg["problems"] or drift) and not getattr(args, "exit_zero", False):
         return EXIT["FINDINGS"]
     return EXIT["OK"]
 
@@ -621,12 +714,33 @@ def register(sub, common) -> None:
         "bom", parents=[common],
         help="check a schematic's BOM against the JLCPCB catalog "
              "(stock/price via LCSC/MPN parameters; networked)")
-    pb.add_argument("path", nargs="?", help="input schematic (.kicad_sch/.SchDoc)")
+    pb.add_argument("path", nargs="*",
+                    help="input schematic(s) (.kicad_sch/.SchDoc); several "
+                         "boards merge into ONE cart (same C-number lines "
+                         "combine, tier pricing at the merged quantity, "
+                         "refs prefixed board:ref)")
     pb.add_argument("--qty", type=int, default=1, metavar="N",
                     help="number of boards: stock and tier pricing are "
                          "evaluated at N x per-line quantity (default: 1)")
-    pb.add_argument("--min-stock", type=int, default=1, metavar="N",
-                    help="flag lines with stock below N (default: 1)")
+    pb.add_argument("--min-stock", type=int, default=None, metavar="N",
+                    help="flag lines with stock below N (default: 1, or "
+                         "akcli.toml [bom].min_stock)")
+    pb.add_argument("--alternates", action="store_true",
+                    help="propose second sources for at-risk lines too "
+                         "(low-stock/out-of-stock/EOL), and note Basic "
+                         "swaps for Extended passives (advisory)")
+    pb.add_argument("--offline", action="store_true",
+                    help="answer from the HTTP cache only: cache misses "
+                         "degrade to 'unverified' lines instead of exit 7; "
+                         "the run is bannered as degraded")
+    pb.add_argument("--lock", metavar="OUT.json",
+                    help="freeze this check as a BOM lockfile (resolved "
+                         "C-numbers, prices, stock, Basic/Extended) for "
+                         "reproducible orders")
+    pb.add_argument("--against-lock", dest="against_lock", metavar="LOCK.json",
+                    help="diff this check against a lockfile: price drift, "
+                         "stock below need, vanished parts (EOL suspects), "
+                         "status/id changes")
     pb.add_argument("--suggest", action="store_true",
                     help="search the catalog for not-found / no-part-id "
                          "lines (match by value + package) and print the "
@@ -644,6 +758,9 @@ def register(sub, common) -> None:
                     help="also write a JLCPCB upload BOM CSV (Comment,"
                          "Designator,Footprint,LCSC Part #); '-' writes "
                          "to stdout")
+    pb.add_argument("--md", metavar="OUT.md", nargs="?", const="-",
+                    help="write a Markdown BOM report (classification "
+                         "summary + full table); '-' or bare = stdout")
     pb.add_argument("--exit-zero", action="store_true",
                     help="always exit 0 (report mode)")
     pb.set_defaults(handler=_cmd_jlc_bom)

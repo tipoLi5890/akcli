@@ -203,6 +203,94 @@
           ]
         }
       ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "U2 (no value) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "U2"
+      ],
+      "pos": [
+        9000.0,
+        -10000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U2",
+          "pos": [
+            9000.0,
+            -10000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R7 (no value) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R7"
+      ],
+      "pos": [
+        21000.0,
+        -10000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R7",
+          "pos": [
+            21000.0,
+            -10000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "U3 (no value) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "U3"
+      ],
+      "pos": [
+        9000.0,
+        -20000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "U3",
+          "pos": [
+            9000.0,
+            -20000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R12 (no value) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R12"
+      ],
+      "pos": [
+        21000.0,
+        -20000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R12",
+          "pos": [
+            21000.0,
+            -20000.0
+          ]
+        }
+      ]
     }
   ]
 }

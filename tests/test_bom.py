@@ -65,7 +65,11 @@ def test_returns_list_of_findings():
 
 def test_clean_bom_has_no_findings():
     sch = _sch([_comp("R1"), _comp("R2"), _comp("C1")])
-    assert bom.run(sch) == []
+    got = bom.run(sch)
+    # hygiene-clean: nothing above NOTE; the per-line missing-order-id NOTEs
+    # (BOM_MISSING_PART_ID, P1-5) are the only output for a param-less board
+    assert all(f.code == "BOM_MISSING_PART_ID" for f in got)
+    assert len(got) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +295,10 @@ def test_power_symbols_are_not_bom_items():
         _comp("#FLG01", value=None, footprint=None),
         _comp("R1"),
     ])
-    assert bom.run(sch) == []
+    got = bom.run(sch)
+    # only R1's missing-order-id NOTE — the virtual parts stay invisible
+    assert [f.code for f in got] == ["BOM_MISSING_PART_ID"]
+    assert got[0].refs == ["R1"]
 
 
 # ---------------------------------------------------------------------------

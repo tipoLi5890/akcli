@@ -309,7 +309,7 @@ codex plugin install akcli@akcli
 
 ## 路线图
 
-当前已提供（v0.10.x）：KiCad 写入/绘制（22 种 op + 10 种宏，含层次 `add_sheet`、net-diff
+当前已提供（v0.11.x）：KiCad 写入/绘制（22 种 op + 10 种宏，含层次 `add_sheet`、net-diff
 安全护栏、`new`/多级 `undo`，输出经 KiCad 自身 netlister 仲裁）、net 不变的 **`arrange --groups`**/
 `move_component` carry 式重新布局、一个顾问式的 **`akcli review`** 评审引擎（跨
 signal/validation/pcb/emc/domain/gerber 检测族分析，一份 datasheet **facts** 存储，

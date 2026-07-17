@@ -43,7 +43,7 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
         return power.run(sch, cfg)
     if name == "bom":
         from ..checks import bom
-        return bom.run(sch)
+        return bom.run(sch, cfg)
     if name == "layout":
         from ..checks import layout
         return layout.run(args.path)
@@ -108,12 +108,26 @@ def _cmd_check(args: argparse.Namespace) -> int:
         doc = contract_mod.load(contract_file)  # BAD_CONFIG/PROTOCOL_MISMATCH via main
         findings.extend(contract_mod.run(sch, doc))
 
-    findings, waived, demoted = _report.apply_waivers(findings, cfg.waivers)
+    waiver_detail: list[dict] = []
+    findings, waived, demoted = _report.apply_waivers(
+        findings, cfg.waivers, detail_out=waiver_detail)
 
     meta = _schematic_meta(sch)
     # Always surface waiver activity so a run cleaned only by waivers is never
     # mistaken for an intrinsically clean board.
     meta["config_waived"] = f"{waived} ({demoted} demoted)"
+    if waiver_detail:
+        # "config-waived: 1" alone was misread as a clean BOM on a real
+        # board — name every silenced finding and the waiver's reason.
+        meta["config_waived_detail"] = "; ".join(
+            f"{d['code']}[{','.join(d['refs']) or '*'}] {d['action']}"
+            + (f" ({d['reason']})" if d["reason"] else "")
+            for d in waiver_detail)
+        for d in waiver_detail:
+            sys.stderr.write(
+                f"waived: {d['code']} [{','.join(d['refs']) or '*'}] "
+                f"{d['action']}"
+                + (f" — {d['reason']}" if d["reason"] else "") + "\n")
     fmt = getattr(args, "format", None) or ("json" if args.json else "text")
     _emit(_report.render(findings, fmt, meta, source=str(path)))
     # one exit policy for every findings-emitting command (see _shared)
@@ -126,10 +140,25 @@ def _cmd_diff(args: argparse.Namespace) -> int:
     from ..checks import diff as diffmod
     rep = diffmod.run(a, b)
     findings = rep.findings()
+    bom_changes = None
+    if getattr(args, "bom", False):
+        from ..parts import bom_jlc          # lazy; offline (no lookups)
+        bom_changes = bom_jlc.bom_diff(a, b)
     if args.json:
-        _emit(_dumps(rep.export()))
+        doc = rep.export()
+        if bom_changes is not None:
+            doc["bom_changes"] = bom_changes
+        _emit(_dumps(doc))
     else:
         _emit(_report.render(findings, "text", {}))
+        if bom_changes is not None:
+            _emit(f"BOM changes ({len(bom_changes)}):")
+            if not bom_changes:
+                _emit("  (none)")
+            for d in bom_changes:
+                _emit(f"  {d['kind']}: {d['refs']} — {d['detail']}")
+            _emit("  (cost delta: --lock each revision and diff the "
+                  "lockfiles with --against-lock)")
     return _findings_exit(findings, args)
 
 
@@ -450,6 +479,10 @@ def register(sub, common) -> None:
     p.set_defaults(handler=_cmd_check)
 
     p = sub.add_parser("diff", parents=[common], help="net-level diff of two schematics")
+    p.add_argument("--bom", action="store_true",
+                   help="also report the BOM line-level delta (added/removed "
+                        "lines, value/id edits, fitted<->dnp class flips; "
+                        "offline)")
     p.add_argument("path", nargs="?", help="schematic A")
     p.add_argument("other", nargs="?", help="schematic B")
     _add_exit_policy_flags(p)

@@ -216,6 +216,10 @@ def _to_part(d: dict) -> Part:
         attrs["subcategory"] = d["subcategory"]
     if d.get("is_preferred") is not None:
         attrs["is_preferred"] = bool(d["is_preferred"])
+    for mk in ("manufacturer", "company", "brand"):
+        if d.get(mk):
+            attrs["manufacturer"] = str(d[mk])
+            break
     if tiers:
         attrs["price_tiers"] = tiers
     raw_specs = d.get("attributes")
@@ -449,6 +453,15 @@ def _fetch_json(url: str, *, opener: urllib.request.OpenerDirector, timeout: flo
 # --------------------------------------------------------------------------- #
 # public API
 # --------------------------------------------------------------------------- #
+class JlcOfflineMiss(JlcNetworkError):
+    """``offline=True`` and the request URL is not in the HTTP cache.
+
+    A subclass of :class:`JlcNetworkError` so un-aware callers still map it
+    to the network exit code; offline-aware callers (``jlc bom --offline``)
+    catch it FIRST and degrade the line to ``unverified`` instead of dying.
+    """
+
+
 def search(
     query: str,
     *,
@@ -458,6 +471,7 @@ def search(
     cache_dir: str | Path | None = None,
     cache_ttl: float | None = CACHE_TTL_SECONDS,
     sleep: SleepFn | None = None,
+    offline: bool = False,
 ) -> list[Part]:
     """Keyword-search jlcsearch and return up to ``limit`` :class:`Part` results.
 
@@ -468,14 +482,23 @@ def search(
     stale copy is served with a stderr warning — set ``AKCLI_JLC_CACHE_STALE=off``
     to fail hard instead. ``sleep`` is forwarded to the retrying transport.
     """
-    if opener is None:
-        opener = _default_opener()
     try:
         lim = max(1, int(limit))
     except (ValueError, TypeError):
         lim = DEFAULT_LIMIT
 
     url = _build_url({"search": query, "limit": lim})
+    if offline:
+        # cache-only: any age is acceptable (the caller opted out of
+        # freshness), a miss raises instead of touching the network
+        payload = _cache_read(cache_dir, url, None)
+        if payload is None:
+            raise JlcOfflineMiss(
+                f"offline: {query!r} not in the HTTP cache", kind="network")
+        parts = [_to_part(r) for r in _extract_rows(payload) if isinstance(r, dict)]
+        return parts[:lim]
+    if opener is None:
+        opener = _default_opener()
     payload = _cache_read(cache_dir, url, cache_ttl)
     if payload is None:
         try:
@@ -503,6 +526,7 @@ def get(
     cache_dir: str | Path | None = None,
     cache_ttl: float | None = CACHE_TTL_SECONDS,
     sleep: SleepFn | None = None,
+    offline: bool = False,
 ) -> Part | None:
     """Fetch one part by LCSC C-number (``"C7593"`` or ``"7593"``); ``None`` if absent."""
     digits = _lcsc_digits(lcsc_id)
@@ -516,6 +540,7 @@ def get(
         cache_dir=cache_dir,
         cache_ttl=cache_ttl,
         sleep=sleep,
+        offline=offline,
     )
     for p in results:
         if _lcsc_digits(p.lcsc) == digits:

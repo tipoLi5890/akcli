@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import re
 
+from .. import bom_policy
 from ..model import Component, Schematic
 from ..report import Finding, Severity, anchor
 
@@ -87,9 +88,19 @@ _PART_ID_PARAMS: tuple[str, ...] = (
 )
 
 # Below this MPN coverage a board is not sourceable as-is. Small sheets are
-# exempt — a 3-part test jig is not a BOM.
+# exempt — a 3-part test jig is not a BOM. Both knobs are project-tunable
+# via akcli.toml [bom] (coverage_floor / coverage_min_parts).
 _MPN_COVERAGE_FLOOR = 0.5
 _MPN_COVERAGE_MIN_PARTS = 10
+
+
+def _bom_prefixes(cfg: object) -> tuple[str, ...]:
+    tbl = getattr(cfg, "bom", None) or {}
+    classes = tbl.get("classes") or {}
+    np = classes.get("no_part")
+    if isinstance(np, list) and np:
+        return tuple(str(x) for x in np)
+    return bom_policy.DEFAULT_NO_PART_PREFIXES
 
 
 def _part_identity(comp: Component) -> str | None:
@@ -138,10 +149,46 @@ def _real_components(sch: Schematic) -> list[Component]:
             and not c.designator.lstrip().startswith("#")]
 
 
-def run(sch: Schematic) -> list[Finding]:
-    """Run BOM hygiene checks on ``sch`` and return findings (possibly empty)."""
+def run(sch: Schematic, cfg: object = None) -> list[Finding]:
+    """Run BOM hygiene checks on ``sch`` and return findings (possibly empty).
+
+    Components are first classified into the four BOM populations
+    (:func:`bom_policy.classify`): ``no-part`` (structural — ``in_bom=no``,
+    a TP/FID/MH-class refdes, or an explicit no-part sourcing) is excluded
+    from every check but counted; ``dnp`` keeps the structural checks and
+    skips the sourcing ones; ``external`` leaves the coverage denominator.
+    """
     findings: list[Finding] = []
-    comps = _real_components(sch)
+    prefixes = _bom_prefixes(cfg)
+    classes: dict[str, tuple[str, str]] = {}
+    excluded: dict[str, int] = {"no-part": 0, "dnp": 0, "external": 0}
+    comps = []
+    for c in _real_components(sch):
+        klass, note = bom_policy.classify(c, prefixes)
+        prior = classes.get(c.designator)
+        if prior is None:
+            classes[c.designator] = (klass, note)
+            if klass != "fitted":
+                excluded[klass] += 1
+        if klass == "no-part":
+            continue
+        comps.append(c)
+
+    def _class_of(desig: str) -> str:
+        return classes.get(desig, ("fitted", ""))[0]
+
+    if any(excluded.values()):
+        # never vacuously clean: exclusions are visible, not silent
+        findings.append(Finding(
+            code="BOM_CLASS_SUMMARY",
+            severity=Severity.INFO,
+            message=(
+                f"bom eligibility: {sum(1 for v in classes.values() if v[0] == 'fitted')} "
+                f"fitted, {excluded['dnp']} dnp, {excluded['external']} external, "
+                f"{excluded['no-part']} no-part (no-part excluded from checks)"
+            ),
+            refs=[],
+        ))
 
     # Group by designator, preserving first-seen order of the designators.
     groups: dict[str, list[Component]] = {}
@@ -239,7 +286,12 @@ def run(sch: Schematic) -> list[Finding]:
         )
 
     # --- missing value / footprint (per logical component) ----------------------
+    # dnp parts keep the structural checks above but skip the sourcing ones:
+    # nothing is bought for them, so a missing value/footprint/order id is
+    # not a sourcing hole.
     for desig, members in groups.items():
+        if _class_of(desig) == "dnp":
+            continue
         has_value = any(_clean(c.value) or _part_identity(c) for c in members)
         has_footprint = any(_clean(c.footprint) for c in members)
         pos = _pos(members[0])
@@ -266,25 +318,96 @@ def run(sch: Schematic) -> list[Finding]:
                 )
             )
 
+    # --- per-line missing order id (fitted only) ---------------------------------
+    # The aggregate coverage floor below hides individual holes (a mostly-
+    # covered board sails past the floor while individual parts stay
+    # unorderable) —
+    # each FITTED logical component without an explicit LCSC/MPN parameter
+    # gets its own NOTE.
+    for desig, members in groups.items():
+        if _class_of(desig) != "fitted":
+            continue
+        if any(bom_policy.order_id_of(c) for c in members):
+            continue
+        pos = _pos(members[0])
+        findings.append(
+            Finding(
+                code="BOM_MISSING_PART_ID",
+                severity=Severity.NOTE,
+                message=(
+                    f"{desig} ({_clean(members[0].value) or 'no value'}) has no "
+                    "LCSC/MPN parameter — not orderable as-is"
+                ),
+                refs=[desig],
+                pos=pos,
+                anchors=[anchor("component", desig, pos)],
+            )
+        )
+
+    # --- assembly-attribute consistency ------------------------------------------
+    for desig, members in groups.items():
+        c0 = members[0]
+        if _class_of(desig) == "dnp" and any(
+                bom_policy.order_id_of(c) for c in members):
+            findings.append(
+                Finding(
+                    code="BOM_DNP_HAS_ORDER_ID",
+                    severity=Severity.NOTE,
+                    message=(
+                        f"{desig} is marked DNP but carries an order id "
+                        f"({bom_policy.order_id_of(c0) or '?'}) — confirm the "
+                        "intent (stale id, or should it be fitted?)"
+                    ),
+                    refs=[desig],
+                    pos=_pos(c0),
+                )
+            )
+    for c in sch.components:
+        if (not c.in_bom and c.on_board and not c.dnp
+                and not c.undesignated
+                and _clean(c.designator)
+                and not c.designator.lstrip().startswith("#")
+                and not bom_policy.is_no_part_ref(c.designator, prefixes)):
+            findings.append(
+                Finding(
+                    code="BOM_CPL_INCONSISTENT",
+                    severity=Severity.NOTE,
+                    message=(
+                        f"{c.designator} is excluded from the BOM (in_bom=no) "
+                        "but placed on the board — assembly would need a part "
+                        "the BOM doesn't list; mark it DNP or a structural "
+                        "class if intended"
+                    ),
+                    refs=[c.designator],
+                    pos=_pos(c),
+                )
+            )
+
     # --- MPN sourcing coverage ---------------------------------------------------
-    # Coverage over LOGICAL components (multi-unit parts count once); a part
-    # counts as covered when any placement carries a part-number identity.
-    if len(groups) >= _MPN_COVERAGE_MIN_PARTS:
+    # Coverage over LOGICAL fitted components (multi-unit parts count once);
+    # a part counts as covered when any placement carries a part-number
+    # identity. dnp/external leave the denominator: nothing is sourced from
+    # the catalog for them.
+    bom_tbl = getattr(cfg, "bom", None) or {}
+    floor = float(bom_tbl.get("coverage_floor", _MPN_COVERAGE_FLOOR))
+    min_parts = int(bom_tbl.get("coverage_min_parts", _MPN_COVERAGE_MIN_PARTS))
+    fitted_groups = {d: m for d, m in groups.items() if _class_of(d) == "fitted"}
+    if len(fitted_groups) >= min_parts:
         covered = sum(
-            1 for members in groups.values()
+            1 for members in fitted_groups.values()
             if any(_part_identity(c) for c in members)
         )
-        cov = covered / len(groups)
-        if cov < _MPN_COVERAGE_FLOOR:
+        cov = covered / len(fitted_groups)
+        if cov < floor:
             findings.append(
                 Finding(
                     code="BOM_MPN_COVERAGE",
                     severity=Severity.WARNING,
                     message=(
-                        f"only {covered}/{len(groups)} components "
+                        f"only {covered}/{len(fitted_groups)} fitted components "
                         f"({cov:.0%}) carry a part-number identity "
                         f"(MPN/distributor field) -- below the "
-                        f"{_MPN_COVERAGE_FLOOR:.0%} sourcing floor, this BOM "
+                        f"{floor:.0%} sourcing floor, this BOM "
                         "cannot be ordered as-is; `akcli jlc bom --fix` can "
                         "fill LCSC parts"
                     ),

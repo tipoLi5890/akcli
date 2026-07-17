@@ -27,3 +27,14 @@ pinout_md = "hardware/docs/pinout.md"
 net    = "LED1_GPIO_RD"
 rule   = "driver_conflict"
 reason = "LED1 shares the charger's open-drain STAT output by design; FW reads it as input"
+
+# BOM policy: sourcing-coverage thresholds, stock floor, assembly economics
+# and the structural refdes classes that never carry an orderable part.
+[bom]
+coverage_floor = 0.5        # BOM_MPN_COVERAGE fires below this (fitted parts)
+coverage_min_parts = 10     # boards smaller than this skip the coverage check
+min_stock = 1               # `jlc bom` low-stock floor
+extended_fee = 3.0          # per-Extended-line feeder fee estimate (USD)
+
+[bom.classes]
+no_part = ["TP", "FID", "MH", "H", "LOGO"]

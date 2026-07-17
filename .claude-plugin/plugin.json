@@ -2,7 +2,7 @@
   "name": "akcli",
   "displayName": "akcli — AI-native KiCad design agent (+ Altium import)",
   "description": "AI-native KiCad design agent (zero-dependency Python CLI + Claude Code plugin): author and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source real parts and fetch datasheets, and import Altium .SchDoc/.SchLib/.PcbDoc — no Altium or KiCad install required.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "repository": "https://github.com/tipoLi5890/akcli",
   "homepage": "https://github.com/tipoLi5890/akcli",
   "license": "MIT",

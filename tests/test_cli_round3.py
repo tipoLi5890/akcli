@@ -289,10 +289,11 @@ def test_jlc_bom_csv_golden(tmp_path, capsys, monkeypatch):
     assert f"wrote JLCPCB BOM CSV: {out_csv}" in err
     # golden: resolved line carries its C-number, no-part-id lines stay blank
     assert out_csv.read_text(encoding="utf-8") == (
-        "Comment,Designator,Footprint,LCSC Part #\n"
-        "100n,C1,C_0402_1005Metric,\n"
-        "10k,R1,R_0402_1005Metric,C25744\n"
-        "10k,R2,R_0402_1005Metric,\n"
+        "No.,Quantity,Comment,Designator,Footprint,Value,"
+        "Manufacturer Part,Manufacturer,Supplier Part,Supplier,Note\n"
+        "1,1,100n,C1,C_0402_1005Metric,100n,,,,,\n"
+        "2,1,10k,R1,R_0402_1005Metric,10k,0402WGF1002TCE,,C25744,LCSC,\n"
+        "3,1,10k,R2,R_0402_1005Metric,10k,,,,,\n"
     )
 
 
@@ -304,7 +305,7 @@ def test_jlc_bom_csv_stdout_is_pure_csv(tmp_path, capsys, monkeypatch):
     assert main(["jlc", "bom", str(tgt), "--csv", "-",
                  "--exit-zero"]) == EXIT["OK"]
     out = capsys.readouterr().out
-    assert out.startswith("Comment,Designator,Footprint,LCSC Part #")
+    assert out.startswith("No.,Quantity,Comment,Designator,Footprint")
     assert "REFS" not in out                        # the table stays off stdout
 
 

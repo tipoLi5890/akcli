@@ -353,7 +353,7 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Roadmap
 
-Shipped today (v0.10.x): KiCad write/draw from an 22-op + 10-macro vocabulary (hierarchical
+Shipped today (v0.11.x): KiCad write/draw from an 22-op + 10-macro vocabulary (hierarchical
 `add_sheet`, net-diff safety rails, `new`/multi-level `undo`, output arbitrated against KiCad's own
 netlister), net-preserving **`arrange --groups`** / `move_component` carry re-layout, an advisory
 **`akcli review`** engine (analyze across signal/validation/pcb/emc/domain/gerber detector families,

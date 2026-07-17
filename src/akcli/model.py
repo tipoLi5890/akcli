@@ -99,6 +99,11 @@ class Component:
     parameters: dict[str, str] = field(default_factory=dict)
     pins: list[Pin] = field(default_factory=list)
     undesignated: bool = False  # True when designator was synthesized
+    # Assembly attributes (KiCad `(dnp yes)` / `(in_bom no)` / `(on_board no)`;
+    # readers that cannot know keep the defaults — never guess).
+    dnp: bool = False           # placed but not populated
+    in_bom: bool = True         # appears on the bill of materials
+    on_board: bool = True       # exported to the board (position/CPL files)
 
 
 @dataclass

@@ -16,8 +16,9 @@ from akcli.parts import bom_jlc
 from akcli.parts.search import JlcNetworkError, Part
 
 
-def _part(lcsc="C1", mpn="X", stock=1000, basic=False, preferred=False, price=0.01):
-    return Part(lcsc=lcsc, mpn=mpn, description="", package="0603",
+def _part(lcsc="C1", mpn="X", stock=1000, basic=False, preferred=False,
+          price=0.01, package="0603", description=""):
+    return Part(lcsc=lcsc, mpn=mpn, description=description, package=package,
                 stock=stock, price=price, basic=basic, datasheet=None,
                 category="R", attributes={"is_preferred": preferred})
 
@@ -131,8 +132,10 @@ def _write_sch(tmp_path, params_by_ref):
 
 def test_cli_exit_semantics(tmp_path, capsys, monkeypatch):
     from akcli.parts import search as parts_search
+    # the fixture's R1 wears an 0402 footprint — the catalog stub must agree,
+    # or the (new) reverse verification correctly flags BOM_LCSC_MISMATCH
     monkeypatch.setattr(parts_search, "get",
-                        lambda lcsc, **k: _part(lcsc, stock=777))
+                        lambda lcsc, **k: _part(lcsc, stock=777, package="0402"))
     monkeypatch.setattr(parts_search, "search", lambda q, **k: [])
     work = _write_sch(tmp_path, {"R1": {"LCSC Part": "C25804"}})
     capsys.readouterr()

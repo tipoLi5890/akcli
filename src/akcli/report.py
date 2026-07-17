@@ -139,7 +139,8 @@ _WAIVE_TARGET: dict[str, Severity] = {
 
 
 def apply_waivers(
-    findings: list[Finding], waivers: list[dict]
+    findings: list[Finding], waivers: list[dict],
+    detail_out: list[dict] | None = None,
 ) -> tuple[list[Finding], int, int]:
     """Apply config ``[[waiver]]`` entries uniformly to every finding.
 
@@ -148,6 +149,10 @@ def apply_waivers(
     downgraded (``severity = note|info``) rather than removed (``severity =
     off``). A finding's ``code``/``message``/``refs`` are never mutated, so SARIF
     ``partialFingerprints`` stay stable across a waiver's application.
+
+    ``detail_out``, when a list is supplied, receives one record per waived
+    finding (code, refs, action, reason) so reports can SHOW what a waiver
+    silenced — "config-waived: 1" alone reads as clean when it isn't.
     """
     if not waivers:
         return list(findings), 0, 0
@@ -160,6 +165,14 @@ def apply_waivers(
             continue
         target = _WAIVE_TARGET.get(str(w.get("severity", "off")).lower())
         waived += 1
+        if detail_out is not None:
+            detail_out.append({
+                "code": f.code,
+                "refs": list(f.refs or []),
+                "action": ("dropped" if target is None
+                           else f"demoted to {target.value}"),
+                "reason": str(w.get("reason") or ""),
+            })
         if target is None:            # severity: off -> drop
             continue
         demoted += 1

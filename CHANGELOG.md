@@ -30,7 +30,48 @@ All notable changes to `akcli` are documented here. The format is based on
 
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
-## [Unreleased]
+## [0.11.0] - 2026-07-17
+
+### Added — BOM completeness (safety, semantics, workflow, reporting)
+- **P0 safety**: `parts/value_parse.py` normalized R/C/L value parsing —
+  suggestion confidence is now strict numeric equality (cross-unit spellings
+  equal, dielectric conflicts downgrade, unparseable never "high"); the
+  historical wrong-part incidents (5.1k -> 1k, 2.2 µF -> 22 µF, TP -> SMPS IC)
+  are pinned as regressions. Structural refdes classes (TP/FID/MH/H/LOGO)
+  never enter the suggestion flow. Every explicit C-number is
+  **reverse-verified** against the schematic's value + package
+  (`BOM_LCSC_MISMATCH`; nothing comparable = honest `unverified`).
+- **P1 semantic model**: `model.Component` gains `dnp`/`in_bom`/`on_board`
+  (parsed from KiCad); `bom_policy.classify()` sorts every part into
+  fitted / dnp / external / no-part (Sourcing/BOM_Sourcing parameters,
+  `akcli.toml [bom]` classes) across `check --bom`, `jlc bom`, CSV and
+  totals. New findings: `BOM_CLASS_SUMMARY` (INFO), per-line
+  `BOM_MISSING_PART_ID` (NOTE, fitted only — aggregate coverage no longer
+  hides individual holes), `BOM_DNP_HAS_ORDER_ID`, `BOM_CPL_INCONSISTENT`.
+  Coverage uses the fitted denominator; thresholds live in `[bom]`.
+- **P2 workflow**: `--lock`/`--against-lock` BOM lockfiles (price/stock/EOL/
+  id drift, exit 1); multi-board carts (`jlc bom main.kicad_sch
+  aux.kicad_sch` — merged tier pricing, per-board breakdowns); `LCSC_ALT`
+  second sources with automatic verified fallback + `--alternates`;
+  assembly economics (Basic/Extended counts, feeder-fee estimate,
+  Basic-swap advisories); `--offline` cache-only mode (misses degrade to
+  `unverified`, never exit 7); `akcli diff a b --bom` per-component BOM
+  delta.
+- **P3 reporting**: waivers are transparent (`waived: CODE [refs] — reason`
+  per silenced finding + `config_waived_detail`); `jlc bom --md` Markdown
+  report; order CSV upgraded to the JLC-EDA template (No./Quantity/Comment/
+  Designator/Footprint/Value/Manufacturer Part/Manufacturer/Supplier
+  Part/Supplier + Note) with EVERY class kept and annotated (user decision:
+  no silent filtering; consigned parts labeled; dead C-numbers still never
+  leak).
+
+### Changed
+- `check --bom` on boards with structural/dnp/external parts now reports
+  differently by design: no-part components are excluded (counted in
+  `BOM_CLASS_SUMMARY`), dnp parts skip the sourcing checks, and param-less
+  fitted parts each get a `BOM_MISSING_PART_ID` NOTE (goldens regenerated).
+- `jlc bom` CSV header/columns changed to the JLC-EDA template (was the
+  4-column `Comment,Designator,Footprint,LCSC Part #`).
 
 ### Fixed
 - **Windows CI (the 0.10.0 release run)**: text written with `Path.write_text`

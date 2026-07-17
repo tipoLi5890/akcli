@@ -29,8 +29,13 @@ DEFAULT_GRID_NM: int = 50 * units.NM_PER_MIL
 
 # Allowed top-level tables/keys and their allowed sub-keys.
 _TOP_KEYS: frozenset[str] = frozenset(
-    {"project", "rail", "paths", "erc_waiver", "waiver", "check"}
+    {"project", "rail", "paths", "erc_waiver", "waiver", "check", "bom"}
 )
+_BOM_KEYS: frozenset[str] = frozenset(
+    {"coverage_floor", "coverage_min_parts", "min_stock", "classes",
+     "extended_fee"}
+)
+_BOM_CLASSES_KEYS: frozenset[str] = frozenset({"no_part"})
 _CHECK_KEYS: frozenset[str] = frozenset(
     {"pairs", "pair_suffixes", "bus_min_family"}
 )
@@ -63,6 +68,7 @@ class Config:
     grid_nm: int = DEFAULT_GRID_NM
     backup_depth: int | None = None    # [project] backup_depth; None = writer default
     check: dict = field(default_factory=dict)  # [check] table (pairs, pair_suffixes, ...)
+    bom: dict = field(default_factory=dict)    # [bom] table (coverage_floor, classes, ...)
 
 
 def _parse_grid(value: object) -> int:
@@ -204,6 +210,36 @@ def load_config(path: Path | str) -> Config:
         if not isinstance(bmf, int) or isinstance(bmf, bool) or bmf < 2:
             fail("BAD_CONFIG", "[check].bus_min_family must be an integer >= 2")
 
+    bom_tbl = data.get("bom", {})
+    if not isinstance(bom_tbl, dict):
+        fail("BAD_CONFIG", "[bom] must be a table")
+    _reject_unknown(bom_tbl, _BOM_KEYS, "[bom]")
+    if "coverage_floor" in bom_tbl:
+        cf = bom_tbl["coverage_floor"]
+        if isinstance(cf, bool) or not isinstance(cf, (int, float)) \
+                or not (0.0 <= float(cf) <= 1.0):
+            fail("BAD_CONFIG", "[bom].coverage_floor must be a number in 0..1")
+    for key in ("coverage_min_parts", "min_stock"):
+        if key in bom_tbl:
+            v = bom_tbl[key]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                fail("BAD_CONFIG", f"[bom].{key} must be an integer >= 0")
+    if "extended_fee" in bom_tbl:
+        v = bom_tbl["extended_fee"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+            fail("BAD_CONFIG", "[bom].extended_fee must be a number >= 0")
+    if "classes" in bom_tbl:
+        cls = bom_tbl["classes"]
+        if not isinstance(cls, dict):
+            fail("BAD_CONFIG", "[bom.classes] must be a table")
+        _reject_unknown(cls, _BOM_CLASSES_KEYS, "[bom.classes]")
+        np = cls.get("no_part")
+        if np is not None and (
+                not isinstance(np, list)
+                or not all(isinstance(x, str) and x for x in np)):
+            fail("BAD_CONFIG",
+                 "[bom.classes].no_part must be a list of refdes prefixes")
+
     return Config(
         mcu_designator=project.get("mcu_designator"),
         rails=rails,
@@ -214,4 +250,5 @@ def load_config(path: Path | str) -> Config:
         grid_nm=grid_nm,
         backup_depth=backup_depth,
         check=dict(check_tbl),
+        bom=dict(bom_tbl),
     )

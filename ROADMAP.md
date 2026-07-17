@@ -12,7 +12,7 @@ Windows live bridge into a running Altium instance) — not a symmetric conversi
 repositioning (2026-07) reshaped this roadmap: the Altium-interop items that earlier milestones
 treated as release-critical now live in a demand-driven optional track.
 
-## Where we are (v0.10.0)
+## Where we are (v0.11.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 

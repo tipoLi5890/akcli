@@ -321,7 +321,7 @@ Engineering design review: advisory findings with explicit confidence and eviden
   deep-review candidates: schema / anchors / datasheet evidence / masquerade checks; failures are
   quarantined with reasons.
 
-### `akcli diff <file_a> <file_b>`
+### `akcli diff <file_a> <file_b> [--bom]`
 Diff two schematic revisions. Nets are matched by **membership** (not display name); components by
 UniqueID, then `(value, footprint, pin-count)` signature, then refdes. `--json` validates against
 `schemas/diff.schema.json` (summary counts, rename map, per-component and per-net changes with
@@ -336,6 +336,9 @@ Dry-run by default; `--apply` writes through the draw pipeline (`.bak` +
 connectivity re-verify), so `akcli undo` reverts an arrange. `--symbols`
 supplies extra symbol sources for the write pipeline (same semantics as
 `draw --symbols`).
+`--bom` appends the per-component BOM delta: added/removed parts, value edits, order-id edits
+and assembly-class flips (fitted↔dnp) — the "what does purchasing see" answer; cost deltas come
+from diffing `jlc bom --lock` lockfiles.
 
 With `--groups` each functional block relocates into its own shelf-packed
 region as **rigid, net-preserving bundles** (moves carry labels/wires; power
@@ -623,11 +626,24 @@ serves `/calc` alone.
   an open KiCad editor to File→Revert after each step (macOS only).
 
 ### `akcli jlc <search|show|bom|datasheet|add> ...`
-JLCPCB/LCSC part search, BOM purchasability check (`jlc bom <sch>` — stock/tier-price/est-cost
-per BOM line via LCSC/MPN parameters; `--qty N` evaluates at build quantity; `--suggest`/`--fix`
-find and write catalog replacements for missing/dead part ids — `--fix` writes only
-high-confidence matches, `--fix-all` also writes low-confidence ones; `--csv OUT.csv` exports a
-JLCPCB upload BOM CSV, `'-'` = stdout), **datasheet resolution/download**
+JLCPCB/LCSC part search, BOM purchasability check (`jlc bom <sch>...` — stock/tier-price/est-cost
+per BOM line via LCSC/MPN parameters; several schematics merge into ONE cart with per-board
+breakdowns and tier pricing at the merged quantity; `--qty N` evaluates at build quantity).
+Components carry their **assembly class** everywhere (fitted / dnp / external / no-part — from
+KiCad `dnp`/`in_bom` attributes, `Sourcing` parameters and structural refdes classes, tunable in
+`akcli.toml [bom]`): dnp/external/no-part lines are never looked up or priced, coverage counts
+fitted parts only, and every explicit C-number is **reverse-verified** against the schematic's
+value + package (`BOM_LCSC_MISMATCH` on disagreement — a mistyped id is a wrong reel, not a
+formality). `LCSC_ALT` parameters supply second sources that take over automatically when the
+primary is at risk. Flags: `--suggest`/`--fix`
+find and write catalog replacements for missing/dead part ids — matches are graded by
+NORMALIZED value equality (never substring), `--fix` writes only
+high-confidence matches, `--fix-all` also writes low-confidence ones; `--alternates` proposes
+second sources for at-risk lines and notes Basic swaps for Extended passives; `--csv OUT.csv`
+exports a JLC-EDA-template BOM CSV (every class kept, annotated in a Note column; `'-'` =
+stdout); `--md [OUT.md]` renders a Markdown report; `--lock OUT.json` freezes the check as a
+lockfile and `--against-lock LOCK.json` reports drift (price/stock/EOL/id changes, exit `1`);
+`--offline` answers from the HTTP cache only (misses degrade to `unverified`, bannered), **datasheet resolution/download**
 (`jlc datasheet <C-number|MPN|sch> [--fetch] [--out DIR]` — resolves szlcsc PDF links via the
 EasyEDA record, `%PDF`-magic-verified downloads, whole-BOM batch mode; files cache under
 `~/.cache/akcli/datasheets/`), and library conversion (`jlc add C<num> [--3d]

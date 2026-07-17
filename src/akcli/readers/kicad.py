@@ -132,6 +132,18 @@ def _pin_world(
     return units.nm_to_mil(wx), units.nm_to_mil(wy)
 
 
+def _flag(sym: sexpr.SNode, tag: str, default: bool) -> bool:
+    """A KiCad yes/no assembly flag (``(dnp yes)``); absent -> ``default``.
+
+    Older files (and akcli-authored sheets) omit these tokens entirely —
+    absence means the KiCad default, never a guess.
+    """
+    node = sym.find(tag)
+    if node is None or len(node.children or []) < 2:
+        return default
+    return str(node.children[1].value).strip().casefold() == "yes"
+
+
 def _props(sym: sexpr.SNode) -> dict[str, str]:
     """``{property-name: value}`` for a placed ``(symbol ...)`` instance."""
     out: dict[str, str] = {}
@@ -262,6 +274,9 @@ def _build_file(
                 sheet=sheet,
                 parameters=dict(props),
                 undesignated=undesignated,
+                dnp=_flag(sym, "dnp", False),
+                in_bom=_flag(sym, "in_bom", True),
+                on_board=_flag(sym, "on_board", True),
             )
             components.append(comp)
             if not undesignated and entry is None:

@@ -382,9 +382,295 @@
       ]
     },
     {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "L1 (10uH) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "L1"
+      ],
+      "pos": [
+        1500.0,
+        800.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "L1",
+          "pos": [
+            1500.0,
+            800.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "C1 (10u) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "C1"
+      ],
+      "pos": [
+        1000.0,
+        950.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C1",
+          "pos": [
+            1000.0,
+            950.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "C2 (10u) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "C2"
+      ],
+      "pos": [
+        2000.0,
+        950.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C2",
+          "pos": [
+            2000.0,
+            950.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "C3 (100n) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "C3"
+      ],
+      "pos": [
+        3000.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C3",
+          "pos": [
+            3000.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "C4 (100n) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "C4"
+      ],
+      "pos": [
+        3600.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C4",
+          "pos": [
+            3600.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R3 (4.7k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R3"
+      ],
+      "pos": [
+        4600.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R3",
+          "pos": [
+            4600.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R4 (4.7k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R4"
+      ],
+      "pos": [
+        5200.0,
+        1000.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R4",
+          "pos": [
+            5200.0,
+            1000.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R1 (10k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R1"
+      ],
+      "pos": [
+        1200.0,
+        2200.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R1",
+          "pos": [
+            1200.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R2 (10k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R2"
+      ],
+      "pos": [
+        1200.0,
+        2600.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R2",
+          "pos": [
+            1200.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R6 (100k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R6"
+      ],
+      "pos": [
+        2400.0,
+        2200.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R6",
+          "pos": [
+            2400.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R7 (22k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R7"
+      ],
+      "pos": [
+        2400.0,
+        2600.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R7",
+          "pos": [
+            2400.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "R5 (1k) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "R5"
+      ],
+      "pos": [
+        3800.0,
+        2200.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "R5",
+          "pos": [
+            3800.0,
+            2200.0
+          ]
+        }
+      ]
+    },
+    {
+      "code": "BOM_MISSING_PART_ID",
+      "severity": "note",
+      "message": "C5 (10n) has no LCSC/MPN parameter — not orderable as-is",
+      "refs": [
+        "C5"
+      ],
+      "pos": [
+        3800.0,
+        2600.0
+      ],
+      "anchors": [
+        {
+          "kind": "component",
+          "id": "C5",
+          "pos": [
+            3800.0,
+            2600.0
+          ]
+        }
+      ]
+    },
+    {
       "code": "BOM_MPN_COVERAGE",
       "severity": "warning",
-      "message": "only 0/13 components (0%) carry a part-number identity (MPN/distributor field) -- below the 50% sourcing floor, this BOM cannot be ordered as-is; `akcli jlc bom --fix` can fill LCSC parts",
+      "message": "only 0/13 fitted components (0%) carry a part-number identity (MPN/distributor field) -- below the 50% sourcing floor, this BOM cannot be ordered as-is; `akcli jlc bom --fix` can fill LCSC parts",
       "refs": [],
       "detector": "check.bom",
       "confidence": "deterministic",
