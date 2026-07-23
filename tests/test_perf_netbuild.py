@@ -15,8 +15,9 @@ Two things are pinned here:
   endpoint, interior, off-segment and collinear-but-outside probe points.
 * **It stays fast.** A ~5000-segment ladder must build nets and verify in well
   under a second (generous ceilings — the point is to catch a return of the
-  quadratic, not to micro-benchmark). No fixtures on disk; everything is
-  generated in-memory.
+  quadratic, not to micro-benchmark). Timings are best-of-3: the min filters
+  shared-CI scheduler noise, while the quadratic's 8× overshoot still trips
+  every run. No fixtures on disk; everything is generated in-memory.
 """
 
 from __future__ import annotations
@@ -83,6 +84,18 @@ _STEP = 100
 _WIDTH = 400
 
 
+def _fastest(fn, runs=3):
+    """Best-of-N wall clock: min over ``runs`` calls filters scheduler noise
+    on shared CI runners without loosening the ceiling itself."""
+    best = float("inf")
+    result = None
+    for _ in range(runs):
+        t0 = time.perf_counter()
+        result = fn()
+        best = min(best, time.perf_counter() - t0)
+    return result, best
+
+
 def _ladder_prims() -> model.NetPrimitives:
     """Two rails (each a chain of _RUNGS segments) crossed by _RUNGS rungs."""
     wires: list[model.WireSeg] = []
@@ -99,9 +112,7 @@ def _ladder_prims() -> model.NetPrimitives:
 def test_build_nets_ladder_is_fast():
     prims = _ladder_prims()
     assert len(prims.wires) == 3 * _RUNGS
-    t0 = time.perf_counter()
-    nets = build_nets(prims)
-    dt = time.perf_counter() - t0
+    nets, dt = _fastest(lambda: build_nets(prims))
     # the whole mesh is one connected net; the 10 pins collapse into it
     assert len(nets) == 1
     assert dt < 1.0, f"build_nets took {dt:.3f}s for {len(prims.wires)} segments"
@@ -123,9 +134,7 @@ def _ladder_kicad_sch() -> str:
 
 def test_verify_ladder_is_fast():
     doc = parse(_ladder_kicad_sch())
-    t0 = time.perf_counter()
-    findings = connectivity.verify(doc)
-    dt = time.perf_counter() - t0
+    findings, dt = _fastest(lambda: connectivity.verify(doc))
     # every rung end lands on a rail vertex; only the two free rail crowns
     # (one step above the top rung) dangle — the mesh interior is fully joined.
     dangling = [f for f in findings if f.code == connectivity.DANGLING_ENDPOINT]
