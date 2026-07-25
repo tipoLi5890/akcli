@@ -69,7 +69,11 @@ jobs:
               echo "::error::No check runs found for ${{ github.sha }} — the CI workflow never ran this commit. Push the commit, wait for green, then re-tag."
               exit 1
             fi
-            pending=$(awk -F'\t' '$2 != "completed"' runs.tsv | wc -l | tr -d ' ')
+            # Own run excluded here too — this job IS a check run on the same
+            # SHA and never completes while it waits (self-deadlock otherwise).
+            pending=$(awk -F'\t' \
+              '$2 != "completed" && $1 !~ /CI green on tagged commit/' \
+              runs.tsv | wc -l | tr -d ' ')
             if [ "$pending" -eq 0 ]; then
               break
             fi
