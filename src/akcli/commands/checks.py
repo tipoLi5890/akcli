@@ -63,6 +63,17 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
     if name == "pairs":
         from ..checks import pairs
         return pairs.run(sch, cfg)
+    if name == "integrity":
+        # The write gate's document checks (dangling endpoints, duplicate
+        # uuids/designators, unresolved lib_ids, broken instance paths, NC
+        # conflicts) — run read-only over ANY .kicad_sch, not just files akcli
+        # itself just wrote (imports and hand-edited files need them most).
+        if not str(args.path).lower().endswith(".kicad_sch"):
+            return []
+        from ..readers import sexpr as _sexpr
+        from ..writers import connectivity as _connectivity
+        text = Path(args.path).read_text(encoding="utf-8")
+        return _connectivity.verify(_sexpr.parse(text))
     return []
 
 
@@ -86,6 +97,8 @@ def _cmd_check(args: argparse.Namespace) -> int:
         which.append("libsync")
     if getattr(args, "pairs", False):
         which.append("pairs")
+    if getattr(args, "integrity", False):
+        which.append("integrity")
     intent_file = getattr(args, "intent", None)
     if intent_file == "@config":
         # bare `--intent`: the project's standing intent contract from config
@@ -100,7 +113,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
         # --intent/--contract alone are pure assertions, like any other selector.
         which = ["erc", "power", "bom", "nets"]
         if str(path).lower().endswith(".kicad_sch"):
-            which.append("layout")
+            which.extend(["layout", "integrity"])
         # name-level pair/bus continuity; [check].pairs = false opts out
         if cfg.check.get("pairs", True):
             which.append("pairs")
@@ -465,6 +478,11 @@ def register(sub, common) -> None:
     p.add_argument("--nets", action="store_true",
                    help="run connectivity-hygiene checks (single-pin nets, "
                         "off-grid pins, wire/pin/label attachment near-misses)")
+    p.add_argument("--integrity", action="store_true",
+                   help="run the write gate's document checks read-only "
+                        "(dangling endpoints, duplicate uuids/designators, "
+                        "unresolved lib_ids, instance paths, no-connect "
+                        "conflicts; .kicad_sch only)")
     p.add_argument("--pairs", action="store_true",
                    help="run differential-pair / bus-continuity checks "
                         "(_P/_N, D+/D-, CAN_H/_L partners; D0..D7 index gaps)")
@@ -519,7 +537,10 @@ def register(sub, common) -> None:
     p.set_defaults(handler=_cmd_pinmap)
 
     p = sub.add_parser("expected", parents=[common],
-                       help="extract an expected pin->signal table from .dts/.overlay or pinout .md")
+                       help="extract an expected pin->signal table from "
+                            ".dts/.overlay or pinout .md (output is ALWAYS "
+                            "JSON — it feeds `pinmap --expected`; the global "
+                            "--json flag is a no-op here)")
     p.add_argument("input", nargs="?", help="input file (.dts, .dtsi, .overlay, .md)")
     p.add_argument("-o", "--output", metavar="FILE",
                    help="write JSON here instead of stdout (feed to pinmap --expected)")

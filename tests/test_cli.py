@@ -91,10 +91,15 @@ def test_net_query_named(capsys):
 
 
 def test_net_list_all_json(capsys):
+    # the list branch shares `nets`' envelope + net shape: ONE parser for both
     assert main(["net", "--json", F(TWO_GND)]) == EXIT["OK"]
-    nets = json.loads(capsys.readouterr().out)
-    assert len(nets) == 1
-    assert nets[0]["name"] == "GND"
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["schema_version"] == "1"
+    assert doc["source"].endswith(".SchDoc")
+    assert doc["total"] == doc["returned"] == 1 and doc["truncated"] is False
+    (net,) = doc["nets"]
+    assert net["name"] == "GND"
+    assert all(isinstance(m, str) and "." in m for m in net["members"])
 
 
 def test_net_missing_name(capsys):
@@ -107,6 +112,78 @@ def test_net_missing_name_json(capsys):
     doc = json.loads(capsys.readouterr().out)
     assert doc == {"schema_version": "1", "found": False, "query": "NOPE",
                    "kind": "net", "source": F(SHARED)}
+
+
+def test_net_named_json_shares_nets_shape(capsys):
+    # named branch: same envelope family + "REF.PIN" members as `nets`,
+    # plus the single-net diagnostics (is_named / source_names / ...)
+    assert main(["net", "--json", F(SHARED), "STAT"]) == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["schema_version"] == "1" and doc["query"] == "STAT"
+    (net,) = doc["nets"]
+    assert net["name"] == "STAT"
+    assert "U3.2" in net["members"]          # "REF.PIN" strings, not [d,p]
+    assert net["is_named"] is True
+
+
+def test_net_at_reverse_lookup(capsys):
+    assert main(["net", F(SHARED), "--at", "U3.2"]) == EXIT["OK"]
+    assert "STAT" in capsys.readouterr().out
+
+
+def test_net_at_json(capsys):
+    assert main(["net", "--json", F(SHARED), "--at", "U3.2"]) == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["pin"] == "U3.2"
+    assert doc["net"]["name"] == "STAT"
+
+
+def test_net_at_unknown_pin_lists_valid_pins(capsys):
+    assert main(["net", F(SHARED), "--at", "U3.99"]) == EXIT["QUERY_MISS"]
+    err = capsys.readouterr().err
+    assert "valid pins:" in err
+
+
+def test_net_at_unknown_component_did_you_mean(capsys):
+    assert main(["net", "--json", F(SHARED), "--at", "U99.1"]) \
+        == EXIT["QUERY_MISS"]
+    captured = capsys.readouterr()
+    doc = json.loads(captured.out)
+    assert doc["found"] is False and doc["kind"] == "pin"
+
+
+def test_net_same_yes_and_no(capsys):
+    assert main(["net", F(SHARED), "--same", "U2.1", "U3.2"]) == EXIT["OK"]
+    assert "yes" in capsys.readouterr().out
+    # a non-connected pair still exits 0: the boolean IS the answer
+    board = str(FIXTURES / "corpus" / "power_entry.kicad_sch")
+    assert main(["net", "--json", board, "--same", "C1.2", "F1.1"]) \
+        == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["same"] is False and doc["net"] is None
+    assert doc["nets"]["C1.2"] == "GND"
+
+
+def test_net_why_geometry_on_kicad(capsys):
+    board = str(FIXTURES / "corpus" / "power_entry.kicad_sch")
+    assert main(["net", "--json", board, "--why", "C1.2"]) == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["pin"] == "C1.2" and doc["net"]["name"] == "GND"
+    assert doc["attachment"]["label_on_tip"] is True
+    assert doc["off_grid_50mil"] is False
+    assert doc["nearest"]["label"]["dist_mil"] == 0.0
+
+
+def test_net_why_non_kicad_answers_membership_only(capsys):
+    assert main(["net", "--json", F(SHARED), "--why", "U3.2"]) == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["net"]["name"] == "STAT"
+    assert doc["attachment"] is None        # geometry needs .kicad_sch
+    assert any("kicad_sch" in h for h in doc["hints"])
+
+
+def test_net_query_flags_are_exclusive(capsys):
+    assert main(["net", F(SHARED), "STAT", "--at", "U3.2"]) == EXIT["USAGE"]
 
 
 def test_component_pin_to_net(capsys):

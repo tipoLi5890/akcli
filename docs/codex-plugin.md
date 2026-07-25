@@ -65,8 +65,9 @@ optional metadata; removing it does not change behavior.
 
 ## Skills ⇄ Claude slash commands
 
-Claude Code exposes five slash commands (`/circuit-review`, `/circuit-diff`,
-`/circuit-pinmap`, `/circuit-draw`, `/circuit-parts`) from `commands/`. Codex plugins have no separate
+Claude Code exposes eight slash commands (`/circuit-review`, `/circuit-diff`,
+`/circuit-pinmap`, `/circuit-draw`, `/circuit-parts`, `/circuit-sim`, `/circuit-datasheet`,
+`/circuit-release`) from `commands/`. Codex plugins have no separate
 `commands` concept — **skills are the callable units**. The same workflows are covered by the
 skills, which Codex loads on demand:
 
@@ -77,6 +78,9 @@ skills, which Codex loads on demand:
 | `/circuit-diff` | `akcli-schematic-review` (revision-diff step) / `akcli-circuit-design` |
 | `/circuit-pinmap` | `akcli-schematic-review` (pinmap step) / `akcli-circuit-design` |
 | `/circuit-draw` | `akcli-schematic-authoring` |
+| `/circuit-sim` | `akcli-schematic-authoring` (sim step) / `akcli-circuit-debug` |
+| `/circuit-datasheet` | `akcli-datasheet-facts` (+ `akcli-parts-sourcing` for the fetch) |
+| `/circuit-release` | `akcli-release-gating` |
 
 ## Install & test
 
@@ -107,6 +111,7 @@ summarize the rails"* — Codex should reach for the `akcli-circuit-design` skil
 
 ## Keeping the two manifests in sync
 
-`name` (`akcli`) and `version` (`0.15.0`) are duplicated across
-`.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`. When you bump the version or
-edit shared metadata, update **both** so Claude Code and Codex agree.
+`name` (`akcli`) and `version` are duplicated across `.claude-plugin/plugin.json` and
+`.codex-plugin/plugin.json`. `pyproject.toml` is the single source of truth for the version:
+run `python tools/sync_version.py` after a bump (CI fails on drift). Shared metadata edits
+still have to be made in **both** manifests by hand.

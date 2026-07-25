@@ -25,7 +25,7 @@
     },
     "analyses": {
       "type": "object",
-      "description": "ngspice analysis name (tran|ac|op|dc|...) -> its argument text, e.g. {\"tran\": \"5u 100m\", \"ac\": \"dec 40 10 100k\"}.",
+      "description": "ngspice analysis name (tran|ac|dc|op|...) -> its argument text, e.g. {\"tran\": \"5u 100m\", \"ac\": \"dec 40 10 100k\"}. An 'op' analysis runs but can carry NO assertions (ngspice cannot '.meas' an operating point); measure an operating point with a single-point 'dc' sweep instead, e.g. {\"dc\": \"Vsupply 3.3 3.3 1\"}.",
       "additionalProperties": { "type": "string" },
       "default": {}
     },
@@ -79,7 +79,7 @@
         },
         "analysis": {
           "type": "string",
-          "description": "Overrides the inferred analysis; must be a key of 'analyses'."
+          "description": "Overrides the inferred analysis; must be a key of 'analyses', and must not be 'op' (rejected with SIM_OP_ASSERT_UNSUPPORTED — use a single-point 'dc' sweep or 'tran')."
         },
         "gt": { "$ref": "#/$defs/numOrEng", "description": "Lower bound: value must be strictly greater." },
         "lt": { "$ref": "#/$defs/numOrEng", "description": "Upper bound: value must be strictly less." },

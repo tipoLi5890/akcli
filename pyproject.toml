@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package and CLI stay `akcli` (see src/akcli/__init__.py name cascade);
 # keep the three in lockstep.
 name = "akcli-kicad"
-version = "0.16.0"
+version = "0.17.0"
 description = "AI-native schematic design agent, purpose-built for KiCad: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -75,14 +75,18 @@ select = ["E4", "E7", "E9", "F", "W"]
 [tool.mypy]
 # Beachhead: gate packages module-by-module as each is brought up to the bar
 # rather than the whole tree at once. Covered so far: the networked layer
-# (parts), the calculators, and the typed core (model/errors/units/safety/
-# netdiff/journal/render_svg/kicad_escape/config/arrange).
+# (parts), the calculators, the typed core (model/errors/units/safety/
+# netdiff/journal/render_svg/kicad_escape/config/arrange), and the net/parse
+# spine (netbuild, readers/sexpr, checks/diff, writers/geometry, groupframe).
 files = [
     "src/akcli/parts", "src/akcli/calc",
     "src/akcli/model.py", "src/akcli/errors.py", "src/akcli/units.py",
     "src/akcli/safety.py", "src/akcli/netdiff.py", "src/akcli/journal.py",
     "src/akcli/render_svg.py", "src/akcli/kicad_escape.py",
     "src/akcli/config.py", "src/akcli/arrange.py",
+    "src/akcli/netbuild.py", "src/akcli/readers/sexpr.py",
+    "src/akcli/checks/diff.py", "src/akcli/writers/geometry.py",
+    "src/akcli/groupframe.py",
 ]
 python_version = "3.11"
 disallow_untyped_defs = true

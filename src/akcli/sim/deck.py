@@ -11,7 +11,10 @@ and the assertion layers are separate stages):
   to an uppercase ``[A-Za-z0-9_]`` token (a leading digit is prefixed with
   ``N``); unnamed nets become ``N<index>``.  ngspice is case-insensitive, so
   two distinct nets that sanitize to the same token are a hard error
-  (``SIM_NODE_COLLISION``).  A deck with no ground net is a hard error
+  (``SIM_NODE_COLLISION``) — **including two same-named nets from different
+  sheet scopes** (netbuild keeps local labels sheet-local, so two instances of
+  one child sheet each own a ``MID``; SPICE is flat, so emitting both would
+  silently short them).  A deck with no ground net is a hard error
   (``SIM_NO_GROUND``) — the caller is pointed at the ``--gnd`` flag.
 
 * **Elements.**  Each real component (``#``-prefixed virtual power symbols are
@@ -20,6 +23,16 @@ and the assertion layers are separate stages):
   cards become a comment; ``unmodeled`` cards are collected, commented, and
   reported as ``SIM_UNMODELED`` warnings.  A pin that sits on no net gets a
   unique dangling node ``NC_<ref>_<pin>`` and a warning.
+
+* **Dropped parts gate the verdict.**  Every part absent from the deck (skipped
+  *or* unmodeled) is listed in ``Deck.skipped`` and reported
+  (``SIM_PART_SKIPPED``, WARNING).  When such a part has two or more connected
+  nodes and one of them is *measured* by an assert (``v(...)`` in its meas text),
+  the finding is an **ERROR**: a skipped series element changes what was
+  measured, so the run must not report PASS.  A value that had to be normalized
+  to become SPICE-legal (``"10k 1%"`` -> ``10k``) is reported
+  ``SIM_VALUE_NORMALIZED`` (WARNING); one that could not be parsed confidently
+  raises ``SIM_VALUE_INVALID`` from :mod:`akcli.sim.models`.
 
 * **Stimuli & layout.**  ``spec.stimuli`` describe independent ``V``/``I``
   sources and ``B`` behavioural sources (whose expression has *all* whitespace
@@ -63,12 +76,17 @@ class Deck:
     nets are keyed by their generated ``N<index>`` node).  ``warnings`` are
     :class:`~akcli.report.Finding` records (unmodeled parts, dangling
     pins); ``unmodeled`` lists the designators that had no SPICE model.
+    ``skipped`` lists **every** part that is absent from the deck — skipped
+    (``Sim.Enable=0``, a ``spec.models`` skip, a connector/test-point) *and*
+    unmodeled — as ``{"designator", "status", "reason", "nodes", "measured"}``
+    dicts, so a caller can report exactly what the simulation left out.
     """
 
     text: str
     node_of: dict[str, str] = field(default_factory=dict)
     warnings: list[Finding] = field(default_factory=list)
     unmodeled: list[str] = field(default_factory=list)
+    skipped: list[dict] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -109,6 +127,50 @@ def _sanitize(name: str) -> str:
     if token[0].isdigit():
         token = "N" + token
     return token
+
+
+# Node references inside an assert's measurement text: ``v(mid)``, ``V(a,b)``.
+# Used to decide whether a dropped part sits on a node the run MEASURES — the
+# difference between a harmless omission and a wrong measured value.
+_MEAS_NODE_RX = re.compile(r"(?i)\bv\s*\(\s*([^)]*)\)")
+
+
+def _spec_asserts(spec: object) -> list:
+    """The assert list of a ``SimSpec`` / plain-dict spec (empty when absent)."""
+    asserts = getattr(spec, "asserts", None)
+    if asserts is None and isinstance(spec, dict):
+        asserts = spec.get("assert") or spec.get("asserts")
+    return list(asserts or [])
+
+
+def _measured_nodes(spec: object) -> set[str]:
+    """SPICE nodes referenced by ``v(...)`` in any assert's measurement text."""
+    nodes: set[str] = set()
+    for a in _spec_asserts(spec):
+        if not isinstance(a, dict):
+            continue
+        text = " ".join(str(a.get(k, "")) for k in ("meas", "when"))
+        for group in _MEAS_NODE_RX.findall(text):
+            for tok in group.split(","):
+                tok = tok.strip()
+                if tok:
+                    nodes.add("0" if tok == "0" else _sanitize(tok))
+    return nodes
+
+
+def _net_scope(net: Net, sheet_of: dict[str, str]) -> str:
+    """Human-readable sheet scope of ``net`` (the sheets its members live on).
+
+    ``netbuild`` keeps local labels **sheet-scoped**, so two instances of the
+    same child sheet produce two distinct ``Net`` records that share a name
+    (``MID``). SPICE has no hierarchy, so the only way to tell them apart in a
+    collision message is where their pins are.
+    """
+    sheets = sorted({sheet_of.get(des, "") for des, _pin in net.members})
+    named = [s for s in sheets if s]
+    if not named:
+        return "root sheet"
+    return "sheet " + ", ".join(named)
 
 
 def _is_ground(net: Net, gnd: str) -> bool:
@@ -192,6 +254,10 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
     node_power_names: dict[str, list[str]] = {}  # node -> names to rail-match
     have_ground = False
     unnamed_idx = 0
+    # designator -> source sheet, for the collision message's scope names.
+    sheet_of = {c.designator: (getattr(c, "sheet", "") or "")
+                for c in sch.components}
+    origin_net: dict[str, Net] = {}   # node -> the Net record that claimed it
 
     # Node tokens claimed by ground/named nets, pre-computed so the unnamed-net
     # generator can skip them: a net literally named 'N1' must never be silently
@@ -212,6 +278,7 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
             node = _sanitize(net.name)
             key = net.name
             prior = origin.get(node)
+            prior_net = origin_net.get(node)
             if prior is not None and prior != key:
                 raise AkcliError(
                     "SIM_NODE_COLLISION",
@@ -219,7 +286,25 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
                     f"{node!r}; rename one (ngspice node names are "
                     f"case-insensitive)",
                 )
+            if prior_net is not None and prior_net is not net:
+                # Same NAME, different net: netbuild keeps local labels
+                # sheet-scoped, so two instances of one child sheet each carry
+                # their own 'MID'. SPICE is flat — emitting both as node MID
+                # silently WIRES THEM TOGETHER, which is a wrong answer with no
+                # warning (the merged node reads one shared value).
+                raise AkcliError(
+                    "SIM_NODE_COLLISION",
+                    f"net {key!r} exists in two different sheet scopes "
+                    f"({_net_scope(prior_net, sheet_of)} and "
+                    f"{_net_scope(net, sheet_of)}) and both would become the "
+                    f"single flat SPICE node {node!r} — ngspice has no "
+                    f"hierarchy, so the two nets would be silently shorted "
+                    f"together; give them distinct names (e.g. {key}_A/{key}_B) "
+                    f"or promote them to one global label if they really are "
+                    f"one net",
+                )
             origin[node] = key
+            origin_net[node] = net
         else:
             # Advance to the first free N<i>, skipping tokens already taken by a
             # named net or an earlier unnamed net.
@@ -254,6 +339,8 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
     elements: list[str] = []
     warnings: list[Finding] = []
     unmodeled: list[str] = []
+    skipped: list[dict] = []
+    measured_nodes = _measured_nodes(spec)
     model_cards: list[str] = []
     # per-node bookkeeping for the floating-node / undriven-rail diagnostics.
     node_ok_letters: dict[str, set[str]] = {}    # node -> SPICE letters emitted
@@ -273,6 +360,49 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
             if node is not None and node != "0":
                 node_stranders.setdefault(node, []).append(comp.designator)
 
+    def _record_dropped(comp: Component, status: str, note: str, *,
+                        warn: bool = True) -> None:
+        """Record + report a part that is absent from the deck.
+
+        Every dropped part becomes visible (``SIM_PART_SKIPPED``; ``warn=False``
+        for an unmodeled part, which already has its own ``SIM_UNMODELED``
+        warning), and one that sits **in series on a measured node** escalates to
+        ERROR: a skipped R2 in a measured divider changes the measured value, so
+        a run that excluded it must never print PASS.
+        """
+        nodes = sorted({
+            nd for pin in comp.pins
+            if (nd := pin_node.get((comp.designator, pin.number))) is not None
+        })
+        hit = sorted(measured_nodes & set(nodes))
+        # Two or more distinct connected nodes = the part could carry current
+        # between them, so dropping it changes the measurement. A one-terminal
+        # part (test point, mounting hole, flag) cannot.
+        in_series = len(nodes) >= 2 and bool(hit)
+        skipped.append({"designator": comp.designator, "status": status,
+                        "reason": note, "nodes": nodes, "measured": in_series})
+        if in_series:
+            warnings.append(Finding(
+                code="SIM_PART_SKIPPED",
+                severity=Severity.ERROR,
+                message=f"{comp.designator} is not in the deck ({status}"
+                + (f": {note}" if note else "")
+                + f") but it connects measured node(s) {', '.join(hit)} to "
+                f"{', '.join(n for n in nodes if n not in hit) or 'nothing else'}"
+                " — the measured value excludes this series element, so a PASS "
+                "would be meaningless; give it Sim.Device/Sim.Params or a "
+                "spec.models entry, or stop asserting on that node",
+                refs=[comp.designator, *hit],
+            ))
+        elif warn:
+            warnings.append(Finding(
+                code="SIM_PART_SKIPPED",
+                severity=Severity.WARNING,
+                message=f"{comp.designator} is not in the deck ({status}"
+                + (f": {note}" if note else "") + ")",
+                refs=[comp.designator],
+            ))
+
     for comp in sch.components:
         if comp.designator.startswith("#"):
             continue  # virtual power symbol: contributes a net name, not a device
@@ -283,10 +413,12 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
         if status == "skip":
             elements.append(f"* skip {comp.designator}: {note}".rstrip())
             _strand(comp)
+            _record_dropped(comp, "skip", note)
             continue
         if status == "unmodeled":
             unmodeled.append(comp.designator)
             _strand(comp)
+            _record_dropped(comp, "unmodeled", note, warn=False)
             warnings.append(
                 Finding(
                     code="SIM_UNMODELED",
@@ -311,6 +443,18 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
                     "SPICE terminal order — emitted in schematic pin-number "
                     "order; verify polarity (set Sim.Pins or a spec.models "
                     "pin_order if reversed)",
+                    refs=[comp.designator],
+                )
+            )
+        value_note = getattr(card, "value_note", "") or ""
+        if value_note:
+            warnings.append(
+                Finding(
+                    code="SIM_VALUE_NORMALIZED",
+                    severity=Severity.WARNING,
+                    message=f"{comp.designator}: {value_note} — only the leading "
+                    "value token reaches ngspice; move ratings/tolerance into "
+                    "their own field if that is not what you meant",
                     refs=[comp.designator],
                 )
             )
@@ -534,7 +678,8 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
     lines.append(".end")
     text = "\n".join(lines) + "\n"
 
-    return Deck(text=text, node_of=node_of, warnings=warnings, unmodeled=unmodeled)
+    return Deck(text=text, node_of=node_of, warnings=warnings,
+                unmodeled=unmodeled, skipped=skipped)
 
 
 def _element_nodes(

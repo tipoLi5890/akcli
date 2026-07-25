@@ -5,7 +5,7 @@ of pass/fail assertions against ``.meas`` results::
 
     {"protocol_version": 1,
      "stimuli": [{"...": "..."}],
-     "analyses": {"tran": "5u 100m", "ac": "dec 40 10 100k", "op": ""},
+     "analyses": {"tran": "5u 100m", "ac": "dec 40 10 100k"},
      "models": {"...": "..."},
      "assert": [
         {"name": "vpeak_max", "meas": "MAX v(peak) from=20m to=60m", "gt": "0.35"},
@@ -25,6 +25,14 @@ as :mod:`akcli.calc.si`; ``approx`` additionally accepts ``tol``
 
 ``options.rshunt`` (absent/``"auto"``/``false``/number/string) tunes the
 deck-builder's floating-node fix — see :mod:`akcli.sim.deck`.
+
+An ``op`` analysis may be declared (it runs, and its node voltages show up in a
+``--wave`` capture), but it can **carry no assertions**: ngspice refuses ``.meas``
+against an operating-point plot, so the combination used to fail every run with a
+generic engine error. It is now rejected up front with
+``AkcliError('SIM_OP_ASSERT_UNSUPPORTED')`` pointing at a ``dc`` sweep (a
+single-point ``dc`` sweep measures an operating point and supports ``.meas``) or
+``tran``.
 
 ``load`` raises ``AkcliError('BAD_CONFIG', ...)`` naming the offending entry
 for shape errors, and ``AkcliError('PROTOCOL_MISMATCH', ...)`` when
@@ -101,6 +109,25 @@ def _parse_num(text: object, where: str, field_name: str) -> float:
 # --------------------------------------------------------------------------- #
 # load / validate
 # --------------------------------------------------------------------------- #
+def _reject_op_assert(analysis: str, path: str) -> None:
+    """Refuse an assertion bound to an ``op`` analysis (ngspice cannot ``.meas`` it).
+
+    ngspice's ``meas`` reads a *plot* (a swept/vector result); an operating-point
+    run produces no such plot, so ``meas op ...`` always errors and the whole run
+    surfaced as an engine failure (exit 7) — the tool documented a combination
+    that could never work. Rejecting it here turns that into an honest config
+    error with a working alternative.
+    """
+    if analysis.strip().lower() != "op":
+        return
+    fail("SIM_OP_ASSERT_UNSUPPORTED",
+         f"{path}: ngspice cannot run 'meas' against an 'op' analysis (an "
+         f"operating point produces no plot to measure). Use a single-point 'dc' "
+         f"sweep — e.g. \"analyses\": {{\"dc\": \"Vsupply 3.3 3.3 1\"}} with "
+         f"\"meas\": \"FIND v(mid) AT=3.3\" — or a 'tran' analysis. An 'op' "
+         f"analysis with no asserts is still fine")
+
+
 def _validate_assert(raw: object, idx: int, analyses: dict, where: str) -> dict:
     path = f"{where}: assert[{idx}]"
     if not isinstance(raw, dict):
@@ -160,6 +187,7 @@ def _validate_assert(raw: object, idx: int, analyses: dict, where: str) -> dict:
             fail("BAD_CONFIG",
                  f"{path}: analysis {analysis!r} not in configured analyses "
                  f"{sorted(analyses)}")
+        _reject_op_assert(analysis, path)
 
     out: dict = {"name": name, src_key: src_val}
     for k in present:
@@ -252,6 +280,14 @@ def load(path: str | Path) -> SimSpec:
     if dupes:
         fail("BAD_CONFIG", f"{where}: duplicate assert name(s): {', '.join(dupes)}")
 
+    # An op-ONLY spec that carries asserts: inference would pick 'tran' and
+    # report a confusing "analysis not configured" — the real problem is that
+    # 'op' cannot be measured at all.
+    if asserts and analyses and all(
+        str(k).strip().lower() == "op" for k in analyses
+    ):
+        _reject_op_assert("op", f"{where}: assert '{names[0]}'")
+
     return SimSpec(
         stimuli=stimuli, analyses=analyses, asserts=asserts,
         models=models, options=options,
@@ -289,6 +325,8 @@ def _infer_analysis(a: dict, spec: SimSpec) -> str:
         fail("BAD_CONFIG",
              f"assert '{a['name']}': inferred analysis {analysis!r} not in "
              f"configured analyses {sorted(spec.analyses)}")
+    # Defensive: a programmatically built SimSpec never passed through load().
+    _reject_op_assert(analysis, f"assert '{a['name']}'")
     return analysis
 
 

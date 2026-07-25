@@ -78,10 +78,13 @@ def _classify_pins(pins):
 
 
 def _resistors_between(ctx, net_a, net_b) -> list[str]:
+    """FITTED resistors bridging the two nets — a DNP feedback resistor leaves
+    the amplifier open-loop, so it must not satisfy the feedback-path search
+    (topo.is_fitted)."""
     out = []
     for ref, _pin in net_a.members:
         comp = ctx.comps.get(ref)
-        if comp is None or not topo.is_resistor(comp):
+        if comp is None or not topo.is_resistor(comp) or not topo.is_fitted(comp):
             continue
         if topo.other_net(ctx, ref, net_a) is net_b:
             out.append(ref)

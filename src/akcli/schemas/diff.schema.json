@@ -80,13 +80,11 @@
           "jaccard": {"type": "number", "minimum": 0, "maximum": 1},
           "added_members": {
             "type": "array",
-            "items": {"type": "array", "minItems": 2, "maxItems": 2,
-                      "items": {"type": "string"}}
+            "items": {"type": "string", "pattern": "^.+\\..+$"}
           },
           "removed_members": {
             "type": "array",
-            "items": {"type": "array", "minItems": 2, "maxItems": 2,
-                      "items": {"type": "string"}}
+            "items": {"type": "string", "pattern": "^.+\\..+$"}
           },
           "name_changed": {"type": "boolean"},
           "membership_changed": {"type": "boolean"},

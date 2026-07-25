@@ -184,6 +184,41 @@ def test_cli_library_repair_requires_an_action(project, capsys):
     assert main(["library", "repair", str(project)]) == 2
 
 
+def test_cli_library_repair_refuses_gui_locked_file(project, capsys):
+    """Write-path unification: a KiCad-held target refuses TARGET_LOCKED (exit 6).
+
+    The rename touches ``board.kicad_sch``; with KiCad's ``~board.kicad_sch.lck``
+    present the repair must write nothing at all — same invariant as
+    ``draw --apply`` and ``relink --apply``.
+    """
+    from akcli.writers import kicad as kwriter
+
+    sch = project / "board.kicad_sch"
+    before = sch.read_text()
+    lck = kwriter.gui_lock_path(sch)
+    lck.write_text("locked\n", encoding="utf-8", newline="\n")
+
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=proj_jlc", "--apply"])
+    err = capsys.readouterr().err
+    assert code == 6, err
+    assert "TARGET_LOCKED" in err and lck.name in err
+    assert sch.read_text() == before                  # untouched
+    assert not (project / "board.kicad_sch.bak").exists()
+
+
+def test_cli_library_repair_dry_run_ignores_gui_lock(project, capsys):
+    """No --apply = no write, so a lock must not block the preview."""
+    from akcli.writers import kicad as kwriter
+
+    kwriter.gui_lock_path(project / "board.kicad_sch").write_text(
+        "locked\n", encoding="utf-8", newline="\n")
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=proj_jlc"])
+    assert code == 0
+    assert "dry-run" in capsys.readouterr().out
+
+
 # --------------------------------------------------------------------------- #
 # library import-altium (.PcbLib -> .pretty)
 # --------------------------------------------------------------------------- #

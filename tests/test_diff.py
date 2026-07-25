@@ -90,6 +90,11 @@ def test_membership_change_added_and_removed_members():
     assert ("U2", "2") in nc.added_members
     assert ("U3", "1") in nc.removed_members
     assert nc.jaccard == pytest.approx(0.5)
+    # the JSON export uses "REF.PIN" strings — ONE member encoding across
+    # net/nets/diff/verify (agents keep a single parser)
+    exported = nc.export()
+    assert exported["added_members"] == ["U2.2"]
+    assert exported["removed_members"] == ["U3.1"]
 
 
 def test_unrelated_nets_below_threshold_do_not_match():

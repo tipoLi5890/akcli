@@ -47,6 +47,7 @@ from __future__ import annotations
 import bisect
 import re
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 
 from . import model
 
@@ -79,11 +80,11 @@ class _DSU:
     def __init__(self) -> None:
         self._parent: dict = {}
 
-    def add(self, x) -> None:
+    def add(self, x: object) -> None:
         if x not in self._parent:
             self._parent[x] = x
 
-    def find(self, x):
+    def find(self, x: object) -> object:
         self.add(x)
         root = x
         while self._parent[root] != root:
@@ -93,7 +94,7 @@ class _DSU:
             self._parent[x], x = root, self._parent[x]
         return root
 
-    def union(self, a, b):
+    def union(self, a: object, b: object) -> object:
         ra, rb = self.find(a), self.find(b)
         if ra != rb:
             self._parent[rb] = ra
@@ -155,7 +156,7 @@ class SegmentIndex:
 
     __slots__ = ("_h", "_hx", "_v", "_vy", "_diag")
 
-    def __init__(self, segments) -> None:
+    def __init__(self, segments: Iterable[tuple[tuple[int, int], tuple[int, int]]]) -> None:
         h: dict = defaultdict(list)  # y -> [(xmin, xmax, a, b), ...]
         v: dict = defaultdict(list)  # x -> [(ymin, ymax, a, b), ...]
         diag: list = []
@@ -184,7 +185,9 @@ class SegmentIndex:
             self._vy[x] = [it[0] for it in items]
         self._diag = diag
 
-    def segments_through(self, p: tuple[int, int]):
+    def segments_through(
+        self, p: tuple[int, int],
+    ) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
         """Yield ``(a, b)`` for every stored segment ``p`` lies on (inclusive)."""
         px, py = p
         items = self._h.get(py)
@@ -205,7 +208,9 @@ class SegmentIndex:
             if _on_seg(p, a, b):
                 yield a, b
 
-    def interior_hits(self, p: tuple[int, int]):
+    def interior_hits(
+        self, p: tuple[int, int],
+    ) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
         """Yield ``(a, b)`` for every segment ``p`` lies STRICTLY inside."""
         px, py = p
         items = self._h.get(py)
@@ -273,7 +278,7 @@ def _name_priority(scope: str, power_priority: bool) -> int:
     return 0
 
 
-def _name_key(scope: str, text: str, sheet: str):
+def _name_key(scope: str, text: str, sheet: str) -> tuple[str, str]:
     """Merge key for the global same-name pass.
 
     Local labels are sheet-scoped ``(sheet, text)``; global-class names merge
@@ -303,7 +308,7 @@ def build_nets(
         defaultdict(list)
     )
 
-    def _node(sheet: str, pt) -> tuple:
+    def _node(sheet: str, pt: tuple[int, int]) -> tuple[str, tuple[int, int]]:
         return (sheet, pt)
 
     # (1) wire segments — union each segment's two endpoints (same sheet).
@@ -569,7 +574,10 @@ def build_nets(
 
         nets.append(
             model.Net(
-                name=canonical,
+                # unnamed fragments legitimately carry name=None at runtime
+                # (rendered as <unnamed@pin>); model.Net's annotation stays
+                # str for the common case.
+                name=canonical,  # type: ignore[arg-type]
                 members=uniq_members,
                 aliases=aliases,
                 source_names=all_names,

@@ -18,9 +18,9 @@ from akcli.review.detectors.validation import (enable_pin, i2c_pullup,
                                                vdomain)
 
 
-def _comp(ref, lib, value=None, pins=()):
+def _comp(ref, lib, value=None, pins=(), dnp=False):
     return Component(designator=ref, library_ref=lib, x_mil=0, y_mil=0,
-                     value=value,
+                     value=value, dnp=dnp,
                      pins=[Pin(number=n, name=nm, x_mil=0, y_mil=0)
                            for n, nm in pins])
 
@@ -544,3 +544,85 @@ def test_fuse_sizing_boundary_exact_floor_is_silent():
 
 def test_fuse_no_load_fact_stays_silent():
     assert _run(power_protect, _entry_sch(fuse_value="1A")) == []
+
+
+# --------------------------------------------------------------------------- #
+# DNP parts satisfy nothing (presence-satisfier discipline, topo.is_fitted)
+#
+# A Do-Not-Populate part is drawn but never fitted: the shipped board behaves
+# as if it were absent, so it must NOT silence a "this part is missing"
+# finding. Every fixture below is the detector's own negative case with the
+# satisfying part flipped to dnp=True — the finding must come back.
+# --------------------------------------------------------------------------- #
+def _dnp(sch, *refs):
+    """Mark components DNP in place; returns the schematic for chaining."""
+    for comp in sch.components:
+        if comp.designator in refs:
+            comp.dnp = True
+    return sch
+
+
+def test_topo_fitted_helpers():
+    fitted = _comp("R1", "Device:R", "10k")
+    unfitted = _comp("R2", "Device:R", "10k", dnp=True)
+    assert topo.is_fitted(fitted) and not topo.is_dnp(fitted)
+    assert topo.is_dnp(unfitted) and not topo.is_fitted(unfitted)
+    # an UNRESOLVED reference is not evidence of a DNP part
+    assert not topo.is_fitted(None) and not topo.is_dnp(None)
+
+
+def test_dnp_pullup_does_not_satisfy_i2c():
+    sch = _dnp(_i2c_sch("1.8k", "1.8k"), "R1")
+    fs = _run(i2c_pullup, sch)
+    assert [f.code for f in fs] == ["REVIEW_I2C_NO_PULLUP"]
+    assert "I2C1_SDA" in fs[0].refs
+
+
+def test_dnp_divider_pullup_leaves_the_bus_unpulled_on_both_lines():
+    sch = _dnp(_i2c_sch("1.8k", "1.8k"), "R1", "R2")
+    assert sorted(f.code for f in _run(i2c_pullup, sch)) == \
+        ["REVIEW_I2C_NO_PULLUP"] * 2
+
+
+def test_dnp_load_caps_do_not_satisfy_the_crystal():
+    sch = _dnp(_xtal_sch("22p", "22p"), "C1", "C2")
+    assert [f.code for f in _run(crystal, sch)] == ["REVIEW_XTAL_NO_LOADCAPS"]
+    # one side DNP is a one-sided load, not a symmetric pair
+    one = _dnp(_xtal_sch("22p", "22p"), "C2")
+    assert [f.code for f in _run(crystal, one)] == ["REVIEW_XTAL_ASYMMETRIC"]
+
+
+def test_dnp_cap_forms_no_rc_pole():
+    assert _run(rc_filter, _dnp(_rc_sch("1k", "100n"), "C1")) == []
+
+
+def test_dnp_pull_leaves_the_enable_floating():
+    # EN tied to +5V through a DNP resistor: the shipped board floats it.
+    comps = [_comp("U1", "Regulator:BUCK", "BUCK",
+                   pins=(("1", "VIN"), ("2", "EN"), ("3", "GND"),
+                         ("4", "VOUT"))),
+             _comp("R1", "Device:R", "100k", dnp=True)]
+    sch = _sch(comps, [("+5V", [("U1", "1"), ("R1", "1")]),
+                       ("GND", [("U1", "3")]),
+                       ("+3V3", [("U1", "4")]),
+                       ("EN_NET", [("U1", "2"), ("R1", "2")])])
+    assert [f.code for f in _run(enable_pin, sch)] == ["REVIEW_EN_FLOATING"]
+    # fitted, the same resistor ties it
+    comps[1].dnp = False
+    assert _run(enable_pin, sch) == []
+
+
+def test_dnp_tvs_does_not_protect_a_connector():
+    sch = _dnp(_conn_sch(with_tvs=True), "D1")
+    assert [f.code for f in _run(protection, sch)] == ["REVIEW_CONN_UNPROTECTED"]
+
+
+def test_dnp_fuse_and_diode_do_not_protect_the_entry():
+    sch = _dnp(_entry_sch(), "F1", "D1")
+    assert {f.code for f in _run(power_protect, sch)} == {
+        "REVIEW_FUSE_MISSING", "REVIEW_REVPOL_UNPROTECTED"}
+
+
+def test_dnp_feedback_resistor_leaves_the_opamp_open_loop():
+    sch = _dnp(_opamp_sch(rf="100k", rg="10k"), "R1")   # R1 = the feedback R
+    assert [f.code for f in _run(opamp, sch)] == ["REVIEW_OPAMP_NO_FEEDBACK"]

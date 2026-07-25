@@ -26,13 +26,11 @@ Attack surfaces and the threats we defend against:
    uncatchable `SIGSEGV`); multi-megabyte atoms or unterminated quotes to exhaust memory; pathological
    node counts.
 3. **Resource exhaustion (DoS).** Oversized files, decompression/decoding bombs, runaway record counts.
-4. **Path traversal.** Malicious `lib_id`, config `[paths]`, op-list `target_file`, or bridge request
-   paths that try to escape a project root, follow symlinks, or expand environment variables to read or
-   clobber files outside the intended directory.
+4. **Path traversal.** A malicious `lib_id`, config `[paths]`, or op-list `target_file` path that tries
+   to escape a project root, follow symlinks, or expand environment variables to read or clobber files
+   outside the intended directory.
 5. **Subprocess / command injection.** Invoking `kicad-cli` with attacker-influenced arguments.
 6. **Destructive writes.** A crash or a bad op-list corrupting the user's real `.kicad_sch`.
-7. **The Windows live bridge.** A second process racing or planting files in the request/response
-   directory.
 
 Out of scope: vulnerabilities in third-party tools you install yourself (KiCad, Altium), the security
 of files you *intend* to overwrite with `--apply`, and protecting against a malicious local user who
@@ -75,8 +73,7 @@ Additional structural defenses:
 - `realpath`s both base and candidate and **rejects any path that escapes `base`** or traverses a
   symlink out of the allowlisted root → `PATH_OUTSIDE_ROOT`.
 - **Never expands environment variables or `~`** from untrusted file contents.
-- Applied to `lib_id` symbol-source resolution, config `[paths]`, op-list `target_file`, and bridge
-  request/response paths.
+- Applied to `lib_id` symbol-source resolution, config `[paths]`, and op-list `target_file` paths.
 
 ### Subprocess safety — `safety.run_subprocess(argv, timeout, maxout)`
 
@@ -97,11 +94,11 @@ KiCad writes are **default dry-run**; an explicit `--apply` is required. On appl
 
 An mtime/hash optimistic lock detects concurrent external edits before replacing.
 
-### Windows live bridge
+### Altium files are never written
 
-The optional `drivers/altium_live/bridge.py` uses a **per-run `0700` directory**, opens files with
-`O_NOFOLLOW`, writes requests atomically (`*.tmp` → rename), and enforces single-flight with a `.lock`.
-A `protocol_version` handshake (`altium_ping`) rejects mismatched peers → `PROTOCOL_MISMATCH`.
+Every Altium reader is strictly read-only, and no code path drives an external EDA process (the
+Windows live-bridge scaffold was deleted in 0.17). The only write target is `.kicad_sch`, through the
+atomic pipeline above.
 
 ## Supported versions
 

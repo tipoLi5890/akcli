@@ -294,3 +294,49 @@ def test_apply_malformed_action_fails(proj):
     with pytest.raises(AkcliError) as ei:
         relink.apply(sch, [{"lib_id": "Fake:R2", "status": "replace"}])
     assert ei.value.code == "BAD_CONFIG"
+
+
+# --------------------------------------------------------------------------- #
+# GUI-open guard (write-path unification: same invariant as `draw --apply`)
+# --------------------------------------------------------------------------- #
+def test_apply_refuses_gui_locked_target(proj):
+    """KiCad holds the schematic open -> TARGET_LOCKED, file untouched."""
+    from akcli.writers import kicad as kwriter
+
+    sch, libdir, _ = proj
+    actions = relink.plan(sch, [libdir])
+    assert _statuses(actions)["Fake:R2"] == "replace"
+    original = sch.read_text(encoding="utf-8")
+
+    lck = kwriter.gui_lock_path(sch)
+    lck.write_text("locked\n", encoding="utf-8", newline="\n")
+
+    with pytest.raises(AkcliError) as ei:
+        relink.apply(sch, actions)
+    assert ei.value.code == "TARGET_LOCKED"
+    assert lck.name in ei.value.message
+
+    assert sch.read_text(encoding="utf-8") == original     # untouched
+    assert not (sch.parent / ".akcli" / "backups" / (sch.name + ".bak")).exists()
+    assert not list(sch.parent.glob("*.tmp"))              # no temp leftovers
+
+
+def test_apply_allow_open_overrides_gui_lock(proj):
+    from akcli.writers import kicad as kwriter
+
+    sch, libdir, _ = proj
+    kwriter.gui_lock_path(sch).write_text("locked\n", encoding="utf-8",
+                                          newline="\n")
+    res = relink.apply(sch, relink.plan(sch, [libdir]), allow_open=True)
+    assert res["written"] is True
+
+
+def test_apply_noop_ignores_gui_lock(proj):
+    """Nothing to replace = no write, so the lock is not a refusal."""
+    from akcli.writers import kicad as kwriter
+
+    sch, libdir, _ = proj
+    kwriter.gui_lock_path(sch).write_text("locked\n", encoding="utf-8",
+                                          newline="\n")
+    actions = [a for a in relink.plan(sch, [libdir]) if a["status"] != "replace"]
+    assert relink.apply(sch, actions)["written"] is False

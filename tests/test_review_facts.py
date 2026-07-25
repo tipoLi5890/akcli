@@ -297,3 +297,25 @@ def test_engine_metadata_lists_facts_mpns():
                               facts=_store("BUCK1", vref=(0.8, "V", 5)))
     assert meta["facts_mpns"] == ["BUCK1"]
     assert any(f.confidence == "datasheet_backed" for f in fs)
+
+
+# --------------------------------------------------------------------------- #
+# facts linkage audit (engine-level REVIEW_FACTS_UNMATCHED)
+# --------------------------------------------------------------------------- #
+def test_unmatched_facts_emit_engine_advisory():
+    # a facts file whose MPN matches no component must not fail silently
+    sch = _sch([_comp("R1", "Device:R", value="10k")], [])
+    store = _store("TPS61023", vref=(0.6, "V", 5))
+    findings, meta = engine.analyze(sch, facts=store)
+    (f,) = [f for f in findings if f.code == "REVIEW_FACTS_UNMATCHED"]
+    assert f.severity is report.Severity.NOTE
+    assert "TPS61023" in f.message and "MPN" in f.message
+    assert meta["facts_unmatched"] == ["TPS61023"]
+
+
+def test_matched_facts_emit_no_advisory():
+    sch = _sch([_comp("U1", "X", params={"MPN": "TPS61023"})], [])
+    store = _store("TPS61023", vref=(0.6, "V", 5))
+    findings, meta = engine.analyze(sch, facts=store)
+    assert not [f for f in findings if f.code == "REVIEW_FACTS_UNMATCHED"]
+    assert meta["facts_unmatched"] == []

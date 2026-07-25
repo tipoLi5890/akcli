@@ -103,7 +103,11 @@ Exit codes: `0` success, `2` bad usage, `4` part has no EasyEDA CAD data,
 ### (3) Place and close the BOM loop
 
 `--place` emits a one-op `place_component` op-list (`place.json`) with `lib_id`
-read from the produced `.kicad_sym` — never guessed from filenames:
+read from the produced `.kicad_sym` — never guessed from filenames — and prints the
+ready `draw` command including the `--symbols` flag it needs. Pass `--symbols`
+here even though `draw` can fall back to the project/global `sym-lib-table`: a
+freshly converted symbol is not registered in any table yet, so the fallback
+cannot find it.
 
 ```bash
 akcli jlc add C2040 --out ./mylib --place --designator U1 --at 1000 1500
@@ -119,7 +123,7 @@ akcli component board.kicad_sch U1             # confirm the placed part's pin -
 - **Match designators to sourced parts:** record each designator's LCSC C-number (e.g. as an
   `LCSC` entry in the op's `parameters` object) so the fabrication BOM maps `R10 -> C25804`
   unambiguously. Re-run `akcli check board.kicad_sch --bom` after every edit; it exits `1`
-  while findings remain (`--exit-zero` for report mode).
+  while findings remain (`--fail-on never` for report mode).
 - After any `--apply`, re-read (`akcli read` / `akcli net`) to confirm the write — never assume.
 - Run `akcli library audit <project>` to cross-check sym/fp-lib-table ↔ schematic ↔ footprint ↔
   3D. Fix any `FOOTPRINT_LIB_UNREGISTERED`/`MODEL_MISSING` finding with
@@ -130,9 +134,9 @@ akcli component board.kicad_sch U1             # confirm the placed part's pin -
 
 ```bash
 akcli jlc datasheet C2984661                  # resolve: PDF URL + MPN + manufacturer
-akcli jlc datasheet C2984661 --fetch          # download -> ~/.cache/akcli/datasheets/
-akcli jlc datasheet board.kicad_sch --fetch   # every BOM line with an LCSC id, one run
-akcli jlc datasheet board.kicad_sch --resolve-mpn --fetch  # MPN-only lines: catalog lookup first
+akcli jlc datasheet C2984661 --fetch --out datasheets   # download -> ./datasheets (project-local)
+akcli jlc datasheet board.kicad_sch --fetch --out datasheets  # every BOM line with an LCSC id, one run
+akcli jlc datasheet board.kicad_sch --resolve-mpn --fetch --out datasheets  # MPN-only lines: catalog lookup first
 ```
 
 - Links come from the part's **EasyEDA record** (szlcsc-hosted PDF; the jlcsearch

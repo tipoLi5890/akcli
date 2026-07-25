@@ -313,9 +313,13 @@ def test_jlc_bom_csv_stdout_is_pure_csv(tmp_path, capsys, monkeypatch):
 # UX: did-you-mean, usage errors, --json envelopes
 # --------------------------------------------------------------------------- #
 def test_calc_unknown_did_you_mean(capsys):
-    assert main(["calc", "eserie"]) == EXIT["USAGE"]
+    # argparse-native choices now reject the typo at parse time with the
+    # full choose-from list (the correct name rides along in the message)
+    with pytest.raises(SystemExit) as exc:
+        main(["calc", "eserie"])
+    assert exc.value.code == EXIT["USAGE"]
     err = capsys.readouterr().err
-    assert "did you mean" in err and "eseries" in err
+    assert "invalid choice: 'eserie'" in err and "'eseries'" in err
 
 
 def test_calc_info_unknown_did_you_mean(capsys):

@@ -22,13 +22,184 @@ All notable changes to `akcli` are documented here. The format is based on
   (consumers must ignore unknown keys); a **major** schema bump may remove or rename fields and
   coincides with a package MAJOR bump.
 
-- **`protocol_version`** (integer; currently `1`) governs the op-list document and the Windows live
-  bridge. It is bumped **only** on a breaking change to op shapes, the result object, or the bridge
-  handshake. Executors and the bridge **reject a higher major `protocol_version`** with
-  `ERROR: PROTOCOL_MISMATCH` rather than guessing. Adding a new optional op or optional op field does
+- **`protocol_version`** (integer; currently `1`) governs the op-list document. It is bumped **only**
+  on a breaking change to op shapes or the result object. Executors **reject a higher major
+  `protocol_version`** with `ERROR: PROTOCOL_MISMATCH` rather than guessing. Adding a new optional op or optional op field does
   **not** bump `protocol_version`.
 
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
+
+## [Unreleased]
+
+## [0.17.0] - 2026-07-25
+
+### Changed (write-identity — re-apply compatibility note)
+- **Symbol/pin UUIDs are now seeded from the designator alone** (previously
+  `designator:op_index`). Editing an op-list — inserting or reordering ops — no longer
+  changes untouched parts' identity, so a re-apply after an edit updates in place instead
+  of duplicating the whole design downstream of the edit (a reproduced data-loss class).
+  Compatibility: a file written by an *older* akcli re-applied with an *edited* op-list
+  may still duplicate parts whose original op index was ≠ 0 — re-apply the unedited list
+  once (or start from `akcli undo`) before editing. Auto-allocated `#PWR` refs now
+  recover their replay identity by position+net (op-index-free).
+- **Hierarchical child sheets are writable.** The connectivity gate accepts
+  `/<top-root>/<sheet>` instance paths, so ops apply to a child file of an existing
+  hierarchy (previously every op — even `add_text` — was refused with a misleading
+  `INVALID_INSTANCES_PATH`). Single-segment paths must still name the file's own root.
+
+### Added
+- **`akcli check --integrity`** — the write gate's document checks (dangling endpoints,
+  duplicate uuids **and duplicate designators**, unresolved lib_ids, instance paths,
+  no-connect conflicts) now run read-only over any `.kicad_sch`, and join the default
+  check family; previously they only ran post-write inside `draw --apply`.
+- **Duplicate annotation keys are rejected** — two `add_text`/`add_rectangle`/
+  `add_text_box` ops sharing a `key` seeded the same uuid, so the second silently
+  replaced the first's node while both reported ok; `validate_oplist` now refuses the
+  op-list and the writer guards post-expansion collisions.
+- **`KICAD_SEXPR_BAD_NUMBER` + `INTERNAL` error codes** — a corrupt numeric field in a
+  `.kicad_sch` (bad merge, disk damage) raises a structured parse error instead of a raw
+  `ValueError` traceback, and a last-resort handler keeps the `--json` stdout-envelope
+  contract even for unexpected exceptions (traceback goes to stderr; `--debug` re-raises).
+- **`tools/sync_schemas.py`** — one command syncs `schemas/*.json` into the packaged
+  mirror (`--check` for drift); the op schema's 32 branches now declare
+  `additionalProperties: false` (plus the universal `group` tag), so schema-side
+  validation catches typos the internal validator already caught.
+- **DNP parts satisfy nothing** — a `(dnp yes)` pull-up/load-cap/bypass-cap/TVS/EN-tie
+  no longer silences the corresponding review/check rule (`topo.is_fitted` gates every
+  presence-satisfier search); BOM enumeration still sees DNP parts.
+- **`POWER_RAIL_NO_SOURCE`** (WARNING) — a recognized rail with ≥2 consumers and no
+  potential source (no POWER_OUT/OUTPUT pin, PWR_FLAG, connector/battery member,
+  entry-named or series-fed rail, or configured `[[rail]]`) is no longer fully silent.
+- **Per-net ERC type-confidence** — a fully-typed net keeps full severity for the
+  type-gated ERC rules even on a low-confidence board (one untyped connector no longer
+  demotes the whole board's typed findings to NOTE).
+- **GUI-open guard everywhere** — `relink-symbols --apply` and `library repair --apply`
+  now refuse with `TARGET_LOCKED` like `draw`/`arrange`/`undo` (`safety.
+  refuse_if_gui_locked`); a cross-engine parity test pins netbuild and the write gate to
+  the same junction/T-span/near-miss verdicts.
+- **mypy beachhead 33 → 38 files** — `netbuild`, `readers/sexpr`, `checks/diff`,
+  `writers/geometry`, `groupframe` join the typed core.
+
+### Fixed
+- **argparse `--json` envelope could be swallowed by a prior in-process run** —
+  stdout tracking now resets before parsing, so `_Parser.error`'s JSON envelope
+  no longer depends on what a previous `main()` call in the same process emitted
+  (embedders and test suites saw order-dependent behavior).
+
+### Added (pre-existing batch)
+- **Pin-level net queries** — `akcli net --at REF.PIN` (reverse lookup: which net is
+  this pin on), `net --same A.PIN B.PIN` (binary connectivity + the common net), and
+  `net --why REF.PIN` (attachment diagnosis: junction/wire-end/mid-span status, nearest
+  wire end / label / other pin with mil distances, `off_grid_50mil` flag, actionable
+  hints — built from the same quantized helpers `netbuild` uses). Unknown pins exit 8
+  with a did-you-mean plus the valid pin list.
+- **argparse failures are machine-readable under `--json`** — a wrong flag, wrong
+  choice, or unknown command now emits the standard
+  `{"error": {code: "USAGE", message, exit: 2, remediation}}` envelope (the argparse
+  message, including the full `choose from` list, rides along); plain-text behavior is
+  unchanged.
+- **`REVIEW_FACTS_UNMATCHED` engine advisory** — `review analyze` now reports (NOTE)
+  when audited facts files match no component MPN, instead of silently leaving those
+  findings heuristic; the metadata block gains a `facts_unmatched` list.
+- **`review drift`** — alias for `review diff` (findings-drift), disambiguating it from
+  the net-level `akcli diff`.
+- **`release preflight --sim <sim.json>`** — quantitative SPICE assertions as an opt-in
+  release gate: violations become manifest findings; a *requested* sim gate that cannot
+  run (no libngspice, deck build failure) FAILS rather than skips. No `--sim` = the usual
+  skipped-with-reason.
+- **`library relink`** — the library-family home of `relink-symbols` (same handler and
+  flags; the top-level name stays).
+- **`/circuit-datasheet` and `/circuit-release` slash commands** — direct entry points
+  for the datasheet→facts flow and the release gate (eight `/circuit-*` commands total).
+- **`NGSPICE_MISSING` / `NGSPICE_FAILED` / `NETWORK` are now registered error codes**
+  (exit 7) with remediation hints — they were emitted as pseudo-codes the `--json`
+  envelope could not recover; `jlc` network failures now raise through the shared error
+  path so `--json` gets the standard envelope.
+- **The blessed connection ladder** — docs/op-list-authoring.md and the authoring skill
+  now converge the connection vocabulary into one decision ladder (label-on-pin default →
+  `connect_and_label` → `route_net` → raw `add_wire` last), with bus/sheet/graphics ops
+  explicitly demoted to an advanced layer.
+- **`/circuit-sim` slash command** (`commands/circuit-sim.md`) — a direct entry point for
+  simulation; the `akcli-schematic-authoring` skill's trigger description now also owns
+  simulate/SPICE/ngspice requests. Both close the gap where "simulate this circuit" matched
+  no skill or command.
+- **Better op-list error messages for agents:** a top-level-array op-list now says exactly
+  how to wrap it (`{"protocol_version": 1, "target_format": "kicad", "ops": [...]}`);
+  `place_component` given `at` is told it takes `x_mil`/`y_mil`; a wire to a nonexistent
+  pin lists the component's valid pins with a did-you-mean.
+- **Altium reads no longer drop records silently** — every `.SchDoc` RECORD id the reader
+  does not consume is counted into a skipped-record histogram and surfaced as a real
+  reader warning (stderr `warning:` line + the `warnings` array in `read --json`):
+  `altium: skipped 5 unsupported record(s): 26 (Bus) ×3, 37 (BusEntry) ×2`. Unknown ids
+  print bare, known ones get their name from the (previously dead) `RECORDS` map, which
+  now covers the documented schematic record ids. This makes the missing Bus/BusEntry
+  support visible instead of inferring a quietly incomplete netlist. `Schematic.warnings`
+  was hardcoded `[]` on both Altium exit paths before.
+- **`.PrjPcb` multi-top and unreadable-child warnings** — a project listing more than one
+  top-level schematic warns and names the sheets it ignored (only one top is read), and a
+  project schematic that cannot be scanned for sheet symbols now warns with the file, error
+  class and message instead of being swallowed (it silently skewed top-sheet detection).
+
+### Fixed
+- Bare `akcli review` / `akcli review facts` exited with code 49 (the byte count of the
+  usage message — `sys.stderr.write(...) or EXIT` short-circuited) instead of the
+  documented usage exit 2.
+- `akcli draw --apply --dry-run` silently wrote the file; `--dry-run` now wins with a
+  warning, so a defensively added flag can never cause a write.
+
+### Changed
+- **`net --json` output is now the `nets` envelope** (breaking for `net --json`
+  consumers): the list branch emits
+  `{schema_version, source, total/matched/returned/truncated, nets: [...]}` instead of a
+  bare array, the `NAME` branch wraps its matches in the same envelope (plus per-net
+  diagnostics), and members are `"REF.PIN"` strings everywhere — one parser now covers
+  `net` and `nets`. Nets that carry aliases additionally expose a sorted `aliases` key
+  in both commands (additive; golden snapshots regenerated).
+- **`diff`/`verify` `--json` net members are now `"REF.PIN"` strings** (breaking for
+  consumers of `added_members`/`removed_members`, which were `[ref, pin]` pairs) — ONE
+  member encoding now covers `net`/`nets`/`diff`/`verify`; `schemas/diff.schema.json`
+  updated (+ mirror). Deliberate 0.x decision: this ships under the existing
+  `schema_version` (`"1.3"`) rather than forcing a model-wide major schema bump — this
+  changelog entry is the migration notice.
+- **`calc` names are argparse-native choices** — an unknown calculator now fails at
+  parse time with the full `choose from` list (and the USAGE JSON envelope under
+  `--json`) via a lazy choices container: the calculator registry still loads only when
+  a `calc` command actually parses, so nothing else pays the import. `calc --help`
+  documents the `list`/`info`/`batch` verbs explicitly.
+- Bare `akcli review` / `review facts` now route through the shared usage-error path,
+  so `--json` gets the standard error envelope (previously plain stderr text only).
+- **`review analyze --fail-on` now accepts the full shared ladder**
+  (`info|note|warning|error|critical|never`); the default stays advisory (exit 0), and
+  both `check`-family and `review` help texts state the opposite gating defaults
+  explicitly.
+- A missing `add_wire`/`add_bus` `vertices` field is now ONE missing-field error (the
+  misleading `NON_ORTHOGONAL_WIRE` duplicate is gone); a wrong-typed `vertices` is an
+  `OP_UNSUPPORTED` type error like every other field.
+- `akcli-circuit-debug` examples also move off the deprecated `--exit-zero`, and its
+  near-verbatim copy of the check metadata-caveat table now defers to
+  `akcli-schematic-review` (single source of truth); `render` help/docs state the
+  default `<input>.svg` write explicitly (`-o -` for stdout); `expected`'s always-JSON
+  output is documented as the one deliberate `--json` exception.
+- Skill/doc guidance: `akcli-schematic-review` examples use `--fail-on never` instead of
+  the deprecated `--exit-zero`; `jlc datasheet --fetch` examples steer to the project-local
+  `--out datasheets` (where `review analyze` auto-discovers); `akcli-release-gating` states
+  that simulation is not a preflight gate and CPL export stays in KiCad;
+  `akcli-circuit-debug` documents the generic `[[waiver]]` table; `docs/SPEC.md`,
+  `ROADMAP.md` and `akcli-altium-interop` drop the Altium live bridge entirely (see
+  Removed) and state that there is no Altium write path, live or offline.
+
+### Removed
+- **The Altium live-bridge subsystem is deleted** — `src/akcli/drivers/altium_live/`
+  (`bridge.py`, the DelphiScript `altium_api.pas`/`.PrjScr`, its README) and
+  `tests/test_bridge.py` are gone. It had **no CLI wiring** and contradicted the 0.14
+  KiCad-first positioning (Altium is import-only); it was already shelved indefinitely.
+  Consequences: `ops list --json` drops the deprecated per-op `altium_live` duplicate key
+  (`altium` remains, informational), `ops list` text says `altium:` instead of
+  `altium-live:`, and `ops.capabilities.json` (both mirrors) replaces
+  `altium_live_wired`/`altium_live_note` with `altium_write_wired: false` /
+  `altium_write_note` — `akcli capabilities --json` now publishes
+  `ops.altium_write_wired`. The `BRIDGE_BUSY`/`BRIDGE_TIMEOUT` error codes stay
+  **registered but unraised** (reserved) so the frozen error/exit tables do not change.
 
 ## [0.16.0] - 2026-07-23
 

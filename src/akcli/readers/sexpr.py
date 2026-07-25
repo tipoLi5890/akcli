@@ -24,6 +24,8 @@ rather than hanging, exhausting memory, or crashing the interpreter.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import re
 
 from ..errors import fail
@@ -133,7 +135,7 @@ class SNode:
         head = self.children[0]
         return head.value if head.is_atom else None
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[SNode]:
         return iter(self.children or ())
 
     def __len__(self) -> int:
@@ -220,6 +222,7 @@ def parse(text: str) -> SNode:
                 fail("KICAD_SEXPR_TOOBIG", f"node count exceeds {MAX_NODES}")
             if stack:
                 parent = stack[-1]
+                assert parent.ws is not None and parent.children is not None
                 parent.ws.append(ws)        # whitespace before this child
                 parent.children.append(node)
             elif root is None:
@@ -239,6 +242,7 @@ def parse(text: str) -> SNode:
             if not stack:
                 fail("KICAD_SEXPR_UNTERMINATED", f"unexpected ')' at offset {i - 1}")
             node = stack.pop()
+            assert node.ws is not None      # every stacked node is a list node
             node.ws.append(ws)              # whitespace before the closing paren
             if not stack:
                 # Root list closed; the remainder of the document is trailing trivia.
@@ -256,6 +260,7 @@ def parse(text: str) -> SNode:
             anode = SNode(True, text=atom_text)
             if stack:
                 parent = stack[-1]
+                assert parent.ws is not None and parent.children is not None
                 parent.ws.append(ws)
                 parent.children.append(anode)
             elif root is None:

@@ -69,11 +69,15 @@ RULES = (
 
 
 def _pullups(ctx: topo.ReviewCtx, net) -> list[tuple[str, object]]:
-    """``(resistor_ref, rail_net)`` pull-ups from this net to a power rail."""
+    """``(resistor_ref, rail_net)`` FITTED pull-ups from this net to a rail.
+
+    A DNP pull-up satisfies nothing — the shipped board's bus floats — so it
+    does not silence ``REVIEW_I2C_NO_PULLUP`` (:func:`topo.is_fitted`).
+    """
     out = []
     for ref, _pin in net.members:
         comp = ctx.comps.get(ref)
-        if comp is None or not topo.is_resistor(comp):
+        if comp is None or not topo.is_resistor(comp) or not topo.is_fitted(comp):
             continue
         on = topo.other_net(ctx, ref, net)
         if on is None or topo.net_is_ground(on):

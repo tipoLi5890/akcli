@@ -13,11 +13,17 @@ Code developed on macOS/Linux never sees either until CI does:
   determinism promise) failed on Windows only.
 
 This test makes the fix structural instead of whack-a-mole: an AST scan over
-``src/akcli`` (vendored code excluded) requires every ``Path.read_text`` to
-pin ``encoding=`` and every ``Path.write_text`` / text-mode builtin ``open``
+``src/akcli`` plus the dev/CI-executed trees ``tools/`` and ``hooks/``
+(vendored code excluded) requires every ``Path.read_text`` to pin
+``encoding=`` and every ``Path.write_text`` / text-mode builtin ``open``
 write to pin BOTH ``encoding=`` and ``newline=`` (readers may pin newline
 too, but translation on read is harmless). A dynamic ``**kwargs`` splat
 counts as providing them (the caller decided).
+
+``tools/`` and ``hooks/`` are in scope because they run on the Windows CI
+matrix too: the hook is spawned by the harness on every ``draw --apply``, and
+the tools write goldens/baselines/manifests whose bytes are asserted
+elsewhere — a CRLF-inflated golden is exactly the 0.10.0 failure again.
 """
 
 from __future__ import annotations
@@ -25,11 +31,19 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "akcli"
+ROOT = Path(__file__).resolve().parents[1]
+SCAN_ROOTS = (ROOT / "src" / "akcli", ROOT / "tools", ROOT / "hooks")
 
 
 def _py_files() -> list[Path]:
-    return [p for p in sorted(SRC.rglob("*.py")) if "_vendor" not in p.parts]
+    out: list[Path] = []
+    for root in SCAN_ROOTS:
+        if not root.is_dir():
+            continue
+        out += [p for p in sorted(root.rglob("*.py"))
+                if "_vendor" not in p.parts
+                and "__pycache__" not in p.parts]
+    return out
 
 
 def _kwarg_names(call: ast.Call) -> set[str]:
@@ -52,7 +66,7 @@ def _open_mode(call: ast.Call) -> str:
 def _violations() -> list[str]:
     out: list[str] = []
     for path in _py_files():
-        rel = path.relative_to(SRC.parent.parent).as_posix()
+        rel = path.relative_to(ROOT).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

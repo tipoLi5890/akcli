@@ -92,6 +92,28 @@ def is_power_symbol(comp: Component) -> bool:
     return (comp.designator or "").startswith("#")
 
 
+def is_fitted(comp: Component | None) -> bool:
+    """True when a component is actually populated (``dnp`` is not set).
+
+    Every **presence-satisfier** search — "a pull-up exists", "the crystal has
+    load caps", "a fuse sits in the entry path", "this connector net reaches a
+    TVS" — must go through this: a Do-Not-Populate part is drawn but never
+    fitted, so it satisfies nothing electrically. BOM/enumeration rules
+    deliberately keep seeing DNP parts (that is what ``bom_policy`` classes are
+    for) and must NOT call this.
+    """
+    return comp is not None and not comp.dnp
+
+
+def is_dnp(comp: Component | None) -> bool:
+    """True only for a component that is present AND marked Do-Not-Populate.
+
+    The inverse of :func:`is_fitted` for *unknown* parts: an unresolved
+    reference is not evidence of a DNP part, so it stays "fitted" here.
+    """
+    return comp is not None and comp.dnp
+
+
 # --------------------------------------------------------------------------- #
 # value parsing (engineering notation incl. infix style: 4k7, 1R0, 100n, 10uF)
 # --------------------------------------------------------------------------- #
@@ -302,11 +324,16 @@ def fb_pin_on(ctx: ReviewCtx, net: Net) -> tuple[str, str] | None:
 
 
 def caps_to_ground(ctx: ReviewCtx, net: Net) -> list[str]:
-    """Capacitors bridging this net to ground (sorted designators)."""
+    """Fitted capacitors bridging this net to ground (sorted designators).
+
+    DNP capacitors are excluded (:func:`is_fitted`): every caller asks an
+    ELECTRICAL question — does this node see a load/bypass cap (crystal load
+    pair, RC pole, rail decoupling count) — and an unpopulated cap answers no.
+    """
     out = []
     for ref, _pin in net.members:
         comp = ctx.comps.get(ref)
-        if comp is None or not is_capacitor(comp):
+        if comp is None or not is_capacitor(comp) or not is_fitted(comp):
             continue
         o = other_net(ctx, ref, net)
         if o is not None and net_is_ground(o):

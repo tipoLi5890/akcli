@@ -19,6 +19,13 @@ consumes ``M`` means *mega* (a "1M" resistor is 1 MΩ), but in SPICE ``M`` means
 *milli* and mega must be written ``MEG``. We parse with the mega meaning and
 render the SPICE ``MEG`` so the two never get crossed.
 
+:func:`spice_value` is lenient (unparseable text passes through) because it also
+serves display paths; every value that is actually *emitted* as an R/C/L element
+goes through :func:`passive_value` instead, which drops trailing rating tokens
+with a note (``"10k 1%"`` -> ``10k``) and refuses anything it cannot parse
+confidently with ``SIM_VALUE_INVALID`` — including an ohms-marked value on an
+inductor (a ferrite bead's ``600R`` is 600 Ω, never 600 H).
+
 :func:`fit_diode` turns datasheet forward-voltage points into a ``.model`` line.
 The default is deliberately conservative: a single table-anchored point plus an
 ideality prior beats a two-point fit off eyeballed curve coordinates, which the
@@ -35,7 +42,7 @@ from pathlib import Path
 from ..calc.si import parse_value
 from ..errors import fail
 
-__all__ = ["DeviceCard", "spice_value", "resolve", "fit_diode",
+__all__ = ["DeviceCard", "spice_value", "passive_value", "resolve", "fit_diode",
            "load_builtin", "builtin_names"]
 
 # Thermal voltage at ~300 K (kT/q); matches the live-session BAT54H fit.
@@ -56,6 +63,10 @@ class DeviceCard:
     full block to inject when one is required. ``pin_order`` lists symbol pin
     numbers in SPICE terminal order (``None`` = use the schematic pin order).
     ``status`` is ``"ok"`` | ``"skip"`` | ``"unmodeled"``.
+
+    ``value_note`` is set when the raw schematic value had to be *normalized* to
+    reach a SPICE-legal token (trailing tolerance/rating tokens dropped); the
+    deck surfaces it as a ``SIM_VALUE_NORMALIZED`` warning.
     """
 
     letter: str = ""
@@ -69,6 +80,9 @@ class DeviceCard:
     # pin-NUMBER order because pin NAMES could not identify the SPICE terminals;
     # the deck surfaces it as a SIM_PIN_ORDER_ASSUMED warning.
     pin_order_assumed: bool = False
+    # Set when the emitted value is a normalization of a multi-token schematic
+    # value ("10k 1%" -> "10k"); surfaced as SIM_VALUE_NORMALIZED by the deck.
+    value_note: str = ""
 
 
 # --- spice_value: engineering notation -> SPICE-safe value ------------------
@@ -144,6 +158,130 @@ def spice_value(text: str) -> str:
     except Exception:
         return raw
     return _render_spice(val)
+
+
+# --- passive_value: the STRICT value gate for emitted R/C/L -----------------
+# ``spice_value`` is deliberately lenient (it passes unparseable text through),
+# which is fine for display but a silent-wrong-answer trap in a deck: a value of
+# ``"10k 1%"`` used to reach ngspice verbatim, where it parses as *10* (the
+# tolerance token becoming a stray parameter) — a live repro read 3.30 V from a
+# divider that should have read 1.65 V and still exited 0/PASS. Every emitted
+# passive therefore goes through :func:`passive_value`, which either yields a
+# value it is *confident* about (dropping trailing rating/tolerance tokens with a
+# note) or refuses with ``SIM_VALUE_INVALID``.
+
+# Separators between the value and any trailing rating/tolerance tokens.
+_VALUE_SPLIT_RX = re.compile(r"[\s,;/|]+")
+# A trailing token that is only an SI prefix and/or a unit — i.e. a value that
+# was written with a space inside it ("4.7 k", "10 uF", "220 ohm"). Such a token
+# is re-joined onto the head instead of being dropped (dropping it would silently
+# turn 4.7 kΩ into 4.7 Ω).
+_PREFIX_TAIL_RX = re.compile(
+    r"(?i)^(?:meg|[pnuµmkgt])?(?:ohms?|Ω|f|h|r|farads?|henr(?:ies|y))?$"
+)
+# Explicit unit markers, mapped to the passive they can legally belong to.
+_OHM_WORD_RX = re.compile(r"(?i)(?:ohms?|Ω)$")
+_FARAD_WORD_RX = re.compile(r"(?i)farads?$")
+_HENRY_WORD_RX = re.compile(r"(?i)henr(?:ies|y)$")
+# IEC 60062 R-marking: "600R" (= 600 Ω) / "4R7" (= 4.7 Ω). The R is both a
+# decimal marker AND an ohms marker — on an L or C it means the part is specified
+# by impedance (a ferrite bead's "600R" is 600 Ω at 100 MHz, NOT 600 H).
+_R_MARK_RX = re.compile(r"^[0-9]*\.?[0-9]+[Rr][0-9]*$")
+# Value strings that mean "deliberately not populated" — a skip, not an error.
+_NOT_POPULATED = frozenset({"DNP", "DNF", "NP", "NM", "NC", "OPEN", "NOTFITTED",
+                            "NOT-FITTED", "NOSTUFF", "NOPOP"})
+_UNIT_NAME = {"R": "resistance (ohms)", "C": "capacitance (farads)",
+              "L": "inductance (henries)"}
+
+
+def _parse_strict(text: str) -> float | None:
+    """Parse ``text`` as a single engineering value, or ``None`` if it is not one.
+
+    Unlike :func:`spice_value` this never passes unparseable text through — it is
+    the confidence test the deck needs before emitting a value.
+    """
+    s = _strip_units(str(text).strip())
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    m = re.match(r"(?i)^([0-9]*\.?[0-9]+)\s*meg$", s)
+    if m:
+        return float(m.group(1)) * 1e6
+    try:
+        return float(parse_value(s))
+    except Exception:
+        return None
+
+
+def _value_unit_class(text: str) -> str:
+    """``"R"``/``"C"``/``"L"`` when ``text`` carries an explicit unit, else ``""``."""
+    s = str(text).strip()
+    if _OHM_WORD_RX.search(s) or _R_MARK_RX.match(s):
+        return "R"
+    if _FARAD_WORD_RX.search(s) or _UNIT_F_RX.search(s):
+        return "C"
+    if _HENRY_WORD_RX.search(s) or _UNIT_H_RX.search(s):
+        return "L"
+    return ""
+
+
+def passive_value(raw: object, letter: str, designator: str = "") -> tuple[str, str]:
+    """Normalize an R/C/L component value for the deck.
+
+    Returns ``(spice_value, note)``. ``note`` is empty when the whole value was
+    consumed; otherwise it records the trailing tokens that were dropped
+    (tolerance, voltage/temperature ratings, dielectric codes …) so the deck can
+    raise a ``SIM_VALUE_NORMALIZED`` warning.
+
+    Understood forms: everything :func:`spice_value` accepts (``4700``, ``4.7k``,
+    ``100nF``, ``1M`` = 1 MΩ, ``1e-7``), the IEC 60062 embedded-decimal notations
+    ``2M2``/``1k5``/``4R7``, a bare R ohms marker (``600R`` -> ``600``), a value
+    written with an internal space (``4.7 k``, ``220 ohm``), and any of those
+    followed by rating tokens (``"10k 1%"``, ``"100n 50V X7R"``).
+
+    Raises ``AkcliError('SIM_VALUE_INVALID')`` when the leading token is not a
+    value at all, or when its explicit unit contradicts the element (an ohms
+    marker on an inductor — the ferrite-bead ``600R`` = 600 H trap). A value that
+    means *deliberately unpopulated* (``DNP``, ``NP``, ``OPEN``, …) is not an
+    error: it returns ``("", "not populated")`` so the caller can skip the part.
+    """
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return "", ""
+    if text.upper().replace(" ", "") in _NOT_POPULATED:
+        return "", "not populated"
+
+    tokens = [t for t in _VALUE_SPLIT_RX.split(text) if t]
+    head, rest = tokens[0], tokens[1:]
+    # Re-join a split unit/prefix tail ("4.7" + "k", "10" + "uF", "220" + "ohm").
+    while rest and _PREFIX_TAIL_RX.match(rest[0]) \
+            and _parse_strict(head + rest[0]) is not None:
+        head = head + rest.pop(0)
+
+    if _parse_strict(head) is None:
+        fail("SIM_VALUE_INVALID",
+             f"{designator or 'component'}: value {text!r} is not a value SPICE "
+             f"can take (its leading token {head!r} does not parse as a number "
+             f"in engineering notation)")
+
+    unit_class = _value_unit_class(head)
+    if unit_class and letter in _UNIT_NAME and unit_class != letter:
+        fail("SIM_VALUE_INVALID",
+             f"{designator or 'component'}: value {text!r} is specified in "
+             f"{_UNIT_NAME[unit_class]}, but the part is emitted as a SPICE "
+             f"'{letter}' element whose value is {_UNIT_NAME[letter]} — e.g. a "
+             f"ferrite bead's '600R' is 600 ohms at its test frequency, not "
+             f"600 H")
+
+    rendered = spice_value(head)
+    note = ""
+    if rest:
+        note = (f"value {text!r} normalized to {rendered!r}; dropped trailing "
+                f"token(s) {' '.join(rest)}")
+    return rendered, note
 
 
 # --- resolution ladder ------------------------------------------------------
@@ -269,7 +407,15 @@ def _from_sim_fields(comp, params: dict) -> DeviceCard | None:
                       status="ok", note="from Sim.* fields")
     if letter in _PASSIVE:
         raw = sim_params or comp.value
-        card.value = spice_value(raw) if raw else None
+        if raw:
+            value, note = passive_value(raw, letter, comp.designator)
+            if note == "not populated":
+                return DeviceCard(status="skip",
+                                  note=f"value {raw!r} means not populated")
+            card.value = value
+            card.value_note = note
+        else:
+            card.value = None
     elif letter == "X":
         card.model_card = _model_card_for(name)
     elif letter in ("D", "Q") and name is None and sim_params:
@@ -348,7 +494,15 @@ def _from_spec_models(comp, entry: dict) -> DeviceCard:
         card.pin_order = [str(p) for p in po]
     if letter in _PASSIVE:
         raw = entry.get("params") or entry.get("value") or comp.value
-        card.value = spice_value(raw) if raw else None
+        if raw:
+            value, note = passive_value(raw, letter, comp.designator)
+            if note == "not populated":
+                return DeviceCard(status="skip",
+                                  note=f"value {raw!r} means not populated")
+            card.value = value
+            card.value_note = note
+        else:
+            card.value = None
     return card
 
 
@@ -364,13 +518,14 @@ def _from_heuristic(comp) -> DeviceCard:
             return DeviceCard(status="unmodeled",
                               note=f"{prefix}{comp.designator[1:] or ''} has no "
                                    "value to model; " + _UNMODELED_NOTE)
-        val = spice_value(comp.value)
-        # A value we could not normalize (still carries letters) is not trusted.
-        if val == str(comp.value).strip() and re.search(r"[A-Za-z]{2,}", val):
-            return DeviceCard(status="unmodeled",
-                              note=f"cannot parse value {comp.value!r}; "
-                                   + _UNMODELED_NOTE)
+        # Strict: a value we cannot parse confidently raises SIM_VALUE_INVALID
+        # rather than reaching ngspice verbatim (where "10k 1%" reads as 10).
+        val, note = passive_value(comp.value, prefix, comp.designator)
+        if note == "not populated":
+            return DeviceCard(status="skip",
+                              note=f"value {comp.value!r} means not populated")
         return DeviceCard(letter=prefix, value=val, status="ok",
+                          value_note=note,
                           note="passive from designator prefix + value")
     # A diode, transistor, IC, etc. NEEDS a model — never invent one silently.
     return DeviceCard(status="unmodeled",

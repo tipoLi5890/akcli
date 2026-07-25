@@ -36,7 +36,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import model
+from . import model, safety
 from .errors import fail
 from .readers import kicad, kicad_lib, sexpr
 from .readers.kicad_lib import _read_text
@@ -162,7 +162,7 @@ def _normalize_only(only: object) -> set[str] | None:
 # apply
 # --------------------------------------------------------------------------- #
 def apply(sch_path: os.PathLike | str, actions: list[dict],
-          backup: bool = True) -> dict:
+          backup: bool = True, *, allow_open: bool = False) -> dict:
     """Splice the ``replace`` actions into ``sch_path`` (atomic, gated).
 
     Non-``replace`` actions are ignored, so :func:`plan`'s full output can be
@@ -171,11 +171,20 @@ def apply(sch_path: os.PathLike | str, actions: list[dict],
     (see module docstring) before ``.akcli/backups/<name>.bak`` is written
     (when ``backup``) and the file is atomically replaced.
 
+    Like every other schematic write path this refuses ``TARGET_LOCKED`` when
+    KiCad holds the target open (``~<name>.lck``) unless ``allow_open`` — the
+    shared invariant lives in :func:`akcli.safety.refuse_if_gui_locked`.
+
     Returns ``{"path", "replaced": [lib_ids], "backup": path | None,
     "written": bool}``. Raises ``VERIFY_FAILED`` when the gate refuses,
     ``SYMBOL_NOT_FOUND`` when a replace targets a lib_id no longer embedded.
     """
     p = Path(os.fspath(sch_path))
+    # GUI-open guard first: with a real replacement pending this call *will*
+    # write, so refuse before parsing/splicing anything.
+    if any((act or {}).get("status") == "replace" for act in actions or []):
+        safety.refuse_if_gui_locked(p, allow_open=allow_open,
+                                    what="the relink write")
     original = _read_text(p)
     doc = sexpr.parse(original)
     if doc.tag != "kicad_sch":

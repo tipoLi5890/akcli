@@ -45,30 +45,60 @@ RECORD_WIRE = 27          # ★
 RECORD_JUNCTION = 29      # ★
 RECORD_DESIGNATOR = 34
 RECORD_PARAMETER = 41
+RECORD_BUS = 26           # ★ (NOT read — surfaced by the skipped-record histogram)
+RECORD_BUS_ENTRY = 37     # ★ (NOT read — surfaced by the skipped-record histogram)
 RECORD_IMPL_44 = 44
 RECORD_IMPL_MODEL = 45
 RECORD_IMPL_FOOTPRINT = 46
 RECORD_IMPL_48 = 48
 
+# id -> human name, used by the readers' skipped-record histogram (an unknown id
+# falls back to its bare number, so this map never needs to be exhaustive).
 RECORDS: dict[int, str] = {
     RECORD_COMPONENT: "Component",
     RECORD_PIN: "Pin",
+    3: "IEEESymbol",
+    4: "Label",
+    5: "Bezier",
     RECORD_POLYLINE: "Polyline",
+    7: "Polygon",
+    8: "Ellipse",
+    9: "PieChart",
+    10: "RoundRectangle",
+    11: "EllipticalArc",
+    12: "Arc",
+    13: "Line",
+    14: "Rectangle",
     RECORD_SHEET_SYMBOL: "SheetSymbol",
     RECORD_SHEET_ENTRY: "SheetEntry",
     RECORD_POWER_PORT: "PowerPort",
     RECORD_PORT: "Port",
     RECORD_NO_ERC: "NoERC",
     RECORD_NET_LABEL: "NetLabel",
+    RECORD_BUS: "Bus",
     RECORD_WIRE: "Wire",
+    28: "TextFrame",
     RECORD_JUNCTION: "Junction",
+    30: "Image",
+    31: "Sheet",
+    32: "SheetName",
+    33: "SheetFileName",
     RECORD_DESIGNATOR: "Designator",
+    RECORD_BUS_ENTRY: "BusEntry",
+    39: "Template",
     RECORD_PARAMETER: "Parameter",
+    43: "WarningSign",
     RECORD_IMPL_44: "Implementation",
     RECORD_IMPL_MODEL: "ModelImplementation",
     RECORD_IMPL_FOOTPRINT: "FootprintImplementation",
     RECORD_IMPL_48: "Implementation48",
 }
+
+
+def record_name(rid: int) -> str:
+    """``"26 (Bus)"`` for a known id, the bare ``"91"`` for an unknown one."""
+    name = RECORDS.get(rid)
+    return f"{rid} ({name})" if name else str(rid)
 
 _UTF8_PREFIX = "%UTF8%"
 
@@ -172,6 +202,7 @@ __all__ = [
     "coord",
     "pin_electrical_type",
     "RECORDS",
+    "record_name",
     "RECORD_COMPONENT",
     "RECORD_PIN",
     "RECORD_POLYLINE",
@@ -181,6 +212,8 @@ __all__ = [
     "RECORD_PORT",
     "RECORD_NO_ERC",
     "RECORD_NET_LABEL",
+    "RECORD_BUS",
+    "RECORD_BUS_ENTRY",
     "RECORD_WIRE",
     "RECORD_JUNCTION",
     "RECORD_DESIGNATOR",

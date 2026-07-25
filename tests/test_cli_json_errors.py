@@ -131,3 +131,80 @@ def test_json_error_stays_off_in_text_mode():
     rc, out, _ = run_cli(["read", "/nonexistent/board.kicad_sch"])
     assert rc == 4
     assert out == ""        # text mode: stdout untouched, stderr has the line
+
+
+# --------------------------------------------------------------------------- #
+# argparse-level failures (wrong flag / wrong choice / unknown command)
+# --------------------------------------------------------------------------- #
+def _run_argparse(argv):
+    """argparse aborts with SystemExit before main() can return."""
+    import contextlib
+    import io
+
+    from akcli.cli import main
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with pytest.raises(SystemExit) as exc:
+            main(argv)
+    return exc.value.code, out.getvalue(), err.getvalue()
+
+
+def test_argparse_unknown_flag_emits_json_envelope():
+    rc, out, err = _run_argparse(["--json", "nets", "--frobnicate"])
+    assert rc == 2
+    doc = json.loads(out)
+    assert doc["error"]["code"] == "USAGE" and doc["error"]["exit"] == 2
+    assert "--frobnicate" in doc["error"]["message"]
+    assert doc["error"]["remediation"]
+    assert "usage:" in err          # the human usage text stays on stderr
+
+
+def test_argparse_invalid_choice_lists_choices_in_json():
+    rc, out, _ = _run_argparse(["--json", "check", "x.kicad_sch",
+                                "--fail-on", "sometimes"])
+    assert rc == 2
+    doc = json.loads(out)
+    assert "invalid choice" in doc["error"]["message"]
+    assert "never" in doc["error"]["message"]   # the full choices list rides along
+
+
+def test_argparse_unknown_command_emits_json_envelope():
+    rc, out, _ = _run_argparse(["--json", "bogus-command"])
+    assert rc == 2
+    doc = json.loads(out)
+    assert doc["error"]["code"] == "USAGE"
+    assert "bogus-command" in doc["error"]["message"]
+
+
+def test_argparse_error_stays_plain_without_json():
+    rc, out, err = _run_argparse(["nets", "--frobnicate"])
+    assert rc == 2
+    assert out == ""                # no envelope unless --json was asked for
+    assert "usage:" in err
+
+
+def test_unexpected_exception_keeps_json_envelope(tmp_path, capsys, monkeypatch):
+    """A bug-class exception (TypeError etc.) must still emit the JSON error
+    envelope on stdout and exit PARSE — never a bare traceback with empty
+    stdout (the audit's reproduced contract break)."""
+    from akcli import cli as cli_mod
+    from akcli import netbuild
+    from akcli.errors import EXIT
+
+    p = tmp_path / "x.kicad_sch"
+    p.write_text(
+        '(kicad_sch (version 20231120) (generator "t")\n'
+        '  (uuid "aaaaaaaa-0000-4000-8000-000000000000"))\n',
+        encoding="utf-8")
+
+    def boom(*a, **k):
+        raise TypeError("synthetic handler bug")
+
+    monkeypatch.setattr(netbuild, "build_nets", boom)
+    rc = cli_mod.main(["nets", str(p), "--json"])
+    captured = capsys.readouterr()
+    assert rc == EXIT["PARSE"]
+    doc = json.loads(captured.out)
+    assert doc["error"]["code"] == "INTERNAL"
+    assert "TypeError" in captured.err

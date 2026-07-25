@@ -39,7 +39,12 @@ becomes a `datasheet_backed` judgement with the exact page as evidence — and
 - **Absence is honest.** A part whose datasheet does not state a number gets
   NO fact for it. Detectors fall back to their heuristics — never to a guess.
 - **One MPN, one file.** Facts are keyed by the exact MPN; a variant with
-  different numbers (voltage options, grades) is its own facts file.
+  different numbers (voltage options, grades) is its own facts file. The
+  schematic component must carry that MPN (a parameter, or the exact Value) or
+  the facts never bind: `review analyze` reports `REVIEW_FACTS_UNMATCHED` (NOTE,
+  plus a `facts_unmatched` list in the metadata) for every facts file that
+  matched no component. Treat that as a failed extraction, not a clean run —
+  the findings you meant to harden are still heuristic.
 
 ## Workflow
 

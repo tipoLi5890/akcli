@@ -64,8 +64,10 @@
       "required": ["op"],
       "oneOf": [
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_component" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "lib_id": { "type": "string" },
             "designator": { "type": "string" },
             "x_mil": { "type": "number" },
@@ -84,8 +86,10 @@
           "description": "Position is exactly one of x_mil+y_mil (absolute) or anchor (+offset_mil, relative to a placed pin/component)."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "delete_component" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "designator": { "type": "string" },
             "cascade": { "type": "boolean",
                          "description": "Also delete wires ending on a deleted pin plus labels/no_connects/junctions anchored there (cascaded uuids are reported)." }
@@ -93,8 +97,10 @@
           "required": ["op", "designator"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "delete_object" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "uuid": { "type": "string" },
             "match": {
               "type": "object",
@@ -115,8 +121,10 @@
           ]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "move_component" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "designator": { "type": "string" },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
@@ -130,8 +138,10 @@
           "description": "Destination is exactly one of x_mil+y_mil (absolute) or anchor (+offset_mil)."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "set_component_transform" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "designator": { "type": "string" },
             "rotation": { "$ref": "#/$defs/rotation" },
             "mirror": { "$ref": "#/$defs/mirror" }
@@ -139,8 +149,10 @@
           "required": ["op", "designator"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "set_component_parameters" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "designator": { "type": "string" },
             "reference": { "type": "string" },
             "value": { "type": "string" },
@@ -150,15 +162,19 @@
           "required": ["op", "designator"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_wire" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "vertices": { "type": "array", "items": { "$ref": "#/$defs/endpoint" }, "minItems": 2 }
           },
           "required": ["op", "vertices"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "route_net" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "from": { "$ref": "#/$defs/endpoint" },
             "to": { "$ref": "#/$defs/endpoint" },
             "style": { "enum": ["auto", "hv", "vh", "z"],
@@ -171,22 +187,28 @@
           "description": "Deterministic orthogonal auto-route between two endpoints: coaxial -> straight wire; otherwise an L/Z whose corner provably avoids every placed pin tip (a coincident corner would silently merge nets)."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_junction" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "at": { "$ref": "#/$defs/point" }
           },
           "required": ["op", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_no_connect" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "pin": { "$ref": "#/$defs/endpoint" }
           },
           "required": ["op", "pin"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_net_label" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "name": { "type": "string" },
             "at": { "$ref": "#/$defs/anchor" },
             "scope": { "$ref": "#/$defs/scope" },
@@ -195,8 +217,10 @@
           "required": ["op", "name", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_power_port" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "lib_id": { "type": "string" },
             "net_name": { "type": "string" },
             "at": { "$ref": "#/$defs/anchor" },
@@ -205,8 +229,10 @@
           "required": ["op", "lib_id", "net_name", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_gnd" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "lib_id": { "type": "string" },
             "net_name": { "type": "string" },
             "at": { "$ref": "#/$defs/anchor" },
@@ -215,8 +241,10 @@
           "required": ["op", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_vcc" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "lib_id": { "type": "string" },
             "net_name": { "type": "string" },
             "at": { "$ref": "#/$defs/anchor" },
@@ -225,8 +253,10 @@
           "required": ["op", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "rename_net" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "from": { "type": "string" },
             "to": { "type": "string" },
             "scope": { "$ref": "#/$defs/scope",
@@ -235,23 +265,29 @@
           "required": ["op", "from", "to"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_bus" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "vertices": { "type": "array", "items": { "$ref": "#/$defs/point" }, "minItems": 2 }
           },
           "required": ["op", "vertices"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_bus_entry" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "at": { "$ref": "#/$defs/point" },
             "size": { "$ref": "#/$defs/point" }
           },
           "required": ["op", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_text" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "text": { "type": "string" },
             "at": { "$ref": "#/$defs/point" },
             "angle": { "type": "number" },
@@ -260,8 +296,10 @@
           "required": ["op", "text", "at"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_rectangle" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "start": { "$ref": "#/$defs/point", "description": "One corner [x, y] mil of the box." },
             "end": { "$ref": "#/$defs/point", "description": "The opposite corner [x, y] mil." },
             "stroke_width_mil": { "type": "number", "description": "Border line width in mils (0 = KiCad default)." },
@@ -272,8 +310,10 @@
           "description": "Top-level graphic rectangle (pure annotation, connectivity-neutral): module borders / group frames. Delete by uuid or by kind (it has no `at` anchor, so the match `at` selector never hits a rectangle)."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_text_box" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "text": { "type": "string", "description": "Note content; \\n for line breaks." },
             "at": { "$ref": "#/$defs/point", "description": "TOP-LEFT corner [x, y] mil of the box." },
             "size": { "$ref": "#/$defs/point", "description": "[width, height] mil." },
@@ -284,8 +324,10 @@
           "description": "Bordered multi-line note box (module notes / design rationale). Pure annotation, connectivity-neutral; grammar fixture-verified against a real KiCad."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "add_sheet" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "name": { "type": "string", "description": "Sheetname property value." },
             "file": { "type": "string", "description": "Sheetfile property value; the referenced child .kicad_sch is NOT created by this op." },
             "at": { "$ref": "#/$defs/point", "description": "Top-left corner [x, y] mil of the sheet box." },
@@ -310,8 +352,10 @@
           "description": "Emit a hierarchical (sheet ...) node with Sheetname/Sheetfile, sheet pins at computed edge coordinates and the (instances) block; the child file is authored separately."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "set_title_block" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "title": { "type": "string" },
             "date": { "type": "string" },
             "rev": { "type": "string" },
@@ -331,8 +375,10 @@
           "description": "Set/replace title-block fields (at least one required). Find-or-create keeps the node where eeschema expects it (after paper, before lib_symbols); connectivity-neutral; unchanged values replay as a no-op note."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_divider" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
             "top_net": { "type": "string" },
@@ -346,8 +392,10 @@
           "required": ["op", "x_mil", "y_mil", "top_net", "mid_net", "bottom_net"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_decoupling" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
             "anchor": { "$ref": "#/$defs/anchorref" },
@@ -362,8 +410,10 @@
           "description": "Macro: one bypass cap + rail/gnd labels on its pins. Position is exactly one of x_mil+y_mil or anchor (+offset_mil) — e.g. anchor 'U1.VCC' drops the cap next to the pin it decouples."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_pullup" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
             "anchor": { "$ref": "#/$defs/anchorref" },
@@ -378,8 +428,10 @@
           "description": "Macro: one pull-up/-down resistor + labels. Position is exactly one of x_mil+y_mil or anchor (+offset_mil)."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_led_indicator" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
             "net": { "type": "string" },
@@ -392,8 +444,10 @@
           "required": ["op", "x_mil", "y_mil", "net"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_rc_filter" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
             "in_net": { "type": "string" },
@@ -407,8 +461,10 @@
           "required": ["op", "x_mil", "y_mil", "in_net", "out_net"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_crystal" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "x_mil": { "type": "number" },
             "y_mil": { "type": "number" },
             "in_net": { "type": "string" },
@@ -422,8 +478,10 @@
           "required": ["op", "x_mil", "y_mil", "in_net", "out_net"]
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_array" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "lib_id": { "type": "string" },
             "designator_prefix": { "type": "string" },
             "count": { "type": "integer", "minimum": 1, "maximum": 200 },
@@ -442,8 +500,10 @@
           "description": "Macro: N identical parts in a row/column at a fixed pitch, named <prefix><start_index>.. — placement sugar; labels/wiring stay explicit."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "connect_and_label" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "from": { "$ref": "#/$defs/endpoint" },
             "to": { "$ref": "#/$defs/endpoint" },
             "net": { "type": "string" },
@@ -454,8 +514,10 @@
           "description": "Macro: pin-to-pin wire + ONE net label mid-wire (the fix for facing-pin label collisions)."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "place_pwr_flag" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "at": { "$ref": "#/$defs/anchor" },
             "rotation": { "$ref": "#/$defs/rotation" }
           },
@@ -463,8 +525,10 @@
           "description": "Macro: power:PWR_FLAG placed MID-WIRE (on-pin placement overlaps symbol bodies); default rotation 90 turns the flag body off the wire axis."
         },
         {
+          "additionalProperties": false,
           "properties": {
             "op": { "const": "terminate_unused_unit" },
+            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
             "designator": { "type": "string" },
             "lib_id": { "type": "string" },
             "unit": { "type": "integer", "minimum": 1 },

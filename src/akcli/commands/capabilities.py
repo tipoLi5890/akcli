@@ -201,13 +201,13 @@ def build_manifest() -> dict:
                                   ".kicad_sch must be authored as its own "
                                   "draw target",
             },
-            # HONESTY: the per-op "altium" support matrix describes the
-            # (experimental, Windows-only) live-bridge executor, which has NO
-            # CLI wiring today — plan/draw always build target_format "kicad".
-            # Read from ops.capabilities.json (the single source of truth) so
-            # wiring the bridge up cannot leave this manifest stale.
-            "altium_live_wired": bool(
-                _ops.load_capabilities().get("altium_live_wired", False)),
+            # HONESTY: Altium is import-only — the per-op "altium" support
+            # matrix is informational and there is NO Altium write executor;
+            # plan/draw always build target_format "kicad". Read from
+            # ops.capabilities.json (the single source of truth) so the manifest
+            # cannot drift from the published matrix.
+            "altium_write_wired": bool(
+                _ops.load_capabilities().get("altium_write_wired", False)),
         },
         "calculators": {"count": len(CALCS), "names": sorted(CALCS)},
         "schemas": _schema_inventory(),

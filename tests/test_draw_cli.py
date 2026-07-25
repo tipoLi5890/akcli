@@ -194,3 +194,101 @@ def test_draw_missing_target_is_usage_error(tmp_path):
     ops = _ops_file(tmp_path, _GOOD_OPS)
     rc = main(["draw", "--ops", str(ops)])
     assert rc == EXIT["USAGE"]
+
+
+def test_draw_apply_plus_dry_run_never_writes(tmp_path, capsys):
+    # a defensively added --dry-run must win over --apply (safety flag first)
+    tgt = _copy(tmp_path)
+    ops = _ops_file(tmp_path, _GOOD_OPS)
+    before = tgt.read_bytes()
+    rc = main(["draw", str(tgt), "--ops", str(ops), "--apply", "--dry-run"])
+    err = capsys.readouterr().err
+    assert rc == EXIT["OK"]
+    assert tgt.read_bytes() == before
+    assert "honoring --dry-run" in err
+
+
+def test_unknown_pin_error_lists_valid_pins(tmp_path, capsys):
+    tgt = _copy(tmp_path)
+    ops = _ops_file(tmp_path, [
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R9",
+         "x_mil": 7000, "y_mil": 4000},
+        {"op": "add_wire", "vertices": ["R9.3", [7000, 4300]]},
+    ])
+    rc = main(["plan", str(tgt), "--ops", str(ops)])
+    out = capsys.readouterr().out
+    assert rc == EXIT["OPLIST"]
+    assert "valid pins: 1, 2" in out
+
+
+# --------------------------------------------------------------------------- #
+# op-list EDITING must not duplicate untouched parts (designator-seeded uuids)
+# --------------------------------------------------------------------------- #
+def test_insert_op_then_reapply_does_not_duplicate(tmp_path, capsys):
+    tgt = _copy(tmp_path)
+    base = [
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R21",
+         "x_mil": 7000, "y_mil": 4000, "value": "1k"},
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R22",
+         "x_mil": 7000, "y_mil": 4600, "value": "2k"},
+    ]
+    ops1 = _ops_file(tmp_path, base, name="ops1.json")
+    assert main(["draw", str(tgt), "--ops", str(ops1), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+
+    # Insert a NEW op at the FRONT — downstream ops all shift index.
+    edited = [
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R20",
+         "x_mil": 7000, "y_mil": 3400, "value": "3k"},
+        *base,
+    ]
+    ops2 = _ops_file(tmp_path, edited, name="ops2.json")
+    assert main(["draw", str(tgt), "--ops", str(ops2), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+
+    text = tgt.read_text(encoding="utf-8")
+    for ref in ("R20", "R21", "R22"):
+        assert text.count(f'(reference "{ref}"') == 1, ref
+
+
+def test_duplicate_designator_gate_flags_literal_dup(tmp_path, capsys):
+    """A doc carrying the same ref+unit on two symbol nodes must not verify."""
+    import re
+
+    from akcli.readers import sexpr as sx
+    from akcli.writers import connectivity
+
+    tgt = _copy(tmp_path)
+    ops = _ops_file(tmp_path, [
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R31",
+         "x_mil": 7000, "y_mil": 4000, "value": "1k"},
+    ])
+    assert main(["draw", str(tgt), "--ops", str(ops), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+
+    text = tgt.read_text(encoding="utf-8")
+    assert not [f for f in connectivity.verify(sx.parse(text))
+                if f.code == "DUPLICATE_DESIGNATOR"]
+
+    # Clone R31's placed-symbol block (balanced-paren scan) under fresh uuids.
+    start = text.rindex("(symbol (lib_id", 0, text.index('"R31"'))
+    depth, i = 0, start
+    in_str = False
+    while True:
+        c = text[i]
+        if c == '"' and text[i - 1] != "\\":
+            in_str = not in_str
+        elif not in_str and c == "(":
+            depth += 1
+        elif not in_str and c == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    block = text[start:i + 1]
+    clone = re.sub(r'"([0-9a-f]{8})(-[0-9a-f-]{27})"',
+                   lambda g: '"deadbeef' + g.group(2) + '"', block)
+    assert clone != block
+    dup = text[:text.rindex(")")] + "\n" + clone + "\n)"
+    findings = connectivity.verify(sx.parse(dup))
+    assert [f for f in findings if f.code == "DUPLICATE_DESIGNATOR"]

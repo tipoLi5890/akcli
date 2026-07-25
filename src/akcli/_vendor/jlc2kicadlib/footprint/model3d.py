@@ -200,7 +200,7 @@ Shape{{
         f"{footprint_info.model_dir}/"
         f"{footprint_info.footprint_name}.wrl"
     )
-    with open(filename, "w") as f:
+    with open(filename, "w", encoding="utf-8", newline="\n") as f:
         f.write(wrl_content)
 
     if footprint_info.model_base_variable:

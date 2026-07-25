@@ -85,6 +85,41 @@ def run_subprocess(
     return proc
 
 
+def refuse_if_gui_locked(
+    paths: os.PathLike | str | list | tuple,
+    *,
+    allow_open: bool = False,
+    what: str = "this edit",
+) -> None:
+    """Refuse (``TARGET_LOCKED``) when KiCad holds any of ``paths`` open.
+
+    KiCad drops a ``~<name>.lck`` next to a document it has open; writing under
+    an open GUI is a losing race (the GUI's later save overwrites the file from
+    memory). ``draw --apply`` has always refused this way — this is the shared
+    form of the invariant so *every* schematic/library write path (op-list
+    executor, ``relink``, ``library repair``) refuses identically, before
+    touching a single byte.
+
+    The lock-file naming has exactly one source of truth,
+    :func:`akcli.writers.kicad.gui_lock_path`, imported lazily here:
+    ``writers.kicad`` imports this module at module level, so a top-level
+    import back would be a cycle.
+    """
+    if allow_open:
+        return
+    from .writers.kicad import gui_lock_path
+
+    items = [paths] if isinstance(paths, (str, os.PathLike)) else list(paths)
+    for cand in items:
+        p = Path(os.fspath(cand))
+        lck = gui_lock_path(p)
+        if lck.exists():
+            fail("TARGET_LOCKED",
+                 f"{p.name} appears open in the KiCad GUI (found {lck.name}); "
+                 f"close it first — refusing {what}, because a GUI save would "
+                 "overwrite it")
+
+
 def atomic_write_with_backup(
     path: os.PathLike | str,
     data: bytes | str,

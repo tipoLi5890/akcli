@@ -21,9 +21,9 @@ complete provenance record.
 
 ## Attribution chain — Altium MCP pattern reference
 
-The optional Windows live-bridge design (`drivers/altium_live/`) and the structured `ERROR: CODE`
-convention were informed, as an **independent-design reference for high-level patterns only**, by the
-Altium MCP lineage:
+The structured `ERROR: CODE` convention — and the since-deleted Windows live-bridge scaffold
+(`drivers/altium_live/`, removed in 0.17) — were informed, as an **independent-design reference for
+high-level patterns only**, by the Altium MCP lineage:
 
 - **flaco-source / altium-mcp** (2026) — file-based JSON request/response bridge between an external
   process and a running Altium instance; a `protocol_version` field on the bridge protocol; structured
@@ -33,8 +33,8 @@ Altium MCP lineage:
 
 Patterns referenced (no source copied): a file-based JSON bridge with atomic request/response files; a
 protocol-version handshake; structured machine-readable error strings. Everything in this repository
-implementing those patterns — the schema namespace, the error-code registry, the op-list vocabulary,
-the bridge directory/locking scheme, and all code — is original to this project.
+that ever implemented those patterns — the schema namespace, the error-code registry, the op-list
+vocabulary, and all code — is original to this project (the bridge scaffold itself is gone).
 
 These upstream projects are distributed under the MIT License. The full MIT License text, reproduced for
 each attributed copyright holder, follows.

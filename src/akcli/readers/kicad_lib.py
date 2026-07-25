@@ -34,7 +34,7 @@ import os
 from pathlib import Path
 
 from .. import model, units
-from ..errors import fail
+from ..errors import AkcliError, fail
 from ..kicad_escape import unescape_string
 from ..safety import MAX_FILE_BYTES
 from . import sexpr
@@ -75,6 +75,22 @@ def _atom_value(node: sexpr.SNode, idx: int) -> str | None:
     return None
 
 
+def _fnum_atom(node: sexpr.SNode | None, idx: int,
+               default: float = 0.0) -> float:
+    """Guarded ``float(_atom_value(...))`` — malformed numbers become a
+    structured parse error instead of a raw ``ValueError`` traceback."""
+    v = _atom_value(node, idx) if node is not None else None
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except ValueError:
+        raise AkcliError(
+            "KICAD_SEXPR_BAD_NUMBER",
+            f"malformed number {v!r} in ({node.tag} ...)"
+            if node is not None else f"malformed number {v!r}") from None
+
+
 def _first_atom_after_head(node: sexpr.SNode) -> str | None:
     """First atom child after the head symbol (a pin's electrical-type token)."""
     for c in (node.children or [])[1:]:
@@ -89,8 +105,8 @@ def _parse_pin(node: sexpr.SNode) -> model.Pin:
     etype = model.KICAD_PINTYPE.get(etype_tok or "", model.PinType.UNSPECIFIED)
 
     at = node.find("at")
-    x_mm = float(_atom_value(at, 1) or 0.0) if at else 0.0
-    y_mm = float(_atom_value(at, 2) or 0.0) if at else 0.0
+    x_mm = _fnum_atom(at, 1) if at else 0.0
+    y_mm = _fnum_atom(at, 2) if at else 0.0
     try:
         angle = int(round(float(_atom_value(at, 3) or 0.0))) % 360 if at else 0
     except (TypeError, ValueError):
@@ -362,8 +378,8 @@ def body_extent_mil(
 
     def take(node: sexpr.SNode | None, idx_x: int = 1, idx_y: int = 2) -> None:
         if node is not None:
-            xs.append(_mm_to_mil(float(_atom_value(node, idx_x) or 0.0)))
-            ys.append(_mm_to_mil(float(_atom_value(node, idx_y) or 0.0)))
+            xs.append(_mm_to_mil(_fnum_atom(node, idx_x)))
+            ys.append(_mm_to_mil(_fnum_atom(node, idx_y)))
 
     holders = [body]
     for sub in body.find_all("symbol"):
@@ -382,9 +398,9 @@ def body_extent_mil(
             elif g.tag == "circle":
                 c = g.find("center")
                 if c is not None:
-                    r = _mm_to_mil(float(_atom_value(g.find("radius"), 1) or 0.0))
-                    cx = _mm_to_mil(float(_atom_value(c, 1) or 0.0))
-                    cy = _mm_to_mil(float(_atom_value(c, 2) or 0.0))
+                    r = _mm_to_mil(_fnum_atom(g.find("radius"), 1))
+                    cx = _mm_to_mil(_fnum_atom(c, 1))
+                    cy = _mm_to_mil(_fnum_atom(c, 2))
                     xs.extend((cx - r, cx + r))
                     ys.extend((cy - r, cy + r))
             elif g.tag == "arc":

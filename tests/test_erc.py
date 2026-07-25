@@ -160,7 +160,8 @@ def test_driver_conflict_high_confidence_is_warning():
 
 
 def test_driver_conflict_low_confidence_is_downgraded_to_note():
-    # Two OUTPUT pins drowned by many Passive pins -> confidence < 0.2 -> NOTE.
+    # Two OUTPUT pins drowned by many Passive pins -> confidence < 0.2, and the
+    # net itself carries an UNTYPED pin (R1.1) -> demoted to NOTE.
     extra = _comp("R1", [_pin(str(i)) for i in range(1, 10)])  # 9 passive pins
     sch = _sch(
         [
@@ -168,12 +169,50 @@ def test_driver_conflict_low_confidence_is_downgraded_to_note():
             _comp("U2", [_pin("1", etype=PinType.OUTPUT)]),
             extra,
         ],
-        [_net("BUS", [("U1", "1"), ("U2", "1")])],
+        [_net("BUS", [("U1", "1"), ("U2", "1"), ("R1", "1")])],
     )
     conf = _by_code(erc.run(sch, _cfg()), erc.ERC_DRIVER_CONFLICT)
     assert len(conf) == 1
     assert conf[0].severity is Severity.NOTE
     assert "type-confidence low" in conf[0].message
+
+
+def test_fully_typed_net_keeps_severity_on_low_confidence_board():
+    # Same low board confidence, but EVERY pin of this 3-member net is typed:
+    # the demotion's excuse (an untyped pin might be the missing driver) is
+    # gone, so the finding keeps full severity.
+    extra = _comp("R1", [_pin(str(i)) for i in range(1, 20)])  # 19 passive pins
+    sch = _sch(
+        [
+            _comp("U1", [_pin("1", etype=PinType.OUTPUT)]),
+            _comp("U2", [_pin("1", etype=PinType.OUTPUT)]),
+            _comp("U3", [_pin("1", etype=PinType.INPUT)]),
+            extra,
+        ],
+        [_net("BUS", [("U1", "1"), ("U2", "1"), ("U3", "1")])],
+    )
+    conf, _typed, _total = erc._type_confidence(sch)
+    assert conf < erc._TYPE_CONFIDENCE_MIN          # board-wide: low
+    hits = _by_code(erc.run(sch, _cfg()), erc.ERC_DRIVER_CONFLICT)
+    assert len(hits) == 1
+    assert hits[0].severity is Severity.WARNING
+    assert "type-confidence low" not in hits[0].message
+
+
+def test_partially_typed_net_on_low_confidence_board_is_demoted():
+    # One untyped member is enough to restore the demotion (per-NET verdict).
+    extra = _comp("R1", [_pin(str(i)) for i in range(1, 10)])
+    sch = _sch(
+        [
+            _comp("U1", [_pin("1", etype=PinType.OUTPUT)]),
+            _comp("U2", [_pin("1", etype=PinType.OUTPUT)]),
+            _comp("R2", [_pin("1"), _pin("2")]),
+            extra,
+        ],
+        [_net("BUS", [("U1", "1"), ("U2", "1"), ("R2", "1")])],
+    )
+    hits = _by_code(erc.run(sch, _cfg()), erc.ERC_DRIVER_CONFLICT)
+    assert len(hits) == 1 and hits[0].severity is Severity.NOTE
 
 
 def test_two_bidirectional_pins_are_not_a_conflict():
@@ -540,16 +579,54 @@ def test_pin_conflict_safe_pairs_are_silent():
 
 
 def test_pin_conflict_demoted_at_low_type_confidence():
-    # 2 typed pins out of 12 -> confidence < 0.2 -> NOTE with the caveat text
+    # 2 typed pins out of 12 -> confidence < 0.2, and the net carries an
+    # untyped member (R1.1) -> NOTE with the caveat text
+    passives = _comp("R1", [_pin(str(i), etype=PinType.PASSIVE, x=float(i))
+                            for i in range(1, 11)])
+    u1 = _comp("U1", [_pin("1", etype=PinType.OPEN_COLLECTOR)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1"), ("R1", "1")])
+    findings = erc.run(_sch([passives, u1, u2], [net]))
+    hits = _by_code(findings, "ERC_PIN_CONFLICT")
+    assert len(hits) == 1 and hits[0].severity is Severity.NOTE
+    assert "type-confidence low" in hits[0].message
+
+
+def test_pin_conflict_fully_typed_net_keeps_severity():
+    # Same board confidence, fully-typed net -> full severity (per-NET rule).
     passives = _comp("R1", [_pin(str(i), etype=PinType.PASSIVE, x=float(i))
                             for i in range(1, 11)])
     u1 = _comp("U1", [_pin("1", etype=PinType.OPEN_COLLECTOR)])
     u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT)])
     net = _net("SIG", [("U1", "1"), ("U2", "1")])
-    findings = erc.run(_sch([passives, u1, u2], [net]))
-    hits = _by_code(findings, "ERC_PIN_CONFLICT")
-    assert len(hits) == 1 and hits[0].severity is Severity.NOTE
-    assert "type-confidence low" in hits[0].message
+    hits = _by_code(erc.run(_sch([passives, u1, u2], [net])), "ERC_PIN_CONFLICT")
+    assert len(hits) == 1 and hits[0].severity is Severity.WARNING
+    assert "type-confidence low" not in hits[0].message
+
+
+def test_floating_input_fully_typed_net_keeps_severity():
+    # INPUT + INPUT, both typed, on an otherwise-untyped board: no driver and
+    # no untyped pin to hide one -> WARNING, not NOTE.
+    passives = _comp("R1", [_pin(str(i), etype=PinType.PASSIVE, x=float(i))
+                            for i in range(1, 11)])
+    u1 = _comp("U1", [_pin("1", name="RXD", etype=PinType.INPUT)])
+    u2 = _comp("U2", [_pin("1", name="CTS", etype=PinType.INPUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    hits = _by_code(erc.run(_sch([passives, u1, u2], [net])),
+                    erc.ERC_FLOATING_INPUT)
+    assert len(hits) == 2
+    assert all(h.severity is Severity.WARNING for h in hits)
+
+
+def test_power_in_undriven_fully_typed_net_keeps_severity():
+    passives = _comp("R1", [_pin(str(i), etype=PinType.PASSIVE, x=float(i))
+                            for i in range(1, 11)])
+    u1 = _comp("U1", [_pin("1", name="VDD", etype=PinType.POWER_IN)])
+    u2 = _comp("U2", [_pin("1", etype=PinType.OUTPUT)])
+    net = _net("SIG", [("U1", "1"), ("U2", "1")])
+    hits = _by_code(erc.run(_sch([passives, u1, u2], [net])),
+                    erc.ERC_POWER_IN_UNDRIVEN)
+    assert len(hits) == 1 and hits[0].severity is Severity.WARNING
 
 
 def test_pin_conflict_waiver():

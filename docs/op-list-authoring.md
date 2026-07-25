@@ -75,7 +75,7 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 | `add_bus` | `vertices` | as `add_wire`, bus graphics |
 | `add_junction` | `at` | usually unnecessary — the executor auto-inserts junctions at 3+-way meets and pin taps |
 | `add_no_connect` | `pin` | `"REF.PIN"` or `[x,y]` |
-| `add_net_label` | `name, at` | `at` also takes `"REF.PIN"` / `"mid(REF.PIN,REF.PIN)"`; `scope: local\|global\|hierarchical` (writer is flat — avoid `hierarchical`) |
+| `add_net_label` | `name, at` | `at` also takes `"REF.PIN"` / `"mid(REF.PIN,REF.PIN)"`; `scope: local\|global\|hierarchical` (use `hierarchical` only in a CHILD sheet file, to pair with the parent's same-name sheet pin — see [Hierarchical sheets](#hierarchical-sheets-add_sheet)) |
 | `place_power_port` | `lib_id, net_name, at` | auto-allocates the `#PWR` reference; merges by name everywhere; `at` also takes `"REF.PIN"` / `"mid(...)"` |
 | `place_gnd` / `place_vcc` | `at` | sugar over `place_power_port` |
 | `add_bus_entry` | `at` | optional `size` (default 2.54 mm @ 45°); each entry end must land on a bus or a wire, else `DANGLING_BUS_ENTRY` gates the write |
@@ -194,6 +194,11 @@ silently place nothing:
 - **Duplicate placements are a lint error**: two `place_component` ops with
   the same `(designator, unit)` in one document is a real double-place
   (`delete_component` earlier in the list releases the designator).
+- **Duplicate annotation keys are a lint error**: two `add_text` /
+  `add_rectangle` / `add_text_box` ops of the same kind sharing a `key` seed
+  ONE uuid, so the second would silently replace the first's node while both
+  reported ok. The error names both op indices; the writer guards the same
+  collision after macro expansion.
 - **Enum slots are TypeError-safe**: a list/dict where an enum belongs
   (`op` name, `target_format`, rotation/orientation, mirror, `scope`, a
   sheet-pin `type`/`side`, …) yields a clean `OpError` naming the field, never
@@ -220,7 +225,11 @@ LOOK at the result before `--apply`.
    with a rotated `<target>.bak` under `.akcli/backups/`. Any op error or
    connectivity ERROR
    (`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`,
-   `UNRESOLVED_LIB_ID`, ...) refuses the write (exit 6). Add `--strict-nets`
+   `DUPLICATE_DESIGNATOR`, `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`,
+   `NO_CONNECT_CONFLICT`) refuses the write (exit 6) — the same set
+   `akcli check <file> --integrity` runs read-only on any `.kicad_sch`, so an
+   imported or hand-edited file can be screened before you author against it.
+   Add `--strict-nets`
    to also refuse when the net diff shows a split/merge touching a **named**
    net — the machine gate for the silent-merge trap below.
 4. Re-read after applying (`akcli nets` / `akcli component`), or better:
@@ -249,20 +258,47 @@ into a refusal.
 
 ## Idempotency rules
 
-- Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus
-  `designator:op_index` (or tag:coords). **Replaying the same op-list file
-  converges byte-identically after one apply.**
-- Because identity includes `op_index`, never reorder or insert ops mid-list
-  in a file you already applied — extend with a NEW delta op-list instead.
-- The same rule covers **group origins**: editing an origin and re-running an
-  ALREADY-applied list re-derives every member's coordinates (new positions,
-  same uuids — the parts move but their labels/wires do not follow). Move an
-  applied module with `move_component` (+`carry_labels`/`carry_wires`) in a
-  delta list, or `akcli arrange --groups`, then refresh frames.
+Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus a
+per-node seed. **Replaying the same op-list file converges byte-identically
+after one apply.** There are two seed families, and they tolerate op-list edits
+differently:
+
+- **Parts are seeded from the designator alone** — `place_component`, and the
+  power symbols behind `place_power_port`/`place_gnd`/`place_vcc`. No op index
+  is involved, so inserting, reordering or deleting ops does **not** change an
+  untouched part's identity: a re-apply after an op-list edit updates parts in
+  place instead of duplicating everything downstream of the edit. An
+  auto-allocated `#PWR0<n>` reference is recovered by position + net name for
+  the same reason (the designator is not carried in the op).
+- **Wires, junctions, no-connects, labels, bus entries and sheets are seeded
+  from a kind tag + their coordinates + the op's index.** Reordering or
+  inserting *those* ops re-derives their uuids, so a re-apply appends a second,
+  coincident node instead of replacing the original — net-neutral, but it
+  accumulates. Safe edits to an already-applied list: append at the END, or
+  change an op in place without changing the number or order of the ops before
+  it. To restructure a list that was already applied, extend with a NEW delta
+  op-list, or `akcli undo` first and re-apply the restructured list from the
+  reverted file.
 - Graphics/notes with a `key` (`add_rectangle`, `add_text`, `add_text_box`)
-  are exempt from the coordinate seed: the same key always replaces the same
-  node, wherever it is and wherever the op sits in the list.
+  are exempt from both seeds: the same key always replaces the same node,
+  wherever it is and wherever the op sits in the list. Two ops of the same kind
+  sharing one `key` are rejected by the validator (they would seed one uuid, so
+  the second would silently replace the first's node while both reported ok).
+- **Group origins.** Editing a group's `origin` and re-running an
+  ALREADY-applied list moves the member parts in place (designator seeds), but
+  every label/wire/junction in the group is re-derived at the new coordinates
+  and appended — the originals stay behind at the old coordinates as strays.
+  Move an applied module with `move_component` (+`carry_labels`/`carry_wires`)
+  in a delta list, or `akcli arrange --groups`, then refresh frames.
 - Deletes are replay-safe no-ops when the target is already gone.
+
+**Migration caveat (files written before the designator-only seed).** An older
+akcli seeded parts from `designator:op_index`. Re-applying an *edited* op-list
+against such a file can duplicate parts whose original op index was ≠ 0: the old
+symbol node's uuid no longer matches, so a second node is created.
+`check --integrity` reports it as `DUPLICATE_DESIGNATOR` and the write gate
+refuses. Re-apply the unedited list once, or roll back with `akcli undo`, before
+editing the list.
 
 ## Connectivity is name-based — and only dangling is a hard gate
 
@@ -351,6 +387,14 @@ keyed on the root + op index), so replay is byte-identical; the instances page
 number is `op_index + 2` (root is page 1) and may be non-contiguous when
 non-sheet ops interleave (KiCad tolerates it).
 
+**One op-list per FILE.** A child `.kicad_sch` is a normal draw target: point
+`target_file` at the child and its ops apply there, even though its existing
+symbols carry a `/<top-root>/<sheet>` parent-hierarchy instance path (the
+connectivity gate accepts those). What is still unsupported is reaching into a
+sub-sheet *from the parent's* op-list — an op that names a sub-sheet path fails
+`HIERARCHICAL_UNSUPPORTED`. Author the parent and each child as their own draw
+targets.
+
 ## Bus authoring (stage 2 semantics — labeled rips)
 
 `add_bus` draws the bus polyline; `add_bus_entry` the diagonal rip. The netlist
@@ -373,6 +417,40 @@ them exactly:
 - **Scope:** local bus labels are sheet-scoped; a **global** bus label merges
   member nets across sheets, and a sheet-pin↔hierarchical-label bus port stitches
   parent/child — same rules as plain labels.
+
+## The blessed connection ladder (pick the FIRST rung that fits)
+
+The vocabulary offers several ways to express one connection; they are NOT
+equally safe. Work down this ladder and stop at the first rung that fits —
+every rung below it trades safety for control you usually don't need:
+
+1. **Label-on-pin** (`add_net_label` anchored at `"REF.PIN"`) — the DEFAULT.
+   Names the net at the pin tip itself: zero geometric-merge risk, survives
+   `arrange` re-packs, and is exactly what every `place_*` macro does
+   internally. Rails use its power-port form: `place_gnd` / `place_vcc` /
+   `place_power_port` (one entry point per rail kind — these are the same
+   pattern, not alternatives to weigh).
+2. **`connect_and_label`** — ONLY for two pins facing each other on one axis
+   (label-on-pin would collide the two texts): one coaxial wire + ONE label
+   at `mid(from,to)`.
+3. **`route_net`** — when a visible wire between non-coaxial pins is wanted:
+   deterministic orthogonal route whose corner provably avoids pin tips;
+   add `label` to name it. Between groups still prefer rung 1 — labels
+   survive re-layout, long wires don't.
+4. **Raw `add_wire`** — last resort, exact-geometry cases only. Highest risk
+   rung: overlapping stubs, T-junction touches and corners on pin tips all
+   silently merge nets (see the patterns below). If you reached this rung,
+   say why in the op's `--note`.
+
+`place_pwr_flag` is not a connection — it only marks a net driven for ERC,
+mid-wire, never on a pin.
+
+**Advanced layer — reach for these only when the task explicitly demands
+them:** bus ops (`add_bus`/`add_bus_entry`, labeled-rip semantics),
+hierarchical `add_sheet`, and the graphics ops
+(`add_text`/`add_text_box`/`add_rectangle`, netlist-neutral by contract).
+None of them participate in ordinary flat-sheet connectivity, and each has
+its own section below.
 
 ## Robust connectivity patterns (distilled from real sessions)
 

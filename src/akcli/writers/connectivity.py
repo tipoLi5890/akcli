@@ -61,6 +61,7 @@ __all__ = ["verify", "auto_junctions"]
 DANGLING_ENDPOINT = "DANGLING_ENDPOINT"
 DANGLING_BUS_ENTRY = "DANGLING_BUS_ENTRY"
 DUPLICATE_UUID = "DUPLICATE_UUID"
+DUPLICATE_DESIGNATOR = "DUPLICATE_DESIGNATOR"
 UNRESOLVED_LIB_ID = "UNRESOLVED_LIB_ID"
 INVALID_INSTANCES_PATH = "INVALID_INSTANCES_PATH"
 NO_CONNECT_CONFLICT = "NO_CONNECT_CONFLICT"
@@ -323,6 +324,30 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
     pin_points, pin_owner, lib_findings = _pin_points(doc, library)
     findings.extend(lib_findings)
 
+    # --- duplicate designators ---------------------------------------------- #
+    # Two symbol nodes carrying the same (reference, unit) means the document
+    # holds the same part twice — the classic symptom of a uuid-seed mismatch
+    # on re-apply. Distinct UNITS of one part legitimately share a reference.
+    ref_units: Counter[tuple[str, str]] = Counter()
+    for sym in _placed_symbols(doc):
+        ref = _symbol_reference(sym)
+        if not ref:
+            continue
+        unit_node = sym.find("unit")
+        unit = _av(unit_node, 1) or "1" if unit_node is not None else "1"
+        ref_units[(ref, unit)] += 1
+    for (ref, unit), count in ref_units.items():
+        if count > 1:
+            findings.append(
+                Finding(
+                    DUPLICATE_DESIGNATOR,
+                    Severity.ERROR,
+                    f"designator {ref!r} unit {unit} appears on {count} symbol "
+                    f"nodes (each part+unit must be placed exactly once)",
+                    refs=[ref],
+                )
+            )
+
     # --- invalid instances path -------------------------------------------- #
     root_uuid = _root_uuid(doc)
     for sym in _placed_symbols(doc):
@@ -345,16 +370,22 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
         for proj in inst.find_all("project"):
             for path in proj.find_all("path"):
                 raw = _av(path, 1) or ""
-                first = raw.strip("/").split("/")[0] if raw.strip("/") else ""
-                if first == root_uuid:
+                segments = raw.strip("/").split("/") if raw.strip("/") else []
+                # Top-sheet form: /<own-root-uuid>. Child-sheet form (a file
+                # edited as part of a parent hierarchy): /<top-root>/<sheet>...
+                # — the child cannot know its parent's root uuid, so any
+                # well-formed multi-segment path is accepted; the single-
+                # segment form must still name THIS file's root.
+                if segments and (segments[0] == root_uuid or len(segments) >= 2):
                     ok = True
         if not ok:
             findings.append(
                 Finding(
                     INVALID_INSTANCES_PATH,
                     Severity.ERROR,
-                    f"placed symbol {ref!r} instances path does not reference the "
-                    f"root sheet uuid {root_uuid!r}",
+                    f"placed symbol {ref!r} instances path names neither this "
+                    f"file's root sheet uuid {root_uuid!r} nor a parent "
+                    f"hierarchy path",
                     refs=[ref, root_uuid],
                 )
             )

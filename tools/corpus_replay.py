@@ -75,7 +75,8 @@ def main() -> int:
     snap = _snapshot(args.corpus)
     print(f"corpus: {len(snap)} schematic(s)")
     if args.write_baseline:
-        args.write_baseline.write_text(json.dumps(snap, indent=2) + "\n")
+        args.write_baseline.write_text(json.dumps(snap, indent=2) + "\n",
+                                       encoding="utf-8", newline="\n")
         print(f"baseline written: {args.write_baseline}")
         return 0
     if not args.baseline:
@@ -84,7 +85,7 @@ def main() -> int:
             print(f"  {name}: {hist}")
         return 0
 
-    base = json.loads(args.baseline.read_text())
+    base = json.loads(args.baseline.read_text(encoding="utf-8"))
     drift = 0
     for name in sorted(set(base) | set(snap)):
         b, n = base.get(name), snap.get(name)

@@ -115,8 +115,7 @@ def _cmd_jlc_search(args: argparse.Namespace) -> int:
         results = parts_search.search(query, limit=getattr(args, "limit", None) or 20,
                                       cache_dir=parts_search.default_cache_dir())
     except parts_search.JlcNetworkError as exc:
-        sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
-        return EXIT["TOOL_MISSING"]
+        raise _ExitWith(EXIT["TOOL_MISSING"], f"ERROR: NETWORK: {exc.message}")
     if not results:
         sys.stderr.write(f"no parts found for {query!r}\n")
         if args.json:
@@ -214,8 +213,7 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
                                   include_risk=want_alts)
             bom_jlc.basic_alternatives(lines, cache_dir=cache)
     except parts_search.JlcNetworkError as exc:
-        sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
-        return EXIT["TOOL_MISSING"]
+        raise _ExitWith(EXIT["TOOL_MISSING"], f"ERROR: NETWORK: {exc.message}")
     if do_fix:
         # plain --fix writes high-confidence suggestions only; --fix-all also
         # writes low-confidence ones (package matched, value unverified)
@@ -263,8 +261,8 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
                     sch, min_stock=min_stock,
                     qty=qty, cache_dir=cache, no_part_prefixes=prefixes)
             except parts_search.JlcNetworkError as exc:
-                sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
-                return EXIT["TOOL_MISSING"]
+                raise _ExitWith(EXIT["TOOL_MISSING"],
+                                f"ERROR: NETWORK: {exc.message}")
     drift: list[dict] | None = None
     lock_out = getattr(args, "lock", None)
     if lock_out:
@@ -425,8 +423,8 @@ def _cmd_jlc_datasheet(args: argparse.Namespace) -> int:
             try:
                 _resolve_mpn_only_rows(rows, cache)
             except parts_search.JlcNetworkError as exc:
-                sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
-                return EXIT["TOOL_MISSING"]
+                raise _ExitWith(EXIT["TOOL_MISSING"],
+                                f"ERROR: NETWORK: {exc.message}")
     else:
         # MPN: exact match against the catalog, prefer in-stock/Basic depth
         try:
@@ -452,8 +450,7 @@ def _cmd_jlc_datasheet(args: argparse.Namespace) -> int:
             r.refs = row.refs
             rows[i] = r
     except easyeda.EasyEdaError as exc:
-        sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
-        return EXIT["TOOL_MISSING"]
+        raise _ExitWith(EXIT["TOOL_MISSING"], f"ERROR: NETWORK: {exc.message}")
 
     out_dir = None
     if getattr(args, "fetch", False):
@@ -512,8 +509,7 @@ def _cmd_jlc_show(args: argparse.Namespace) -> int:
     try:
         part = parts_search.get(lcsc, cache_dir=parts_search.default_cache_dir())
     except parts_search.JlcNetworkError as exc:
-        sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
-        return EXIT["TOOL_MISSING"]
+        raise _ExitWith(EXIT["TOOL_MISSING"], f"ERROR: NETWORK: {exc.message}")
     if part is None:
         sys.stderr.write(f"no part {lcsc!r} found\n")
         if args.json:
@@ -560,6 +556,27 @@ def _read_symbol_name(kicad_sym_path: str) -> str | None:
     return lib.symbols[0].name if lib.symbols else None
 
 
+def _read_symbol_value(kicad_sym_path: str) -> str | None:
+    """Read the first symbol's ``Value`` property from a produced ``.kicad_sym``.
+
+    The converter writes the part's actual value there (``10k``, ``100n``) when
+    EasyEDA carries one, and falls back to the MPN otherwise — so this is the
+    authoritative Value for a placement, ahead of the enrichment MPN/title.
+    """
+    try:
+        from ..readers import sexpr  # lazy
+        root = sexpr.parse(Path(kicad_sym_path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    for sym in root.find_all("symbol"):
+        for prop in sym.find_all("property"):
+            kids = prop.children or []
+            if len(kids) >= 3 and kids[1].value == "Value":
+                val = (kids[2].value or "").strip()
+                return val or None
+    return None
+
+
 def _build_place_oplist(result, args, value: str | None) -> dict | None:
     """Build a one-op ``place_component`` op-list from a successful conversion.
 
@@ -578,6 +595,11 @@ def _build_place_oplist(result, args, value: str | None) -> dict | None:
         return None
     fp_art = next((a for a in result.artifacts if a.endswith(".kicad_mod")), None)
     fp_name = Path(fp_art).stem if fp_art else sym_name
+
+    # The converted symbol's own Value wins: it carries the part's actual value
+    # ("10k") when EasyEDA has one, where the enrichment fallback only knows the
+    # MPN. Keeps the placed instance's Value consistent with the library symbol.
+    value = _read_symbol_value(sym_art) or value
 
     fp_lib = getattr(args, "footprint_lib", None) or "footprint"
     x_mil, y_mil = args.at
@@ -694,8 +716,15 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
             lines.append(f"  {a}")
         if place and place_path is not None:
             lines.append(f"placement op-list: {place_path}")
+            # --symbols is NOT optional here: the symbol lives only in the
+            # freshly converted library, so a draw without it exits 6
+            # (SYMBOL_NOT_FOUND) unless the library is registered in the
+            # project's sym-lib-table.
+            sym_art = next(
+                (a for a in result.artifacts if a.endswith(".kicad_sym")), None)
+            symbols_flag = f" --symbols {sym_art}" if sym_art else ""
             lines.append("  apply with: akcli draw <target.kicad_sch> --ops "
-                         f"{place_path} --apply")
+                         f"{place_path}{symbols_flag} --apply")
         lines.append(_VERIFY_CAVEAT)
         lines.append("hint: review with `akcli check`/`kicad-cli erc` before use.")
         _emit("\n".join(lines))

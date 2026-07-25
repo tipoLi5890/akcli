@@ -37,11 +37,32 @@
       ]
     },
     {
+      "code": "POWER_RAIL_NO_SOURCE",
+      "severity": "warning",
+      "message": "rail '+3V3' has 2 consumer(s) (#PWR01, R1) but no source: nothing on it (or on the nets it reaches through series parts) is a power_out/output pin, a PWR_FLAG, or a connector/battery/test point — check that the supply is actually wired",
+      "refs": [
+        "+3V3",
+        "#PWR01",
+        "R1"
+      ]
+    },
+    {
       "code": "POWER_RAIL",
       "severity": "info",
       "message": "rail 'MID': 3 consumer(s): C1, R1, R2",
       "refs": [
         "MID"
+      ]
+    },
+    {
+      "code": "POWER_RAIL_NO_SOURCE",
+      "severity": "warning",
+      "message": "rail 'MID' has 3 consumer(s) (C1, R1, R2) but no source: nothing on it (or on the nets it reaches through series parts) is a power_out/output pin, a PWR_FLAG, or a connector/battery/test point — check that the supply is actually wired",
+      "refs": [
+        "MID",
+        "C1",
+        "R1",
+        "R2"
       ]
     },
     {

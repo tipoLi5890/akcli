@@ -42,6 +42,13 @@ def _read_detect_meta(obj, path: Path, fmt: str, method: str,
         meta["detected_format"] = fmt
         meta["detection_method"] = method
         meta["object_counts"] = dict(counts)
+    # Reader warnings (skipped Altium records, ignored project tops, undecoded
+    # library primitives) are LOGS: they ride in the JSON payload's `warnings`
+    # array AND go to stderr, so a text-mode read cannot look clean while the
+    # model is knowingly incomplete. (`read` bypasses `_load_schematic`, which
+    # is where every other command does this.)
+    for w in list(getattr(obj, "warnings", None) or []):
+        sys.stderr.write(f"warning: {w}\n")
     warn = _empty_import_warning(path, fmt, counts)
     if warn:
         warnings = getattr(obj, "warnings", None)
@@ -212,10 +219,270 @@ def _cmd_read(args: argparse.Namespace) -> int:
     raise _ExitWith(EXIT["UNSUPPORTED_FORMAT"], f"ERROR: unsupported/unknown format: {path}")
 
 
+def _net_json(n, rich: bool = False) -> dict:
+    """The ONE net JSON shape shared by ``net`` and ``nets`` (members "D.P").
+
+    ``rich`` adds the single-net diagnostics (aliases always ride along when
+    present — additive optional keys, same base shape for every consumer).
+    """
+    d: dict = {"name": n.name, "stable_id": n.stable_id,
+               "members": sorted(f"{des}.{p}" for des, p in n.members)}
+    if n.aliases:
+        d["aliases"] = sorted(n.aliases)
+    if rich:
+        d["is_named"] = n.is_named
+        if n.source_names:
+            d["source_names"] = list(n.source_names)
+        if n.confidence != 1.0:
+            d["confidence"] = n.confidence
+        if n.merge_reasons:
+            d["merge_reasons"] = list(n.merge_reasons)
+    return d
+
+
+def _pin_spec(spec: str) -> tuple[str, str]:
+    """Split ``"REF.PIN"`` on the FIRST dot (the `netdiff`/`nets` convention)."""
+    ref, sep, pin = spec.partition(".")
+    if not sep or not ref or not pin:
+        raise _ExitWith(EXIT["USAGE"],
+                        f"ERROR: expected REF.PIN (e.g. U3.7), got {spec!r}")
+    return ref, pin
+
+
+def _pin_or_miss(args: argparse.Namespace, path: Path, sch,
+                 spec: str) -> tuple[str, str] | None:
+    """Resolve ``REF.PIN`` against the schematic; on a miss, emit the standard
+    ``found: false`` envelope + did-you-mean and return ``None``."""
+    ref, pin = _pin_spec(spec)
+
+    def miss(stderr_line: str) -> None:
+        if args.json:
+            _emit(_dumps(_stamp({"found": False, "query": spec, "kind": "pin",
+                                 "source": path.as_posix()})))
+        sys.stderr.write(stderr_line + "\n")
+
+    comp = next((c for c in sch.components if c.designator == ref), None)
+    if comp is None:
+        hint = _did_you_mean(ref, (c.designator for c in sch.components))
+        miss(f"no component {ref!r}{hint}")
+        return None
+    if all(p.number != pin for p in comp.pins):
+        hint = _did_you_mean(pin, (p.number for p in comp.pins))
+        valid = ", ".join(sorted({p.number for p in comp.pins}))
+        miss(f"{ref} has no pin {pin!r}{hint} (valid pins: {valid})")
+        return None
+    return ref, pin
+
+
+def _net_at(args: argparse.Namespace, path: Path, sch, spec: str) -> int:
+    """``net --at REF.PIN`` — reverse lookup: which net is this pin on."""
+    resolved = _pin_or_miss(args, path, sch, spec)
+    if resolved is None:
+        return EXIT["QUERY_MISS"]
+    net = _pin_net_index(sch).get(resolved)
+    if args.json:
+        _emit(_dumps(_stamp({
+            "source": path.as_posix(),
+            "pin": f"{resolved[0]}.{resolved[1]}",
+            "net": _net_json(net, rich=True) if net else None,
+        })))
+    else:
+        label = _net_display(net) if net else "(no net)"
+        _emit(f"{resolved[0]}.{resolved[1]} -> {label}")
+    return EXIT["OK"]
+
+
+def _net_same(args: argparse.Namespace, path: Path, sch,
+              specs: list[str]) -> int:
+    """``net --same A.PIN B.PIN`` — binary connectivity: same net or not."""
+    ra = _pin_or_miss(args, path, sch, specs[0])
+    rb = _pin_or_miss(args, path, sch, specs[1]) if ra is not None else None
+    if ra is None or rb is None:
+        return EXIT["QUERY_MISS"]
+    index = _pin_net_index(sch)
+    na, nb = index.get(ra), index.get(rb)
+    same = na is not None and nb is not None and na.stable_id == nb.stable_id
+    if args.json:
+        _emit(_dumps(_stamp({
+            "source": path.as_posix(),
+            "pins": [f"{r}.{p}" for r, p in (ra, rb)],
+            "same": same,
+            "net": _net_json(na, rich=True) if same and na else None,
+            "nets": {f"{r}.{p}": (index.get((r, p)).name
+                                  if index.get((r, p)) else None)
+                     for r, p in (ra, rb)},
+        })))
+    else:
+        if same and na is not None:
+            _emit(f"same net: yes — {_net_display(na)}")
+        else:
+            da = _net_display(na) if na else "(no net)"
+            db = _net_display(nb) if nb else "(no net)"
+            _emit(f"same net: no — {specs[0]} on {da}, {specs[1]} on {db}")
+    return EXIT["OK"]
+
+
+def _off_grid_50(v: float) -> bool:
+    r = v % 50.0
+    return min(r, 50.0 - r) > 0.01
+
+
+def _net_why(args: argparse.Namespace, path: Path, sch, spec: str) -> int:
+    """``net --why REF.PIN`` — pin-centric attachment diagnosis.
+
+    Answers the question `component` cannot: WHY a pin shows ``(no net)`` —
+    junction/wire-end attachment status, the nearest wire end / label / other
+    pin with mil distances, and the off-grid trap. Same quantized helpers as
+    ``netbuild``, so the verdict never disagrees with the net engine.
+    """
+    import math
+
+    resolved = _pin_or_miss(args, path, sch, spec)
+    if resolved is None:
+        return EXIT["QUERY_MISS"]
+    ref, pin = resolved
+    net = _pin_net_index(sch).get(resolved)
+    payload: dict = {
+        "source": path.as_posix(),
+        "pin": f"{ref}.{pin}",
+        "net": _net_json(net, rich=True) if net else None,
+    }
+    hints: list[str] = []
+
+    if path.suffix.lower() != ".kicad_sch":
+        hints.append("geometry diagnosis needs a .kicad_sch (this input only "
+                     "answers net membership)")
+        payload.update({"at": None, "attachment": None, "nearest": None,
+                        "off_grid_50mil": None, "hints": hints})
+        return _emit_why(args, payload, net)
+
+    from .. import netbuild
+    from ..readers import kicad as _krd
+    prims = _krd.read_primitives(path)
+    ph = next((p for p in prims.pins if p.ref == resolved), None)
+    if ph is None:
+        hints.append("no placed pin handle found (is this unit placed on the "
+                     "root sheet?)")
+        payload.update({"at": None, "attachment": None, "nearest": None,
+                        "off_grid_50mil": None, "hints": hints})
+        return _emit_why(args, payload, net)
+
+    q, on_seg = netbuild._q, netbuild._on_seg
+    qp = q(ph.at)
+    segs = [(w.a, w.b) for w in prims.wires if w.sheet == ph.sheet]
+    qsegs = [(q(a), q(b)) for a, b in segs]
+    at_junction = any(q(j.at) == qp for j in prims.junctions
+                      if j.sheet == ph.sheet)
+    at_wire_end = any(qp in (qa, qb) for qa, qb in qsegs)
+    midspan = (not at_wire_end and not at_junction
+               and any(on_seg(qp, qa, qb) for qa, qb in qsegs))
+    label_on_tip = any(
+        q(lb.at) == qp for lb in prims.labels
+        if lb.sheet == ph.sheet and lb.scope != "hier" and lb.text)
+
+    def _dist(pt: tuple[float, float]) -> float:
+        return math.hypot(pt[0] - ph.at[0], pt[1] - ph.at[1])
+
+    def _nearest(candidates):
+        best, best_d = None, None
+        for tag, pt in candidates:
+            d = _dist(pt)
+            if best_d is None or d < best_d:
+                best, best_d = (tag, pt), d
+        if best is None or best_d is None:
+            return None
+        (tag, pt) = best
+        entry = {"at": [round(pt[0], 1), round(pt[1], 1)],
+                 "dist_mil": round(best_d, 1)}
+        if tag:
+            entry.update(tag)
+        return entry
+
+    near_wire = _nearest(
+        (None, e) for seg in segs for e in seg)
+    near_label = _nearest(
+        ({"text": lb.text}, lb.at) for lb in prims.labels
+        if lb.sheet == ph.sheet and lb.scope != "hier" and lb.text)
+    near_pin = _nearest(
+        ({"pin": f"{p.ref[0]}.{p.ref[1]}"}, p.at) for p in prims.pins
+        if p.sheet == ph.sheet and p.ref != resolved)
+
+    off_grid = _off_grid_50(ph.at[0]) or _off_grid_50(ph.at[1])
+
+    if midspan:
+        hints.append(f"pin tip at ({round(ph.at[0])},{round(ph.at[1])}) "
+                     "touches a wire MID-SPAN with no junction — not "
+                     "connected; add an add_junction there or end the wire "
+                     "on the pin tip")
+    # a single-member net is electrically the same as "not connected" —
+    # the pin only nets with itself, so the near-miss hints still apply.
+    unconnected = net is None or len(net.members) <= 1
+    if unconnected:
+        if near_wire and 0 < near_wire["dist_mil"] <= 100:
+            hints.append(f"nearest wire end is {near_wire['dist_mil']} mil "
+                         f"away at ({near_wire['at'][0]},{near_wire['at'][1]})"
+                         " — extend it to the pin tip")
+        if near_label and 0 < near_label["dist_mil"] <= 100:
+            hints.append(f"label '{near_label['text']}' floats "
+                         f"{near_label['dist_mil']} mil away — anchor it "
+                         "exactly on the pin tip")
+    if off_grid:
+        hints.append("pin tip is OFF the 50-mil grid — grid-snapped wires "
+                     "cannot land on it; move the component onto the grid")
+
+    payload.update({
+        "at": [round(ph.at[0], 1), round(ph.at[1], 1)],
+        "sheet": ph.sheet,
+        "attachment": {"at_junction": at_junction, "at_wire_end": at_wire_end,
+                       "midspan_touch": midspan, "label_on_tip": label_on_tip},
+        "nearest": {"wire_end": near_wire, "label": near_label,
+                    "pin": near_pin},
+        "off_grid_50mil": off_grid,
+        "hints": hints,
+    })
+    return _emit_why(args, payload, net)
+
+
+def _emit_why(args: argparse.Namespace, payload: dict, net) -> int:
+    if args.json:
+        _emit(_dumps(_stamp(payload)))
+        return EXIT["OK"]
+    lines = [f"{payload['pin']} -> "
+             + (_net_display(net) if net else "(no net)")]
+    att = payload.get("attachment")
+    if att:
+        state = [k for k, v in att.items() if v]
+        lines.append("attachment: " + (", ".join(state) if state else "none"))
+    near = payload.get("nearest") or {}
+    for kind in ("wire_end", "label", "pin"):
+        e = near.get(kind)
+        if e:
+            what = e.get("text") or e.get("pin") or ""
+            what = f" {what!r}" if what else ""
+            lines.append(f"nearest {kind}:{what} {e['dist_mil']} mil away "
+                         f"at ({e['at'][0]},{e['at'][1]})")
+    for h in payload.get("hints") or []:
+        lines.append(f"hint: {h}")
+    _emit("\n".join(lines))
+    return EXIT["OK"]
+
+
 def _cmd_net(args: argparse.Namespace) -> int:
     path = _require_path(args.path)
     sch = _load_schematic(path)
     name = getattr(args, "name", None)
+    at = getattr(args, "at", None)
+    same = getattr(args, "same", None)
+    why = getattr(args, "why", None)
+    if sum(1 for x in (name, at, same, why) if x) > 1:
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: give at most one of NAME, --at, --same, --why")
+    if at:
+        return _net_at(args, path, sch, at)
+    if same:
+        return _net_same(args, path, sch, same)
+    if why:
+        return _net_why(args, path, sch, why)
 
     if name:
         matches = [
@@ -230,8 +497,11 @@ def _cmd_net(args: argparse.Namespace) -> int:
             sys.stderr.write(f"no net named {name!r}{hint}\n")
             return EXIT["QUERY_MISS"]
         if args.json:
-            from ..model import to_json
-            _emit(_dumps([to_json(n) for n in matches]))
+            _emit(_dumps(_stamp({
+                "source": path.as_posix(),
+                "query": name,
+                "nets": [_net_json(n, rich=True) for n in matches],
+            })))
         else:
             out = []
             for n in matches:
@@ -242,13 +512,19 @@ def _cmd_net(args: argparse.Namespace) -> int:
             _emit("\n".join(out))
         return EXIT["OK"]
 
-    # no name: list all nets
+    # no name: list all nets — SAME envelope + net shape as `nets`, so an
+    # agent needs exactly one parser for both commands.
+    ordered = sorted(sch.nets, key=lambda n: (n.name is None, _net_display(n)))
+    ordered, meta = _match_limit(ordered, args, key=lambda n: n.name or "")
     if args.json:
-        from ..model import to_json
-        _emit(_dumps([to_json(n) for n in sch.nets]))
+        _emit(_dumps(_stamp({
+            "source": path.as_posix(),
+            **meta,
+            "nets": [_net_json(n) for n in ordered],
+        })))
     else:
         out = []
-        for n in sorted(sch.nets, key=lambda n: (n.name is None, _net_display(n))):
+        for n in ordered:
             members = " ".join(f"{d}.{p}" for d, p in n.members)
             out.append(f"{_net_display(n)}: {members}")
         _emit("\n".join(out))
@@ -288,9 +564,7 @@ def _cmd_nets(args: argparse.Namespace) -> int:
             # across OSes — Windows str(Path) would emit backslashes here.
             "source": path.as_posix(),
             **meta,
-            "nets": [{"name": n.name, "stable_id": n.stable_id,
-                      "members": sorted(f"{d}.{p}" for d, p in n.members)}
-                     for n in ordered],
+            "nets": [_net_json(n) for n in ordered],
         })))
     else:
         out = [f"{_net_display(n)}: "
@@ -389,7 +663,7 @@ def _cmd_pins(args: argparse.Namespace) -> int:
     from ..writers.lib_cache import _coerce_sources
 
     cfg = _load_cfg(args, None)
-    libs = _coerce_sources(_draw_symbol_sources(args, cfg))
+    libs = _coerce_sources(_draw_symbol_sources(args, cfg, lib_ids=[lib_id]))
     sym = kicad_lib.resolve(lib_id, libs)          # raises SYMBOL_NOT_FOUND
 
     at = getattr(args, "at", None) or [0.0, 0.0]
@@ -456,7 +730,7 @@ def _cmd_bbox(args: argparse.Namespace) -> int:
     from ..writers.lib_cache import _coerce_sources
 
     cfg = _load_cfg(args, None)
-    libs = _coerce_sources(_draw_symbol_sources(args, cfg))
+    libs = _coerce_sources(_draw_symbol_sources(args, cfg, lib_ids=[lib_id]))
     sym = kicad_lib.resolve(lib_id, libs)          # raises SYMBOL_NOT_FOUND
 
     at = getattr(args, "at", None) or [0.0, 0.0]
@@ -649,9 +923,19 @@ def register(sub, common) -> None:
     _add_throttle_flags(p, "objects (components/symbols/footprints)")
     p.set_defaults(handler=_cmd_read)
 
-    p = sub.add_parser("net", parents=[common], help="query nets")
+    p = sub.add_parser("net", parents=[common],
+                       help="query nets: by name, all, or pin-level "
+                            "(--at / --same / --why REF.PIN)")
     p.add_argument("path", nargs="?", help="input schematic")
     p.add_argument("name", nargs="?", help="net name to query (omit to list all)")
+    p.add_argument("--at", metavar="REF.PIN",
+                   help="reverse lookup: which net is this pin on")
+    p.add_argument("--same", nargs=2, metavar=("A.PIN", "B.PIN"),
+                   help="binary connectivity: are these two pins on one net")
+    p.add_argument("--why", metavar="REF.PIN",
+                   help="attachment diagnosis: why is this pin (not) "
+                        "connected — junction/wire-end status, nearest wire "
+                        "end/label/pin with mil distances, off-grid flag")
     p.set_defaults(handler=_cmd_net)
 
     p = sub.add_parser("nets", parents=[common],

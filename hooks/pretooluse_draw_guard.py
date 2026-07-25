@@ -47,6 +47,25 @@ def _akcli_argv() -> list[str] | None:
     return None
 
 
+def _tokenize(command: str) -> list[str] | None:
+    """Split a Bash command line, or None (fail open) if unsplittable.
+
+    posix=False on Windows for the same reason as ``_akcli_argv()``: POSIX
+    splitting eats the backslashes in ``--ops C:\\proj\\ops.json``, so
+    ``os.path.exists()`` would miss the file and the guard would silently fail
+    open on every Windows call. Non-POSIX mode keeps surrounding quotes on a
+    token — strip them.
+    """
+    try:
+        tokens = shlex.split(command, posix=(os.name != "nt"))
+    except ValueError:
+        return None
+    if os.name == "nt":
+        tokens = [t[1:-1] if len(t) >= 2 and t[0] == t[-1] == '"' else t
+                  for t in tokens]
+    return tokens
+
+
 def _extract(tokens: list[str], flag: str) -> str | None:
     for i, tok in enumerate(tokens):
         if tok == flag and i + 1 < len(tokens):
@@ -109,9 +128,8 @@ def main() -> int:
     command = (payload.get("tool_input") or {}).get("command") or ""
     if "akcli" not in command or "draw" not in command or "--apply" not in command:
         return 0
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
+    tokens = _tokenize(command)
+    if tokens is None:
         return 0
     ops_path = _extract(tokens, "--ops")
     if not ops_path or not os.path.exists(ops_path):

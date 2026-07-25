@@ -33,9 +33,10 @@ Exit codes: `0` on results **and** on a clean no-results path (a `no parts found
 notice goes to stderr); `7` on a network/HTTP error (a single
 `ERROR: NETWORK: …` line goes to stderr — never a traceback).
 
-Note: unlike most `akcli` commands, a `jlc` network error does not emit the
-`--json` error envelope on stdout — only the plain `ERROR: NETWORK: …` line on
-stderr.
+A `jlc` network error goes through the shared error path like every other
+command, so `--json` gets the standard envelope on stdout
+(`{"error": {"code": "NETWORK", "message", "exit": 7, "remediation"}}`) with the
+plain `ERROR: NETWORK: …` line on stderr for humans.
 
 ### `akcli jlc bom <sch> [--qty N] [--min-stock N] [--suggest] [--fix|--fix-all] [--csv OUT.csv] [--json]`
 
@@ -102,7 +103,7 @@ then every BOM line carrying an `LCSC` parameter is resolved in one run.
 ```bash
 akcli jlc datasheet C2984661                     # print the PDF URL + MPN/manufacturer
 akcli jlc datasheet TCRT5000 --fetch             # exact-MPN match, download the PDF
-akcli jlc datasheet board.kicad_sch --fetch      # whole BOM -> ~/.cache/akcli/datasheets/
+akcli jlc datasheet board.kicad_sch --fetch --out datasheets  # whole BOM -> ./datasheets (review auto-discovers it)
 akcli jlc datasheet board.kicad_sch --resolve-mpn --fetch   # MPN-only lines get a catalog lookup first
 ```
 
@@ -193,8 +194,19 @@ project's `fp-lib-table` actually registers, or fix an existing library with
 `akcli library repair <project> --rename-footprint-lib footprint=<nickname> --apply`.
 **`--3d-path MODE`** picks how the footprint references the 3D model: `relative` (default; portable,
 resolves only next to the library), `absolute` (always resolves on this machine, not portable), or a
-`${VAR}` prefix (portable via a KiCad path variable). The trade-off is printed on stderr. A converted
-library is a CLAIM — verify pin mapping/dimensions against the datasheet, and cross-check the whole
+`${VAR}` prefix (portable via a KiCad path variable). The trade-off is printed on stderr.
+
+**Symbol fields and pin types.** The symbol's `Value` is the part's **actual value** when
+EasyEDA carries one (`10kΩ` → `10k`, `100nF` → `100n`); the manufacturer part number moves
+to a dedicated `MPN` field (`LCSC` keeps the C-number), and `Value` falls back to the MPN
+for parts with no value attribute. Pin **electrical types** are mapped from EasyEDA's
+five-code space (undefined/input/output/bidirectional/power) plus two context rules, because
+that space cannot express KiCad's: a two-pin R/C/L-class part gets `passive` pins (EasyEDA
+codes them `input`, which used to trip ERC's floating-input rule), pins named `NC`/`DNC`
+become `no_connect`, and a power pin named like a supplied rail (`VOUT`, `VREG`, …) becomes
+`power_out`. Everything else keeps its declared code — still a claim to verify.
+
+A converted library is a CLAIM — verify pin mapping/dimensions against the datasheet, and cross-check the whole
 workspace with `akcli library audit <project>`.
 
 Exit codes: `0` success · `2` bad usage (bad C-number, `--place` without

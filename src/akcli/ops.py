@@ -621,6 +621,16 @@ _MACRO_EXPANDERS = {
 }
 
 
+# Annotation ops whose optional ``key`` seeds the node uuid (writer maps
+# (tag, key) -> uuid, ignoring coords and op index) — validate_oplist rejects
+# duplicate (tag, key) pairs so one op cannot silently replace another's node.
+_ANNOTATION_KEY_TAGS: dict[str, str] = {
+    "add_text": "text",
+    "add_rectangle": "rectangle",
+    "add_text_box": "text_box",
+}
+
+
 def _duplicate_placements(ops_list: list) -> list[tuple[int, str, object, int]]:
     """``(op_index, designator, unit, first_index)`` per repeated placement.
 
@@ -1010,8 +1020,12 @@ _KIND_CHECKS: dict[str, tuple] = {
 
 def _unknown_field(idx: int, name: str, field: str, known,
                    out: list[OpError]) -> None:
-    hint = difflib.get_close_matches(field, list(known), n=1)
+    known_list = list(known)
+    hint = difflib.get_close_matches(field, known_list, n=1)
     suggestion = f" (did you mean {hint[0]!r}?)" if hint else ""
+    if not suggestion and field == "at" and "x_mil" in known_list:
+        # the most common coordinate-field mixup: at:[x,y] ops vs x_mil/y_mil
+        suggestion = f" ({name} takes \"x_mil\"/\"y_mil\", not \"at\")"
     out.append(OpError(idx, name, "OP_UNSUPPORTED",
                        f"{name}: unknown field {field!r}{suggestion}"))
 
@@ -1175,9 +1189,15 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
                 out.append(OpError(idx, name, "OP_UNSUPPORTED",
                                    f"{name}.{field} must be {desc}, got {value!r}"))
 
-    if name in ("add_wire", "add_bus"):
-        verts = op.get("vertices")
-        if not isinstance(verts, list) or len(verts) < 2:
+    if name in ("add_wire", "add_bus") and "vertices" in op:
+        # absent vertices is already a missing-required-field error above —
+        # re-reporting it here as a wire-shape problem only misleads.
+        verts = op["vertices"]
+        if not isinstance(verts, list):
+            out.append(OpError(idx, name, "OP_UNSUPPORTED",
+                               f"{name}.vertices must be an array of >= 2 "
+                               f"points, got {verts!r}"))
+        elif len(verts) < 2:
             out.append(OpError(idx, name, "NON_ORTHOGONAL_WIRE",
                                "vertices must be an array of >= 2 points"))
         else:
@@ -1250,6 +1270,25 @@ def validate_oplist(doc: dict) -> list[OpError]:
         errs.append(OpError(i, "place_component", "OP_UNSUPPORTED",
                             f"duplicate placement of designator {d!r} unit {u} "
                             f"(first placed at op [{first}])"))
+
+    # document-level lint: two annotation ops sharing a stable key — the
+    # writer derives the node uuid from (tag, key) alone, so the second op
+    # would silently REPLACE the first's node while both report ok.
+    seen_keys: dict[tuple[str, str], int] = {}
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict):
+            continue
+        tag = _ANNOTATION_KEY_TAGS.get(str(op.get("op", "")))
+        key = op.get("key")
+        if tag is None or not isinstance(key, str) or not key:
+            continue
+        first_i = seen_keys.setdefault((tag, key), i)
+        if first_i != i:
+            errs.append(OpError(i, str(op.get("op")), "OP_UNSUPPORTED",
+                                f"duplicate annotation key {key!r} for "
+                                f"{op.get('op')} (first used at op "
+                                f"[{first_i}]) — the second op would replace "
+                                "the first node in place; use distinct keys"))
     return errs
 
 
@@ -1265,6 +1304,12 @@ def load_oplist(path: str | Path) -> dict:
     except json.JSONDecodeError as exc:
         raise AkcliError("OP_UNSUPPORTED", f"invalid op-list JSON: {exc}") from exc
     if not isinstance(doc, dict):
+        if isinstance(doc, list):
+            raise AkcliError(
+                "OP_UNSUPPORTED",
+                "op-list root must be a JSON object, not a top-level array — "
+                'wrap your ops as {"protocol_version": 1, '
+                '"target_format": "kicad", "ops": [...]}')
         raise AkcliError("OP_UNSUPPORTED", "op-list root must be a JSON object")
     return doc
 

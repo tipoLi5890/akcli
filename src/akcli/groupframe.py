@@ -94,11 +94,13 @@ def group_report(path: str | Path) -> list[dict]:
     root_uuid = _root_uuid(root)
     present: set[str] = set()
     for c in root.children or []:
-        if not c.is_list or not (c.children or []) or c.children[0].value != "rectangle":
+        kids = c.children or []
+        if not c.is_list or not kids or kids[0].value != "rectangle":
             continue
         un = c.find("uuid")
-        if un is not None and len(un.children or []) >= 2:
-            present.add(str(un.children[1].value))
+        ukids = un.children or [] if un is not None else []
+        if len(ukids) >= 2:
+            present.add(str(ukids[1].value))
 
     rows: list[dict] = []
     for name, info in group_boxes(path).items():
@@ -130,7 +132,8 @@ def plan_frames(path: str | Path, *, groups_meta: dict | None = None,
                  _snap_out(y0 - margin_mil, up=False)]
         end = [_snap_out(x1 + margin_mil, up=True),
                _snap_out(y1 + margin_mil, up=True)]
-        gmeta = meta.get(name) if isinstance(meta.get(name), dict) else {}
+        raw_meta = meta.get(name)
+        gmeta = raw_meta if isinstance(raw_meta, dict) else {}
         title = gmeta.get("title") or name
         ops.append({"op": "add_rectangle", "start": start, "end": end,
                     "key": _frame_key(name)})

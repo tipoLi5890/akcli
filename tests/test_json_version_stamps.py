@@ -175,7 +175,7 @@ def test_capabilities_constraints_and_altium_honesty():
     argv = ["capabilities", "--json"]
     doc = json_of(argv)
     ops = doc["ops"]
-    assert ops["altium_live_wired"] is False
+    assert ops["altium_write_wired"] is False
     cons = ops["constraints"]
     assert cons["rotation_enum"] == [0, 90, 180, 270]
     assert cons["wire_orthogonal_only"] is True

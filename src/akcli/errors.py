@@ -29,6 +29,8 @@ ERROR_CODES: frozenset[str] = frozenset(
         "KICAD_SEXPR_DEPTH",
         "KICAD_SEXPR_UNTERMINATED",
         "KICAD_SEXPR_TOOBIG",
+        "KICAD_SEXPR_BAD_NUMBER",
+        "INTERNAL",
         # writer / op-list / verify
         "SYMBOL_NOT_FOUND",
         "BAD_ANGLE",
@@ -47,7 +49,18 @@ ERROR_CODES: frozenset[str] = frozenset(
         # external tooling
         "KICAD_CLI_TIMEOUT",
         "KICAD_CLI_MISSING",
-        # Altium live bridge transport
+        "NGSPICE_MISSING",
+        "NGSPICE_FAILED",
+        # sim deck build / sim.json (raised before ngspice is ever loaded)
+        "SIM_NO_GROUND",
+        "SIM_NODE_COLLISION",
+        "SIM_VALUE_INVALID",
+        "SIM_OP_ASSERT_UNSUPPORTED",
+        # networked surface (jlc)
+        "NETWORK",
+        # RESERVED transport codes: the Altium live driver was removed (Altium is
+        # import-only) and nothing raises these today — they stay registered
+        # because the published error/exit tables are frozen.
         "BRIDGE_BUSY",
         "BRIDGE_TIMEOUT",
         # binary fetch / auto-download integrity
@@ -89,6 +102,8 @@ _CODE_EXIT: dict[str, int] = {
     "KICAD_SEXPR_DEPTH": EXIT["PARSE"],
     "KICAD_SEXPR_UNTERMINATED": EXIT["PARSE"],
     "KICAD_SEXPR_TOOBIG": EXIT["PARSE"],
+    "KICAD_SEXPR_BAD_NUMBER": EXIT["PARSE"],
+    "INTERNAL": EXIT["PARSE"],
     # op-list / verify failures -> 6
     "SYMBOL_NOT_FOUND": EXIT["OPLIST"],
     "BAD_ANGLE": EXIT["OPLIST"],
@@ -102,13 +117,23 @@ _CODE_EXIT: dict[str, int] = {
     "TARGET_LOCKED": EXIT["OPLIST"],
     "GROUP_UNKNOWN": EXIT["OPLIST"],
     "GROUP_NO_ORIGIN": EXIT["OPLIST"],
+    # sim deck build: the schematic/spec cannot be turned into an honest deck;
+    # nothing ran, so this is an op-list-class refusal (6), never a tool error.
+    "SIM_NO_GROUND": EXIT["OPLIST"],
+    "SIM_NODE_COLLISION": EXIT["OPLIST"],
+    "SIM_VALUE_INVALID": EXIT["OPLIST"],
     # usage / config errors -> 2
     "PATH_OUTSIDE_ROOT": EXIT["USAGE"],
     "BAD_CONFIG": EXIT["USAGE"],
+    # a sim.json that asks for something the engine cannot do -> 2 (config)
+    "SIM_OP_ASSERT_UNSUPPORTED": EXIT["USAGE"],
     # external tooling -> 7
     "KICAD_CLI_TIMEOUT": EXIT["TOOL_MISSING"],
     "KICAD_CLI_MISSING": EXIT["TOOL_MISSING"],
-    # Altium live bridge: a held lock behaves like TARGET_LOCKED (6); a
+    "NGSPICE_MISSING": EXIT["TOOL_MISSING"],
+    "NGSPICE_FAILED": EXIT["TOOL_MISSING"],
+    "NETWORK": EXIT["TOOL_MISSING"],
+    # reserved bridge transport: a held lock behaves like TARGET_LOCKED (6); a
     # response time-out behaves like an unavailable external tool (7).
     "BRIDGE_BUSY": EXIT["OPLIST"],
     "BRIDGE_TIMEOUT": EXIT["TOOL_MISSING"],
@@ -157,6 +182,14 @@ REMEDIATION: dict[str, str] = {
     "KICAD_SEXPR_TOOBIG":
         "the file exceeds a safety size cap; if it is a genuine KiCad file, "
         "report it (caps live in akcli.safety)",
+    "INTERNAL":
+        "an unexpected exception escaped a command handler (this is an "
+        "akcli bug) — re-run with --debug for the raw traceback and "
+        "report it with the input file",
+    "KICAD_SEXPR_BAD_NUMBER":
+        "a numeric field in the file is not a valid number (corrupt merge, "
+        "disk damage or hand edit) — open the file at the quoted token and "
+        "repair it, or restore from backup",
     # writer / op-list / verify
     "SYMBOL_NOT_FOUND":
         "pass the defining library via --symbols <lib.kicad_sym> (or config "
@@ -204,13 +237,46 @@ REMEDIATION: dict[str, str] = {
     "KICAD_CLI_MISSING":
         "install KiCad (bundles kicad-cli) or set AKCLI_KICAD_CLI; "
         "`akcli doctor` shows what is discovered",
-    # Altium live bridge transport
+    # reserved transport codes (no live driver; see ERROR_CODES note)
     "BRIDGE_BUSY":
         "another bridge request is in flight; wait and retry (single-flight "
         "transport)",
     "BRIDGE_TIMEOUT":
         "the running Altium instance did not answer in time; check the "
         "DelphiScript listener is running, then retry",
+    # ngspice engine
+    "NGSPICE_MISSING":
+        "no libngspice found — install KiCad (its bundled libngspice is "
+        "auto-discovered) or point AKCLI_NGSPICE at the library; "
+        "`akcli doctor --require ngspice` verifies. `sim --deck-only` still "
+        "works without it",
+    "NGSPICE_FAILED":
+        "the engine ran but failed; inspect the deck with `sim --deck-only` "
+        "(unresolved components / bad Sim.* fields are the usual cause)",
+    # sim deck build / sim.json
+    "SIM_NO_GROUND":
+        "no net became SPICE node 0; pass `--gnd <net>` naming the reference "
+        "net (`akcli nets <sch>` lists them), or add a GND power symbol",
+    "SIM_NODE_COLLISION":
+        "two different nets map to one ngspice node (node names are "
+        "case-insensitive, and ngspice has no sheet hierarchy); rename one net "
+        "so the names differ in more than case/punctuation, and give per-sheet "
+        "local labels distinct names (MID_A/MID_B) or promote them to global "
+        "labels when they really are one net",
+    "SIM_VALUE_INVALID":
+        "the component value is not a value SPICE can take; write it as a bare "
+        "engineering value (10k, 4R7, 100nF) and move ratings/tolerance into "
+        "another field, or set Sim.Device/Sim.Params (or a spec.models entry) "
+        "to say explicitly what to simulate — `Sim.Enable=0` skips the part",
+    "SIM_OP_ASSERT_UNSUPPORTED":
+        "ngspice cannot run `.meas` against an operating-point analysis; "
+        "declare a `dc` sweep (e.g. \"dc\": \"Vsupply 3.3 3.3 1\" with "
+        "\"meas\": \"FIND v(mid) AT=3.3\") or a `tran` analysis and assert "
+        "against that — an `op` analysis with no asserts is still fine",
+    # networked surface (jlc)
+    "NETWORK":
+        "the jlc endpoint is unreachable; check network/proxy or set "
+        "AKCLI_JLC_BASE_URL to a mirror — cached responses may still serve",
     # binary fetch / auto-download integrity
     "BINFETCH_DOWNLOAD":
         "the download failed; check network access and retry (or install the "

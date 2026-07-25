@@ -34,10 +34,11 @@ Two ground rules:
 |---|---|
 | Net looks split / pin floating / wrong merge | `akcli net <file> <NETNAME>` |
 | One component wired wrongly | `akcli component <file> <REF>` |
-| "Is this check finding real?" | `akcli check <file> --exit-zero --json` |
-| Two revisions disagree | `akcli diff <a> <b> --exit-zero` |
+| "Is this check finding real?" | `akcli check <file> --fail-on never --json` |
+| Two revisions disagree | `akcli diff <a> <b> --fail-on never` |
 | MCU pin assignment suspect | `akcli pinmap <file> --mcu U3` |
 | `draw`/`plan` refused to write | `akcli draw <target> --ops <ops.json>` (dry-run, read connectivity block) |
+| Refusal may predate the op-list (bad target file) | `akcli check <target> --integrity --fail-on never` |
 | File will not parse at all | `akcli read <file> --debug` |
 | Unclear tool state | `akcli --version` (prints package **and** protocol version) |
 | Write refused by `TARGET_LOCKED` (KiCad GUI has the file open) | close the GUI, or `akcli draw <t> --ops <ops.json> --apply --allow-open` (then File>Revert in KiCad) |
@@ -55,12 +56,24 @@ akcli net board.kicad_sch GND --json
 
 # (b) List ALL nets and look for duplicates / near-names (GND vs GND_2, N$-auto names)
 akcli net board.kicad_sch
-akcli net board.kicad_sch --json | jq 'length'
+akcli net board.kicad_sch --json | jq '.total'   # same envelope + net shape as `akcli nets`
 
 # (c) Check the component side: which net does each pin of U3 actually land on?
 akcli component board.kicad_sch U3
 akcli component board.kicad_sch U3 --json
+
+# (d) Pin-level causality — ask the engine directly instead of reverse-reading findings
+akcli net board.kicad_sch --at U3.7            # which net is this pin on (null = floating)
+akcli net board.kicad_sch --same U3.7 R1.2     # are these two pins one net?
+akcli net board.kicad_sch --why U3.7           # WHY is it (not) connected: junction/wire-end
+                                               # status, nearest wire end/label/pin with mil
+                                               # distances, off-grid flag, fix hints
 ```
+
+`--why` is the shortcut for the floating-pin symptom: it reports mid-span touches
+(pin on a wire body with no junction), a wire end or label that stops N mil short,
+and off-grid pin tips — the three causes that otherwise require reading
+`check --nets` findings backwards.
 
 Then compare against the expectation (datasheet, prior revision via `akcli diff`, or an expected
 table via `akcli pinmap --expected`). Interpretation guide:
@@ -93,24 +106,28 @@ table via `akcli pinmap --expected`). Interpretation guide:
 ## 2. Triaging `akcli check` findings
 
 ```bash
-akcli check board.kicad_sch --exit-zero            # report mode: findings without exit 1
-akcli check board.kicad_sch --erc --exit-zero      # isolate one check family (--erc/--power/--bom)
+akcli check board.kicad_sch --fail-on never        # report mode: findings without exit 1
+akcli check board.kicad_sch --erc --fail-on never  # isolate one family (--erc/--power/--bom/--nets/
+                                                  # --layout/--integrity/--pairs)
+akcli check board.kicad_sch --integrity --fail-on never   # the write gate's document checks,
+                                                  # read-only on ANY .kicad_sch
 akcli check board.kicad_sch -C akcli.toml --json
 ```
 
-**Read the metadata header first** — it is printed on every run and decides how much the findings
-(and their absence) are worth:
+`--integrity` is the diagnosis shortcut for "the file itself is wrong": it runs
+the same checks `draw --apply` gates on (`DANGLING_ENDPOINT`,
+`DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`, `DUPLICATE_DESIGNATOR`,
+`UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`, `NO_CONNECT_CONFLICT`) over a file
+akcli did not write — the fastest way to tell a hand edit / bad merge / moved
+library from an electrical problem, and to confirm a target is clean BEFORE
+blaming an op-list for a refused write.
 
-- `passive_pin_ratio` high (few pins carry a real electrical type): the type-gated rules
-  (driver conflict, floating input) are demoted to NOTE with an explanatory suffix. A "clean" ERC
-  on such a board is **vacuous** for those rules — say so explicitly.
-- `no_erc_suppressed` > 0: that many findings were silenced by No-ERC markers. Confirm the
-  markers are intentional before trusting the pass.
-- `unnamed_net_count` > 0: the power check ignores unnamed nets entirely, so an IC fed by an
-  unnamed rail is never checked for power/ground. A clean power pass with many unnamed nets is
-  weak evidence.
-- Fractional coords present (Altium sources only): sub-unit coordinates existed; geometry
-  reasoning is still valid but be alert on near-miss pin/wire questions.
+**Read the metadata header first** — it is printed on every run and decides how much the
+findings (and their absence) are worth. The full caveat table (passive-pin ratio, No-ERC
+suppression, unnamed-net count, fractional coords — and what each does to finding
+reliability) lives in the **akcli-schematic-review** skill; do not re-derive it here. The
+debugging-specific consequence: a "clean" run under any of those caveats is **vacuous
+evidence** for the demoted rules — say so explicitly instead of reporting a pass.
 
 Real fault vs false positive, per rule:
 
@@ -123,13 +140,17 @@ Real fault vs false positive, per rule:
 - `ERC_DANGLING_NET`: single-pin net. Real for forgotten wires; false positive for intentional
   test points — waive via `[[erc_waiver]]` (rule tokens are the lowercase forms, e.g.
   `dangling_net`) rather than ignoring the whole check.
+- Non-ERC findings (power/BOM/nets/layout codes) use the generic `[[waiver]]` table instead:
+  any finding `code` + optional `refs`, and a `reason` is required — see the
+  akcli-schematic-review skill for the full syntax.
 - `ERC_NET_ALIAS`: NOTE-only by design (the merge was deliberate). Escalate only if the merged
   names should not be one net (see §1 wrong-merge).
 - BOM findings: duplicate designators are ERRORs and almost always real; refdes gaps are
   NOTE-level hygiene.
 
 Exit semantics: `check`/`diff`/`pinmap` exit **1** when any finding is WARNING or worse; use
-`--exit-zero` when you want the report without tripping scripted error handling.
+`--fail-on never` (`--exit-zero` is its deprecated alias) when you want the report
+without tripping scripted error handling.
 
 ## 3. Debugging `plan` / `draw` failures
 
@@ -147,7 +168,15 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   `INVALID_INSTANCES_PATH` are ERRORs — any one of them (or any errored op) makes `draw` exit
   **6** and refuse the write; `NO_CONNECT_CONFLICT` is a warning. Fix the op-list (usually a wire
   endpoint that misses a pin — prefer `"REF.PIN"` endpoints, which snap exactly) and re-run the
-  dry-run until the connectivity block is clean.
+  dry-run until the connectivity block is clean. Run
+  `akcli check <target> --integrity --fail-on never` first when the same codes may
+  already be in the target: the gate reports pre-existing document damage as if
+  your ops caused it.
+- **`INVALID_INSTANCES_PATH` on a hierarchical child file is no longer expected.**
+  A child `.kicad_sch` of an existing hierarchy accepts ops (its `/<top-root>/<sheet>`
+  instance paths are valid); a single-segment path must still name the file's own
+  root uuid. What is still unsupported is placing *into* a sub-sheet path from the
+  parent — target the child file directly.
 - Per-op failures name the culprit: `SYMBOL_NOT_FOUND` → add `--symbols`; `VERIFY_FAILED` on
   `set_component_transform`/`set_component_parameters` → the designator does not exist in the
   target (check with `akcli component`); `PROTOCOL_MISMATCH` / `OP_UNSUPPORTED` → stop and
@@ -176,7 +205,7 @@ Exit-code table (frozen in `errors.py`):
 | Code | Meaning | Typical action |
 |---|---|---|
 | 0 | success / no findings | proceed (but see vacuous-pass caveats, §2) |
-| 1 | check/diff/pinmap findings ≥ WARNING | triage findings; `--exit-zero` for report mode |
+| 1 | check/diff/pinmap findings ≥ WARNING | triage findings; `--fail-on never` for report mode |
 | 2 | usage / config error (`BAD_CONFIG`, bad flags, `export --json`) | fix the invocation or TOML |
 | 3 | parse error (corrupt OLE2 / S-expr, alloc guards) | suspect the file; report upstream |
 | 4 | file not found | fix the path |
@@ -233,6 +262,19 @@ Debugging tactics specific to `sim`:
   the deck* — so a "wrong" measurement may just mean the part isn't in the
   simulation. Model it (`Sim.*` fields, a `models` entry, or `fit_diode`) before
   trusting the result.
+- **`SIM_PART_SKIPPED` is often the bug.** Any part the deck does not emit — DNP/
+  `NP`/`OPEN` value, `Sim.Enable=0`, a `models` `skip`, a connector/test point, or
+  unmodeled — is reported here, and the finding is an **ERROR** (exit 1) when it
+  has ≥2 connected nodes and an assertion measures one of them. A divider that
+  "measures the rail" usually has one leg skipped, not miswired.
+- **`SIM_VALUE_INVALID` (exit 6) is a refusal, not a crash.** A value SPICE cannot
+  take confidently (`LED red`, `TBD`, an ohms-marked `600R` on an `L`) stops the
+  run; `10k 1%`-style trailing tokens are dropped with a `SIM_VALUE_NORMALIZED`
+  warning instead. Read those warnings: the normalized value is what was actually
+  simulated.
+- **An assert bound to `op` is rejected** (`SIM_OP_ASSERT_UNSUPPORTED`, exit 2) —
+  `.meas` needs a plot. Re-declare the analysis as a single-point `dc` sweep
+  (`"dc": "Vsupply 3.3 3.3 1"`) to assert an operating point.
 - **A failed measurement (`SIM_MEAS_FAILED`) is a finding, not a crash.** A `WHEN`
   edge that never crosses (e.g. `t_detect` on a detector that never latches)
   comes back as `None`/`failed` — which is frequently the bug you were chasing.

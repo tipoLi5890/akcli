@@ -60,7 +60,7 @@ codex plugin install akcli@akcli
 
 ```bash
 akcli read  board.kicad_sch --summary                            # 归一化 JSON，压缩在上下文预算内
-akcli check board.kicad_sch                                      # ERC-lite + power + BOM + 连通性
+akcli check board.kicad_sch                                      # ERC-lite + power + BOM + 连通性 + 文档完整性
 akcli draw  board.kicad_sch --ops ops.json                       # dry-run：显示改动 + net diff
 akcli draw  board.kicad_sch --ops ops.json --apply --strict-nets # 原子写入 + 校验 + 备份
 akcli undo  board.kicad_sch                                      # 回退上一次写入
@@ -76,15 +76,15 @@ Python 的连通性闸门把关，`akcli undo` 则从轮替备份栈回退。离
 
 | 命令 | 功能 |
 |---|---|
-| `read` · `net` · `component` · `pins` | 把 KiCad 或 Altium 解析成同一套归一化 JSON 模型；查询 net、元件与引脚坐标。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | 依据带版本号的 **22 种 op + 10 种宏** JSON op-list 绘制 `.kicad_sch`，由 net-diff 安全闸门与一键 `undo` 把关。 |
-| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + intent／contract 检查、原理图 ↔ PCB 等价、net 成员关系 diff、MCU 引脚 → net 表。 |
-| `review` | 建议性（advisory）、分级置信度的设计评审，横跨六大检测族（signal／validation／pcb／emc／domain／gerber）。 |
-| `sim` | 转成 SPICE deck，在 KiCad 自带 ngspice 上断言；角点扫描；用 datasheet 点拟合二极管模型。 |
-| `jlc` | 搜索 JLCPCB/LCSC（库存、价格、Basic／Extended），进程内把元件转成 KiCad 库，抓取规格书。 |
+| `read` · `net` · `component` · `pins` | 把 KiCad 或 Altium 解析成同一套归一化 JSON 模型；查询 net（整条 net，或引脚级的 `net --at`／`--same`／`--why`）、元件与引脚坐标。 |
+| `new` · `plan` · `draw` · `ops` · `arrange` | 依据带版本号的 **22 种 op + 10 种宏** JSON op-list 绘制 `.kicad_sch`（根文件，或既有层次结构中的子图页），由 net-diff 安全闸门与一键 `undo` 把关。符号来源依次为 `--symbols`、配置文件路径，最后是项目与全局的 `sym-lib-table`。 |
+| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + 文档完整性 + intent／contract 检查、原理图 ↔ PCB 等价、net 成员关系 diff、MCU 引脚 → net 表。 |
+| `review` | 建议性（advisory）、分级置信度的设计评审，横跨六大检测族（signal／validation／pcb／emc／domain／gerber）；标记 DNP 的元件不满足任何规则。 |
+| `sim` | 转成 SPICE deck，在 KiCad 自带 ngspice 上断言；角点扫描；用 datasheet 点拟合二极管模型。元件值先归一化，无法确定解读的一律拒绝而不猜测。 |
+| `jlc` | 搜索 JLCPCB/LCSC（库存、价格、Basic／Extended），进程内把元件转成 KiCad 库（带电气类型的引脚、真实 `Value`），抓取规格书。 |
 | `calc` | **60** 个附标准引用的离线计算器（E 系列、IPC-2221、阻抗、I²C 上拉、buck／boost……），每条都附引用。 |
 | `library` · `fab` · `release` | 库工作区审计／修复、版本化 fab profile 检查，以及写出可追溯 manifest 的 release preflight。 |
-| `render` · `doc` · `view` | 纯标准库 SVG 渲染、Markdown pinout book，以及 localhost 的 `/calc` + `/live` 仪表板。 |
+| `export` · `render` · `doc` · `view` | netlist 导出（Protel／KiCad／CSV——KiCad 格式带有重新导入所需的 UUID sheetpath 身份）、纯标准库 SVG 渲染、Markdown pinout book，以及 localhost 的 `/calc` + `/live` 仪表板。 |
 
 两个代表性示例——一次设计评审与一次元件搜索：
 
@@ -99,8 +99,8 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 输出结构化 JSON（带有 `schema_version`），op-list 携带 `protocol_version`，`akcli capabilities`
 会用一份 JSON 文档自描述整个 CLI 能力面——而且每个错误码都携带机器可读的 `remediation` 修复提示。
 
-- **Claude Code** — 安装随附插件，即可获得五个 `/akcli:circuit-*` 命令（review、pinmap、draw、
-  diff、parts）与十二个 skills，涵盖设计、评审、电路编写、Altium 互通、元件选型、计算器与 release
+- **Claude Code** — 安装随附插件，即可获得八个 `/akcli:circuit-*` 命令（review、pinmap、draw、
+  diff、parts、sim、datasheet、release）与十二个 skills，涵盖设计、评审、电路编写、Altium 互通、元件选型、计算器与 release
   把关。
 - **Codex** — 安装随附插件，或把 skills 文件夹放进 `.agents/skills/` 让其自动发现。见
   [docs/codex-plugin.md](../docs/codex-plugin.md)。
@@ -148,7 +148,7 @@ Python 之外的东西——一律在运行时探测，核心流程永远不需�
 
 ## 路线图
 
-**当前已提供（v0.15.0）：** KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet`、net-diff
+**当前已提供（v0.16.0）：** KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet`、net-diff
 安全护栏、`new`／多级 `undo`）、保持 net 不变的 `arrange --groups` 重新布局、建议性的 `akcli review`
 评审引擎（六大检测族、datasheet facts 存储、`propose`／`tree`／`validate`）、ERC／power／BOM／
 diff／pinmap／intent／contract 检查（含 waiver 与 SARIF）、原理图 ↔ PCB `verify`、项目 `library`

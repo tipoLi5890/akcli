@@ -67,11 +67,12 @@ def _cmd_render(args: argparse.Namespace) -> int:
 def register(sub, common) -> None:
     p = sub.add_parser(
         "render", parents=[common],
-        help="render a schematic to SVG (no KiCad install; Altium too)")
+        help="render a schematic to SVG (no KiCad install; Altium too). "
+             "WRITES <input>.svg by default — use `-o -` for stdout")
     p.add_argument("path", nargs="?", help="input .kicad_sch or .SchDoc")
     p.add_argument("-o", "--output", metavar="FILE",
-                   help="output SVG path ('-' = stdout; default: "
-                        "<input>.svg next to the input)")
+                   help="output SVG path ('-' = stdout, nothing written; "
+                        "default: <input>.svg written next to the input)")
     p.add_argument("--grid", action="store_true",
                    help="overlay world-mil gridlines + coordinate captions + "
                         "origin cross (read placement coordinates off the "

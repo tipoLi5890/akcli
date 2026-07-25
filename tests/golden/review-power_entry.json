@@ -8,6 +8,7 @@
     "config_waived": "0 (0 demoted)",
     "review_profile": "standard",
     "facts_mpns": [],
+    "facts_unmatched": [],
     "source_format": "kicad",
     "components": 9,
     "nets": 7,

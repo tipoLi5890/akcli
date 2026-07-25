@@ -71,7 +71,7 @@ def _akcli(argv: list[str]) -> SimpleNamespace:
 
 
 def _load_expected(task_dir: Path) -> dict[str, frozenset[str]]:
-    doc = json.loads((task_dir / "expected_nets.json").read_text())
+    doc = json.loads((task_dir / "expected_nets.json").read_text(encoding="utf-8"))
     return {n["name"]: frozenset(n["members"]) for n in doc["nets"]}
 
 
@@ -83,7 +83,7 @@ def score_ops(task_dir: Path, ops_path: Path) -> dict:
     result["total"] = len(expected)
 
     try:
-        oplist = json.loads(ops_path.read_text())
+        oplist = json.loads(ops_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         result["errors"].append(f"unreadable op-list: {exc}")
         return result
@@ -100,7 +100,7 @@ def score_ops(task_dir: Path, ops_path: Path) -> dict:
         if isinstance(oplist, dict):
             oplist["target_file"] = sheet.name
         cand = tmp / "candidate.json"
-        cand.write_text(json.dumps(oplist), encoding="utf-8")
+        cand.write_text(json.dumps(oplist), encoding="utf-8", newline="\n")
 
         val = _akcli(["ops", "validate", str(cand), "--json"])
         try:
@@ -133,7 +133,7 @@ def score_ops(task_dir: Path, ops_path: Path) -> dict:
         # ground-truth nets are compared AFTER the re-pack.
         post = task_dir / "postcheck_arrange.json"
         if post.is_file():
-            params = json.loads(post.read_text())
+            params = json.loads(post.read_text(encoding="utf-8"))
             argv = ["arrange", str(sheet), "--groups", "--apply",
                     *(a for s in SYMBOLS for a in ("--symbols", str(s)))]
             for flag in ("group-gap", "page-width", "row-width", "margin"):

@@ -24,9 +24,29 @@ akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profil
 ```
 
 Gates, in order: `check` (ERC/power/BOM/nets) → `intent` → `contract` →
-`library-audit` → `sch-pcb` → `fab` → `order` → **`review`** (policy-gated)
-→ **`gerber`** (fab package) → `git` (clean worktree; `--allow-dirty`
-records instead of failing).
+`library-audit` → `sch-pcb` → `fab` → `order` → **`sim`** (`--sim` sim.json;
+quantitative SPICE assertions) → **`review`** (policy-gated) → **`gerber`**
+(fab package) → `git` (clean worktree; `--allow-dirty` records instead of
+failing).
+
+- **The sim gate is opt-in and strict**: give `--sim <sim.json>` and the
+  assertion violations become gate findings in the manifest. A requested sim
+  gate that cannot run (no libngspice, deck build failure) **FAILS, never
+  skips** — a PASS manifest may not ship because the release machine lacked
+  the engine. No `--sim` = skipped-with-reason, like every other gate.
+
+Two things preflight does **not** cover — say so in the release summary
+instead of implying they were checked:
+
+- **Assembly CPL is not produced.** `jlc bom --csv` covers the assembly BOM,
+  but the centroid/placement (CPL) file must be exported from the PCB in
+  KiCad (Fabrication Outputs → Component Placement) — akcli has no PCB stage.
+- **Document integrity is not in the `check` gate.** That gate runs
+  ERC/power/BOM/nets only; run `akcli check <sch> --integrity --fail-on never`
+  alongside preflight (dangling endpoints, duplicate uuids/designators,
+  unresolved `lib_id`s, instance paths, no-connect conflicts) and report its
+  result with the manifest — a duplicate designator or an unresolved symbol
+  library is a ship-stopper the gate list will not raise.
 
 ## Gate doctrine
 

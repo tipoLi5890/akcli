@@ -7,10 +7,12 @@ description: >-
   from a spec or datasheet ("設計電路", "design a circuit", "create a schematic from
   scratch"); placing components, wires, net labels, power ports, or junctions in a
   .kicad_sch via op-list JSON; picking real parts with JLC/LCSC sourcing before drawing;
+  simulating the drawn circuit with the bundled ngspice ("模擬", simulate, run a SPICE
+  sim, operating point, transient, DC sweep, assert node voltages);
   or safely re-running / editing a previously drawn sheet. Triggers on keywords:
   new schematic, draw circuit, op-list, place_component, add_wire, net label,
   power port, decoupling, LDO block, connector fanout, akcli plan, akcli draw,
-  JLC part selection, kicad_sch authoring.
+  akcli sim, ngspice, SPICE deck, sim.json, JLC part selection, kicad_sch authoring.
 ---
 
 # akcli-schematic-authoring — from requirements to a verified `.kicad_sch`
@@ -18,7 +20,10 @@ description: >-
 This skill covers *creating* circuits with the `akcli` op-list writer. For basic
 read/analyze/draw mechanics, exit codes, error format, and the Altium (read-only)
 path, **see the akcli-circuit-design skill** — do not re-derive them here. KiCad is the
-only writable target; the writer is flat (single-sheet) v1.
+only writable target. Authoring targets ONE sheet file per run: a child
+`.kicad_sch` of an existing hierarchy is a valid target (its ops apply
+normally), but you cannot place *into* a sub-sheet path from the parent — run
+`draw` against the child file itself.
 
 **The authoring loop (never skip a stage):**
 requirements → block plan (groups + intent) → part selection → op-list
@@ -85,8 +90,8 @@ Never design an IC's surrounding circuit from remembered specs. Pull the PDF
 and read it:
 
 ```bash
-akcli jlc datasheet C2984661 --fetch          # one part -> ~/.cache/akcli/datasheets/
-akcli jlc datasheet board.kicad_sch --fetch   # every BOM line with an LCSC id, one run
+akcli jlc datasheet C2984661 --fetch --out datasheets   # one part -> ./datasheets (project-local)
+akcli jlc datasheet board.kicad_sch --fetch --out datasheets  # every BOM line, one run
 ```
 
 - **Link resolution:** links come from the part's EasyEDA record; a `no-link`
@@ -191,10 +196,19 @@ Rules the validator and executor enforce:
   keep it open for the whole loop. With no path it auto-discovers the single
   `.kicad_sch` in the CWD; bare `akcli view` serves the hub (calculators +
   idle /live).
+- **The blessed connection ladder — pick the FIRST rung that fits** (full
+  rationale in docs/op-list-authoring.md): (1) **label-on-pin** is the
+  default for every connection (`add_net_label` at `"REF.PIN"`; rails via
+  `place_gnd`/`place_vcc`/`place_power_port`) — zero geometric-merge risk,
+  survives `arrange`; (2) `connect_and_label` only for facing coaxial pins;
+  (3) `route_net` when a visible wire is wanted; (4) raw `add_wire` last,
+  exact-geometry cases only. Bus/sheet/graphics ops are the advanced layer —
+  only when the task explicitly demands them.
 - **Wire vs label vs power port**: wire (`add_wire`, `"REF.PIN"` endpoints) for
   short in-block connections; `add_net_label` with `"scope": "local"` on a short
   wire stub for readable in-block nets; `"scope": "global"` for nets crossing
-  blocks (writer is flat — avoid `hierarchical`, sheets are unsupported);
+  blocks on the same sheet (`hierarchical` only when the net leaves the sheet
+  through a `(sheet)` pin — see `add_sheet` below);
   `place_power_port` / `place_gnd` / `place_vcc` for rails (power ports merge by
   name everywhere and auto-allocate `#PWR` refs). Connectivity is name-based, so
   overlapping/collinear stubs or a wire T-junctioning another net silently MERGE
@@ -242,7 +256,11 @@ Rules the validator and executor enforce:
   `angle`) for short notes; `add_text_box` (`text`, `at`, `size`) for design
   rationale paragraphs; `add_rectangle` (`start`, `end`, optional `key` for
   idempotent replace) for ad-hoc frames — but functional-block borders should
-  come from `groups --frame`, not hand-drawn rectangles; `set_title_block`
+  come from `groups --frame`, not hand-drawn rectangles. A `key` (accepted by
+  `add_text`/`add_text_box`/`add_rectangle`) must be **unique per op-list**:
+  the node uuid is derived from `(kind, key)` alone, so the validator refuses a
+  duplicate rather than letting the second op replace the first's node while
+  both report ok. `set_title_block`
   (`title`/`date`/`rev`/`company`/`comment1..`) stamps the sheet metadata that
   `akcli new --title` didn't set.
 - **Repetitive placements — `place_array`**: N same-symbol parts in one op
@@ -322,7 +340,11 @@ per signal pin, `place_gnd` on the ground pin, `add_no_connect` on unused pins
 Every `place_component` / power-port symbol must resolve from a source: per-op
 `symbol_source`, repeatable `--symbols` (a `.kicad_sym`, or a `.kicad_sch` whose
 inline `lib_symbols` is harvested), or config `[paths]` entries ending in
-`.kicad_sym`. A miss is `SYMBOL_NOT_FOUND`.
+`.kicad_sym`. As a LAST resort a `lib_id` nickname the explicit sources do not
+cover is looked up in the project and global `sym-lib-table`, so `Device:R`
+resolves against an installed KiCad — an explicit `--symbols` always wins, and
+passing it stays the deterministic recommendation (the fallback depends on the
+machine's KiCad install). A miss is still `SYMBOL_NOT_FOUND`.
 
 ```bash
 SYMS=/usr/share/kicad/symbols    # macOS: /Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols
@@ -348,7 +370,9 @@ file open (a `~<name>.lck` lock file). After confirming it is safe, use
 `remediation` field saying what to do next. On `OP_UNSUPPORTED`,
 `PROTOCOL_MISMATCH`, or geometry errors: stop and report, do not retry
 blindly. After a successful `--apply`, `akcli render board.kicad_sch` gives
-you an SVG to *look at* what you placed, `akcli doc board.kicad_sch` builds
+you an SVG to *look at* what you placed (it writes `board.kicad_sch.svg` next
+to the input — pass `-o -` when you only want the SVG on stdout and no file
+left behind), `akcli doc board.kicad_sch` builds
 the Markdown pinout book (pin→net tables + rails + BOM) for human hand-off,
 and `akcli log .` shows the write journal (every plan/draw/undo with its
 op-list hash and net-diff verdict). Pass `--note "why"` on writes so the
@@ -378,13 +402,22 @@ refuses the write (exit 6). An intended merge/rename? Re-run without
 
 ## (6) Idempotency and safe re-runs
 
-- Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus
-  `designator:op_index` (or tag:coords). **Re-running the same op-list file
-  converges** — prior same-uuid nodes are replaced, `#PWR` refs are recovered,
-  re-applies stay byte-identical.
-- Because identity includes `op_index`, never reorder or insert ops mid-list in a
-  file you already applied. To extend an applied sheet, author a NEW small op-list
-  containing only the delta ops (Example B).
+- Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus a
+  per-node key: **symbols/pins key on the designator alone**, wires/graphics/
+  annotations on `tag:coords` (annotation `key`s ignore coords entirely).
+  **Re-running the same op-list file converges** — prior same-uuid nodes are
+  replaced, `#PWR` refs are recovered, re-applies stay byte-identical.
+- **Editing an applied op-list is safe for part identity.** Inserting,
+  reordering, or deleting ops does not change any untouched part's uuid, so a
+  re-apply updates in place. What still keys on position is *geometry*: a wire,
+  graphic, or annotation whose coordinates change becomes a new node, and the
+  old one is left behind — remove it with `delete_object` (or use an annotation
+  `key`, which survives moves). Extending an applied sheet with a small
+  delta-only op-list (Example B) remains the tidiest habit, no longer a rule.
+- **One-time migration:** a file written by a *pre-0.17* akcli carries the old
+  `designator:op_index` uuids. Re-apply the UNEDITED op-list once (or start from
+  `akcli undo`) before editing it; editing first can duplicate parts whose
+  original op index was ≠ 0.
 - `set_component_transform` / `set_component_parameters` address parts by
   designator; an unknown designator fails that op with `VERIFY_FAILED` and blocks
   the whole write.
@@ -400,8 +433,15 @@ refuses the write (exit 6). An intended merge/rename? Re-run without
 akcli read board.kicad_sch --md                        # parts present, values correct?
 akcli nets board.kicad_sch                             # every net -> sorted members, one line each
 akcli component board.kicad_sch U1                     # pin->net map of key parts
+akcli net board.kicad_sch --same U1.7 C3.1             # assert THE connection you just drew
+akcli net board.kicad_sch --why U1.7                   # a pin shows (no net)? attachment
+                                                       # diagnosis + nearest wire/label + hints
 akcli check board.kicad_sch --fail-on never            # ERC-lite + power + BOM + nets + layout
-                                                       # (+ --pairs for diff-pair/bus continuity)
+                                                       # + integrity (+ --pairs for diff-pair/bus)
+akcli check board.kicad_sch --integrity --fail-on never  # the write gate's document checks alone,
+                                                       # read-only: dangling endpoints, duplicate
+                                                       # uuids/designators, unresolved lib_ids,
+                                                       # instance paths, no-connect conflicts
 akcli diff board.kicad_sch.bak board.kicad_sch --fail-on never  # the delta is exactly what you drew
                                                                 # (--bom adds the BOM-line delta)
 ```
@@ -462,6 +502,27 @@ Components resolve to SPICE devices via the `Sim.*`-fields → `sim.json` `model
 `SIM_UNMODELED` (a loud warning, never a silent guess) — give those parts a
 `Sim.*` field, a `models` entry, or a `fit_diode` model card. `--deck-only`
 works with no ngspice installed, so it doubles as a review/CI plan step.
+
+Three gates that decide whether a `PASS` means anything (full rules:
+`docs/sim.md`):
+
+- **Values are gated, not guessed.** A passive's value must parse: IEC 60062
+  forms work (`2M2`, `1k5`, `4R7`; `1M` = 1 MΩ → SPICE `1MEG`), a split unit is
+  re-joined (`4.7 k`, `100 nF`), and trailing rating/tolerance tokens are
+  dropped with a `SIM_VALUE_NORMALIZED` warning (`10k 1%` → `10k`). Anything
+  unparseable (`LED red`, `TBD`, or an ohms-marked value on an `L`) is
+  `SIM_VALUE_INVALID`, exit 6 — the tool refuses to simulate rather than let
+  ngspice read `"10k 1%"` as `10`.
+- **Unpopulated parts fail the run they matter to.** A `DNP`/`NP`/`OPEN` value,
+  `Sim.Enable=0`, or a `models` `skip` leaves the part out of the deck and
+  reports `SIM_PART_SKIPPED`; that finding is an **ERROR** (exit 1) when the
+  part has ≥2 connected nodes and an assertion measures one of them — a skipped
+  series element makes the asserted number meaningless. Model it or stop
+  asserting on that node.
+- **`op` analyses cannot carry assertions.** ngspice's `.meas` reads a plot and
+  an operating point produces none, so an assert bound to `op` is refused up
+  front with `SIM_OP_ASSERT_UNSUPPORTED` (exit 2). Assert an operating point
+  with a **single-point `dc` sweep** instead (`"dc": "Vsupply 3.3 3.3 1"`).
 
 Go beyond the single nominal run when the design has margins to defend:
 `--sweep R21=2.2k,3.3k --sweep temp=0,25,60` re-runs every assertion across

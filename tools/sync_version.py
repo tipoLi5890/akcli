@@ -59,7 +59,8 @@ def _load_json(path: Path) -> dict:
 
 def _dump_json(path: Path, obj: dict) -> None:
     # Trailing newline; 2-space indent matches the hand-authored manifests.
-    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8", newline="\n")
 
 
 def _plan_plugin(doc: dict, version: str) -> bool:

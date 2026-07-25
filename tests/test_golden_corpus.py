@@ -52,6 +52,11 @@ CASES: list[Case] = [
     Case("check-two_gnd_ports", ("check", _ALT2, "--json", "--fail-on", "never")),
     Case("diff-v7-v8", ("diff", _KI7, _KI, "--json", "--fail-on", "never")),
     Case("diff-alt-self", ("diff", _ALT, _ALT, "--json", "--fail-on", "never")),
+    # a cut wire moves R1.1 off +3V3: pins the "REF.PIN" member ENCODING in
+    # added_members/removed_members (every other diff golden has them empty)
+    Case("diff-cut-wire",
+         ("diff", _KI, "tests/fixtures/kicad/board_v8_cut_wire.kicad_sch",
+          "--json", "--fail-on", "never")),
     Case("review-board_v8",
          ("review", "analyze", _KI, "--json", "--profile", "standard")),
     Case("review-shared_name_label",

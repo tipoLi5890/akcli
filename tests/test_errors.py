@@ -23,15 +23,22 @@ def test_required_codes_present():
         "ALTIUM_BAD_SECTOR_SHIFT", "ALTIUM_ALLOC_GUARD", "ALTIUM_MALFORMED",
         "ALTIUM_UNSUPPORTED",
         "KICAD_SEXPR_DEPTH", "KICAD_SEXPR_UNTERMINATED", "KICAD_SEXPR_TOOBIG",
+        "KICAD_SEXPR_BAD_NUMBER", "INTERNAL",
         "SYMBOL_NOT_FOUND", "BAD_ANGLE", "NON_ORTHOGONAL_WIRE", "OFF_GRID",
         "OVERLAP", "VERIFY_FAILED", "OP_UNSUPPORTED", "HIERARCHICAL_UNSUPPORTED",
         "PROTOCOL_MISMATCH", "TARGET_LOCKED", "PATH_OUTSIDE_ROOT",
         # functional groups (envelope `groups` + per-op `group` tag)
         "GROUP_UNKNOWN", "GROUP_NO_ORIGIN",
         "KICAD_CLI_TIMEOUT", "KICAD_CLI_MISSING", "BAD_CONFIG",
+        # ngspice engine + the jlc networked surface
+        "NGSPICE_MISSING", "NGSPICE_FAILED", "NETWORK",
+        # sim deck build / sim.json (raised before the engine is ever loaded)
+        "SIM_NO_GROUND", "SIM_NODE_COLLISION", "SIM_VALUE_INVALID",
+        "SIM_OP_ASSERT_UNSUPPORTED",
         # binary-fetch integrity codes
         "BINFETCH_DOWNLOAD", "BINFETCH_CHECKSUM",
-        # Altium live bridge transport
+        # reserved transport codes (the Altium live driver was deleted; nothing
+        # raises these, but the published error/exit tables stay frozen)
         "BRIDGE_BUSY", "BRIDGE_TIMEOUT",
     }
     assert required <= ERROR_CODES
@@ -73,6 +80,12 @@ def test_exit_mapping_categories():
     assert exit_for_code("KICAD_CLI_MISSING") == EXIT["TOOL_MISSING"]
     assert exit_for_code("BRIDGE_BUSY") == EXIT["OPLIST"]
     assert exit_for_code("BRIDGE_TIMEOUT") == EXIT["TOOL_MISSING"]
+    # sim deck-build refusals are op-list class (nothing ran, exit 6) — never
+    # exit 7, which would read as "install a tool"; a bad sim.json is usage (2).
+    assert exit_for_code("SIM_NO_GROUND") == EXIT["OPLIST"]
+    assert exit_for_code("SIM_NODE_COLLISION") == EXIT["OPLIST"]
+    assert exit_for_code("SIM_VALUE_INVALID") == EXIT["OPLIST"]
+    assert exit_for_code("SIM_OP_ASSERT_UNSUPPORTED") == EXIT["USAGE"]
 
 
 def test_every_code_has_exit_mapping():

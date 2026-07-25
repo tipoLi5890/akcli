@@ -14,7 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from akcli import model
 from akcli._vendor.jlc2kicadlib import _http, _kmt
+from akcli._vendor.jlc2kicadlib.symbol import symbol as symbol_mod
+from akcli._vendor.jlc2kicadlib.symbol import symbol_handlers
 from akcli.drivers import jlc2kicad
 from akcli.readers import kicad_lib, sexpr
 
@@ -203,3 +206,104 @@ def test_absolutize_models_rewrites_bare_relative(tmp_path):
     expect = (tmp_path / "out").resolve() / "proj_jlc" / "packages3d" / "X.step"
     assert f'(model "{expect.as_posix()}"' in text
     assert '(model "packages3d/' not in text
+
+
+# --------------------------------------------------------------------------- #
+# symbol quality: pin electrical types + Value/MPN fields (akcli deviations)
+# --------------------------------------------------------------------------- #
+def test_fixture_pins_carry_the_easyeda_input_code():
+    """Guards the premise of the pin-type deviation: the raw EasyEDA data for a
+    plain 0603 resistor codes BOTH pins as electric=1 ("Input")."""
+    payload = json.loads(
+        (FIX / "C25804_symbol_b210af5a1436310a86e8b108e2e5a90b.json").read_text()
+    )
+    codes = [line.split("~")[2]
+             for line in payload["result"]["dataStr"]["shape"]
+             if line.startswith("P~")]
+    assert codes == ["1", "1"]
+
+
+def test_converted_resistor_pins_are_passive(tmp_path, offline_http):
+    """A two-pin R/C/L part must convert to `passive` pins — as `input` pins it
+    trips akcli's own floating-input ERC rule on every placement."""
+    res = jlc2kicad.convert("C25804", str(tmp_path / "out"))
+    sym = next(a for a in res.artifacts if a.endswith(".kicad_sym"))
+    lib = kicad_lib.read(sym)
+    types = {p.electrical_type for p in lib.symbols[0].pins}
+    assert types == {model.PinType.PASSIVE}
+
+
+def test_converted_symbol_value_is_the_part_value_and_mpn_is_kept(tmp_path,
+                                                                 offline_http):
+    res = jlc2kicad.convert("C25804", str(tmp_path / "out"))
+    sym = next(a for a in res.artifacts if a.endswith(".kicad_sym"))
+    text = Path(sym).read_text()
+    assert '(property "Value" "10k"' in text        # EasyEDA "10kΩ", normalized
+    assert '(property "MPN" "0603WAF1002T5E"' in text
+    assert '(property "LCSC" "C25804"' in text
+    # the MPN must no longer masquerade as the Value
+    assert '(property "Value" "0603WAF1002T5E"' not in text
+
+
+@pytest.mark.parametrize("raw,expect", [
+    ("10kΩ", "10k"),
+    ("10KΩ", "10k"),
+    ("100nF", "100n"),
+    ("4.7uF", "4.7u"),
+    ("4.7μF", "4.7u"),
+    ("10uH", "10u"),
+    ("1M", "1M"),          # mega stays upper-case
+    ("8MHz", "8MHz"),      # frequencies keep their unit
+    ("100 ohm", "100"),
+    ("", ""),
+    ("N/A", "N/A"),        # not a magnitude: passed through
+])
+def test_normalize_value(raw, expect):
+    assert symbol_mod.normalize_value(raw) == expect
+
+
+def test_component_value_ignores_a_value_that_just_repeats_the_mpn():
+    c_para = {"name": "TCRT5000", "Manufacturer Part": "TCRT5000",
+              "Value": "TCRT5000"}
+    assert symbol_mod.component_value(c_para) == ""
+    assert symbol_mod.component_value({"Resistance": "4.7kΩ"}) == "4.7k"
+    assert symbol_mod.component_value({}) == ""
+
+
+@pytest.mark.parametrize("prefix,tags,pins,expect", [
+    ("R", ["Resistors"], 2, "passive"),
+    ("C", [], 2, "passive"),
+    ("L", [], 2, "passive"),
+    ("U", ["Resistors"], 2, "passive"),      # tag-driven
+    ("U", ["MCU"], 2, ""),                   # an IC keeps its declared codes
+    ("R", ["Resistors"], 8, ""),             # not a two-pin part
+])
+def test_default_electrical_type(prefix, tags, pins, expect):
+    assert symbol_mod.default_electrical_type(prefix, tags, pins) == expect
+
+
+@pytest.mark.parametrize("code,name,default,expect", [
+    ("0", "A", "", "unspecified"),
+    ("1", "A", "", "input"),
+    ("2", "A", "", "output"),
+    ("3", "A", "", "bidirectional"),
+    ("4", "VCC", "", "power_in"),
+    ("4", "GND", "", "power_in"),
+    ("4", "VOUT", "", "power_out"),
+    ("4", "VOUT1", "", "power_out"),
+    ("4", "VREG", "", "power_out"),
+    ("9", "A", "", "unspecified"),           # outside EasyEDA's code space
+    ("", "A", "", "unspecified"),
+    ("1", "NC", "", "no_connect"),
+    ("1", "N.C.", "", "no_connect"),
+    ("0", "DNC", "", "no_connect"),
+    ("1", "A", "passive", "passive"),        # passive-class override
+    ("2", "A", "passive", "passive"),
+    ("0", "A", "passive", "passive"),
+    ("3", "A", "passive", "bidirectional"),  # declared direction survives
+    ("4", "VCC", "passive", "power_in"),
+    ("1", "NC", "passive", "no_connect"),
+])
+def test_electrical_type_mapping(code, name, default, expect):
+    assert symbol_handlers.electrical_type(
+        code, pin_name=name, default_type=default) == expect

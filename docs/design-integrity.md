@@ -9,6 +9,11 @@ project library workspace (`akcli library`), schematic↔PCB equivalence
 The common thread: **fail loudly, plan before writing, and keep policy in
 versioned files with evidence** — never in hardcoded constants.
 
+Not to be confused with `akcli check --integrity`, which is the *document*
+integrity family (the write gate's dangling-endpoint / duplicate-uuid /
+duplicate-designator / instances-path checks run read-only); see
+[docs/cli-reference.md](cli-reference.md).
+
 ## Reading footprint libraries
 
 ```bash
@@ -169,11 +174,13 @@ akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --contract b
 ```
 
 Runs every applicable gate — schematic checks, intent, contracts, library
-audit, sch↔PCB equivalence, fab policy, order manifest, git cleanliness — and
+audit, sch↔PCB equivalence, fab policy, order manifest, git cleanliness, and
+(with `--sim <sim.json>`) quantitative SPICE assertions — and
 writes a manifest binding input SHA-256s, the akcli version, the git revision
 (and, with `--allow-dirty`, the recorded fact of dirtiness) and each gate's
 findings. Gates without inputs are **skipped with a reason**, never silently
-green. Exit 0 only when every gate passed.
+green — except that a *requested* `--sim` gate that cannot run (no libngspice,
+deck build failure) FAILS rather than skips. Exit 0 only when every gate passed.
 
 ## Writer safety: the GUI-open guard
 
@@ -181,7 +188,7 @@ green. Exit 0 only when every gate passed.
 akcli draw board.kicad_sch --ops edit.json --apply --allow-open
 ```
 
-`draw`/`arrange`/`undo --apply` refuse with `TARGET_LOCKED` (exit 6) while
+`draw`/`arrange`/`undo`/`relink-symbols`/`library repair --apply` refuse with `TARGET_LOCKED` (exit 6) while
 KiCad's `~<name>.lck` lock file is present: a write under an open GUI is a
 losing race — the GUI's later save overwrites the file from memory.
 `--allow-open` is explicit risk acceptance; after applying, the CLI reminds

@@ -74,6 +74,29 @@ def analyze(sch: Schematic, *, pcb: object | None = None,
                     f.code, f.rule_version, f.anchors)
         findings.extend(batch)
 
+    # Facts linkage audit: a facts file that matches NO component MPN would
+    # otherwise fail silently (findings stay heuristic, nothing upgrades to
+    # datasheet_backed, nobody notices). Engine-level like
+    # REVIEW_DETECTOR_ERROR — this is bookkeeping, not a detector rule.
+    unmatched_mpns: list[str] = []
+    if facts is not None and getattr(facts, "by_mpn", None):
+        from .facts import component_mpn
+        comp_mpns = {m.upper() for m in
+                     (component_mpn(c) for c in sch.components) if m}
+        unmatched_mpns = sorted(k for k in facts.by_mpn
+                                if k not in comp_mpns)
+        if unmatched_mpns:
+            findings.append(Finding(
+                code="REVIEW_FACTS_UNMATCHED", severity=Severity.NOTE,
+                message=(f"{len(unmatched_mpns)} audited facts file(s) match "
+                         f"no component MPN: {', '.join(unmatched_mpns)} — "
+                         "their findings stay heuristic instead of "
+                         "datasheet_backed; give the component an MPN "
+                         "parameter (or its exact part-number Value) to "
+                         "attach them"),
+                refs=list(unmatched_mpns),
+                detector="engine.facts", confidence="deterministic"))
+
     findings.sort(key=lambda f: (
         -{"info": 0, "note": 1, "warning": 2, "error": 3, "critical": 4}
         .get(f.severity.value, 0),
@@ -87,6 +110,7 @@ def analyze(sch: Schematic, *, pcb: object | None = None,
         "review_profile": profile,
         "facts_mpns": (sorted(facts.by_mpn) if facts is not None
                        and getattr(facts, "by_mpn", None) else []),
+        "facts_unmatched": unmatched_mpns,
         "source_format": sch.source_format,
         "components": len(sch.components),
         "nets": len(sch.nets),

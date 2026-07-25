@@ -34,7 +34,9 @@ def run(ctx: topo.ReviewCtx) -> list[Finding]:
     out: list[Finding] = []
     tvs_nets: set[str] = set()
     for comp in ctx.sch.components:
-        if topo.is_tvs(comp):
+        # Only FITTED clamps protect anything: a DNP TVS leaves the net
+        # exposed on the shipped board (topo.is_fitted).
+        if topo.is_tvs(comp) and topo.is_fitted(comp):
             for net in ctx.comp_nets.get(comp.designator, []):
                 tvs_nets.add(net.stable_id)
 

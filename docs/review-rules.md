@@ -38,6 +38,7 @@ akcli review explain REVIEW_XTAL_LOAD
 | `REVIEW_OPAMP_GAIN` | info | heuristic | ideal op-amp: G = 1 + Rf/Rg; G = −Rf/Rin |
 | `REVIEW_OPAMP_NO_FEEDBACK` | warning | heuristic | — |
 | `REVIEW_DETECTOR_ERROR` | warning | deterministic | — (engine containment; quarantined) |
+| `REVIEW_FACTS_UNMATCHED` | note | deterministic | — (engine bookkeeping: audited facts files whose MPN matches no component — they upgrade nothing until the component carries the MPN) |
 
 **Validation family (M3):**
 
@@ -118,7 +119,33 @@ sha256 no longer matches), `FACTS_QUOTE_MISMATCH` (warning),
 deterministic) — MPN/distributor-field coverage below 50 % on a ≥10-part
 sheet: the BOM cannot be ordered as-is.
 
-`akcli review explain <CODE>` prints the full specification of any registered detector rule (the `REVIEW_DETECTOR_ERROR` engine-containment code is internal — no `explain` page).
+`akcli review explain <CODE>` prints the full specification of any registered detector rule (the `REVIEW_DETECTOR_ERROR` / `REVIEW_FACTS_UNMATCHED` engine codes are internal — no `explain` page).
+
+## DNP parts satisfy nothing
+
+Every rule that fires on the **absence** of a part searches only for parts
+that are actually **fitted**: a component marked Do-Not-Populate (KiCad
+`(dnp yes)`) is drawn for documentation but the shipped board behaves as if it
+were not there, so it must never silence a "this is missing" finding. In
+practice (`topo.is_fitted`):
+
+- a DNP pull-up does not satisfy `REVIEW_I2C_NO_PULLUP`;
+- DNP load capacitors do not satisfy `REVIEW_XTAL_NO_LOADCAPS` (and one DNP
+  cap of a pair is a one-sided load: `REVIEW_XTAL_ASYMMETRIC`);
+- a DNP cap forms no `REVIEW_RC_CUTOFF` pole and is not counted as decoupling
+  by `review tree`;
+- a DNP resistor does not tie an enable pin (`REVIEW_EN_FLOATING` still fires);
+- a DNP fuse/diode is not in the series path (`REVIEW_FUSE_MISSING`,
+  `REVIEW_REVPOL_*`) and a DNP TVS protects nothing
+  (`REVIEW_CONN_UNPROTECTED`);
+- a DNP feedback resistor leaves the amplifier open-loop
+  (`REVIEW_OPAMP_NO_FEEDBACK`).
+
+The same discipline applies in `check`: a DNP bypass cap does not decouple a
+rail (`POWER_NO_DECOUPLING`) and does not carry a source through to a rail
+(`POWER_RAIL_NO_SOURCE`). **BOM/enumeration rules deliberately keep seeing DNP
+parts** — that is what the `bom_policy` classes (`fitted`/`dnp`/`external`/
+`no-part`) are for.
 
 ## Spec pages
 

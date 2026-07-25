@@ -126,7 +126,9 @@ def _entry_names(net) -> bool:
 def _chain_from(ctx: topo.ReviewCtx, seed) -> tuple[list, list[str]]:
     """(nets, crossed part refs) of the series chain containing ``seed``.
 
-    Crosses only fuse/diode/inductor two-terminal parts, never into ground.
+    Crosses only FITTED fuse/diode/inductor two-terminal parts, never into
+    ground: a DNP protector protects nothing, so it must not silence
+    ``REVIEW_FUSE_MISSING``/``REVIEW_REVPOL_UNPROTECTED`` (topo.is_fitted).
     """
     nets = [seed]
     seen = {seed.stable_id}
@@ -138,6 +140,8 @@ def _chain_from(ctx: topo.ReviewCtx, seed) -> tuple[list, list[str]]:
             comp = ctx.comps.get(ref)
             if comp is None or topo.is_power_symbol(comp):
                 continue
+            if not topo.is_fitted(comp):
+                continue                  # DNP: no series path, no protection
             if not (topo.is_fuse(comp) or topo.is_diode(comp)
                     or topo.is_inductor(comp)):
                 continue
@@ -154,12 +158,12 @@ def _chain_from(ctx: topo.ReviewCtx, seed) -> tuple[list, list[str]]:
 
 
 def _shunt_reverse_diodes(ctx: topo.ReviewCtx, chain_nets) -> list[str]:
-    """Diodes bridging a chain net to ground (the crowbar element)."""
+    """Fitted diodes bridging a chain net to ground (the crowbar element)."""
     out = []
     for net in chain_nets:
         for ref, _pin in net.members:
             comp = ctx.comps.get(ref)
-            if comp is None or not topo.is_diode(comp):
+            if comp is None or not topo.is_diode(comp) or not topo.is_fitted(comp):
                 continue
             on = topo.other_net(ctx, ref, net)
             if on is not None and topo.net_is_ground(on):

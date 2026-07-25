@@ -4,7 +4,9 @@
 3D models and reports lint-style findings (exit 1 on >= WARNING). ``repair``
 productizes the two historically hand-``sed``-ed fixes — footprint-nickname
 renames and 3D-model path policy — as a dry-run plan; ``--apply`` writes
-atomically with a ``.bak`` next to each file.
+atomically with a ``.bak`` next to each file, and refuses ``TARGET_LOCKED``
+(the shared :func:`akcli.safety.refuse_if_gui_locked` gate) if KiCad holds any
+target open — the same invariant as ``draw --apply``.
 """
 
 from __future__ import annotations
@@ -90,6 +92,13 @@ def _cmd_library_repair(args: argparse.Namespace) -> int:
                         "OLD=NEW and/or --3d-path MODE")
 
     do_apply = bool(getattr(args, "apply", False))
+    if do_apply and edits:
+        # Same invariant as `draw --apply` / `relink --apply`: never write a
+        # file KiCad holds open (a GUI save would overwrite it from memory).
+        # Checked before any output so a refusal writes nothing at all.
+        from .. import safety
+        safety.refuse_if_gui_locked([e.path for e in edits],
+                                    what="the repair write")
     if args.json:
         _emit(_dumps(_stamp({
             "project": str(ws.project_dir),
@@ -320,3 +329,24 @@ def register(sub, common) -> None:
     pl.add_argument("project", nargs="?", default=".",
                     help="project directory or file (default: .)")
     pl.set_defaults(handler=_cmd_library_check_lock)
+
+    # `library relink` — the library-maintenance home of the top-level
+    # `relink-symbols` (same handler + flags; the old name stays for compat)
+    from .checks import _cmd_relink
+    pk = lib_sub.add_parser(
+        "relink", parents=[common],
+        help="re-embed stale lib_symbols cache entries from fresh "
+             ".kicad_sym libraries (alias of `relink-symbols`; dry-run "
+             "unless --apply)")
+    pk.add_argument("target", nargs="?", help="the .kicad_sch to relink")
+    pk.add_argument("--libs", metavar="DIR", action="append",
+                    help="symbol library dir or .kicad_sym file (repeatable); "
+                         "default: the KiCad.app SharedSupport symbols dir "
+                         "if it exists")
+    pk.add_argument("--only", metavar="NICKS",
+                    help="comma-separated library nicknames (or full lib_ids) "
+                         "to consider")
+    pk.add_argument("--apply", action="store_true",
+                    help="write the replacements (default: preview only; "
+                         "net-membership equivalence gated, leaves <name>.bak)")
+    pk.set_defaults(handler=_cmd_relink)

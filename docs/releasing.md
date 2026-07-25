@@ -32,6 +32,23 @@ otherwise it is skipped and the release still succeeds.
 The tag (minus the leading `v`) **must** equal the `pyproject.toml` version, or
 the workflow fails fast before building anything.
 
+## The CI-green gate (step 4, enforced)
+
+Step 4 is no longer a human promise. The release workflow's first job,
+`ci-green`, queries the GitHub API for every check run on the tagged commit
+(`repos/<repo>/commits/<sha>/check-runs`) and refuses to build or publish
+unless all of them concluded `success` (`skipped`/`neutral` are tolerated).
+It waits up to 30 minutes for still-running checks, and treats **no check runs
+at all** as a failure — that is the exact shape of "tagged a commit CI never
+saw".
+
+Escape hatch, for when a release must go out despite the gate (e.g. an
+unrelated flaky infra check): run the `Release` workflow from the Actions tab
+via **workflow_dispatch on the tag ref** with the `force` input set to `true`.
+That logs a warning and skips the gate; everything else (tag/pyproject match,
+manifest sync, build, notes extraction) still runs. Pushing a tag can never
+bypass the gate — `force` only exists on manual dispatch.
+
 ## Docs conformance gate (contributor note)
 
 `tests/test_docs_conformance.py` runs in CI and guards the docs against drift, so
@@ -48,6 +65,11 @@ keep it in mind when editing any `README*.md`, `docs/*.md`, or `skills/*/SKILL.m
   calculator, update every count in the docs in the same change or the gate fails.
 
 Run it locally with `python -m pytest tests/test_docs_conformance.py -q`.
+
+A sibling gate (`tests/test_schema_exports.py`) requires the packaged mirror
+`src/akcli/schemas/*.json` to be byte-identical to the canonical `schemas/*.json`.
+After editing a schema, run `python tools/sync_schemas.py` (or
+`python tools/sync_schemas.py --check` to see the drift without writing).
 
 ## PyPI publishing
 

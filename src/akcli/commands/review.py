@@ -17,7 +17,7 @@ from .. import report as _report
 from ..errors import EXIT
 from ._shared import _did_you_mean, _dumps, _emit, _ExitWith, _require_path, _stamp
 
-_FAIL_ON = ("warning", "error", "critical")
+_FAIL_ON = ("info", "note", "warning", "error", "critical", "never")
 _FORMATS = ("text", "json", "sarif", "junit", "markdown")
 
 
@@ -35,9 +35,9 @@ def _read_schematic(path: Path):
 
 
 def _fail_on_exit(findings: list, threshold: str | None) -> int:
-    if not threshold:
+    if not threshold or threshold == "never":
         return EXIT["OK"]
-    ranks = {"warning": 2, "error": 3, "critical": 4}
+    ranks = {"info": 0, "note": 1, "warning": 2, "error": 3, "critical": 4}
     floor = ranks[threshold]
     sev_rank = {"info": 0, "note": 1, "warning": 2, "error": 3, "critical": 4}
     if any(sev_rank.get(f.severity.value, 0) >= floor for f in findings):
@@ -542,9 +542,11 @@ def register(sub, common) -> None:
         help="engineering design review: advisory findings with explicit "
              "confidence + evidence (analyze / report / explain)")
     rev = p.add_subparsers(dest="review_command", metavar="<subcommand>")
-    p.set_defaults(handler=lambda a: (
-        sys.stderr.write("ERROR: use `akcli review analyze|report|explain`\n")
-        or EXIT["USAGE"]))
+    def _bare_review(a: argparse.Namespace) -> int:
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: use `akcli review analyze|report|explain|"
+                        "propose|testbench|diff|tree|validate|facts`")
+    p.set_defaults(handler=_bare_review)
 
     pa = rev.add_parser(
         "analyze", parents=[common],
@@ -568,7 +570,9 @@ def register(sub, common) -> None:
                          "<sch dir>/datasheets when it holds extracted/)")
     pa.add_argument("--fail-on", dest="fail_on", choices=_FAIL_ON,
                     help="exit 1 when any finding is at/above this severity "
-                         "(default: always exit 0 — review is advisory)")
+                         "(default: never — review is advisory; note `akcli "
+                         "check` is the opposite: it gates at warning unless "
+                         "told otherwise)")
     pa.set_defaults(handler=_cmd_review_analyze)
 
     pf = rev.add_parser(
@@ -576,9 +580,10 @@ def register(sub, common) -> None:
         help="datasheet facts store: audited, PDF-pinned numbers that turn "
              "heuristic findings datasheet_backed")
     facts_sub = pf.add_subparsers(dest="facts_command", metavar="<action>")
-    pf.set_defaults(handler=lambda a: (
-        sys.stderr.write("ERROR: use `akcli review facts add|verify|lookup`\n")
-        or EXIT["USAGE"]))
+    def _bare_facts(a: argparse.Namespace) -> int:
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: use `akcli review facts add|verify|lookup`")
+    pf.set_defaults(handler=_bare_facts)
 
     pfa = facts_sub.add_parser(
         "add", parents=[common],
@@ -660,8 +665,10 @@ def register(sub, common) -> None:
     pb.set_defaults(handler=_cmd_review_testbench)
 
     pd = rev.add_parser(
-        "diff", parents=[common],
-        help="compare two findings files (fingerprint-aligned drift)")
+        "diff", parents=[common], aliases=["drift"],
+        help="compare two findings files (fingerprint-aligned drift; "
+             "`drift` is an alias — this is findings-drift, NOT the "
+             "net-level `akcli diff`)")
     pd.add_argument("old", nargs="?", help="earlier findings .json")
     pd.add_argument("new", nargs="?", help="later findings .json")
     pd.add_argument("--fail-on-new", dest="fail_on_new", action="store_true",

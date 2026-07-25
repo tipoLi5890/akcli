@@ -36,9 +36,12 @@ which mode runs:
   instructions; ``--write`` commits it through the KiCad writer (rotated ``.bak``
   backup + connectivity re-verify).
 
-Exit codes: ``0`` clean · ``1`` assertion/measure/corner failure · ``2``
-usage/config · ``6`` deck build (no ground / node collision) or a failed apply ·
-``7`` libngspice missing or an engine failure/timeout. Heavy imports stay LAZY.
+Exit codes: ``0`` clean · ``1`` assertion/measure/corner failure, or a deck
+ERROR finding (a part missing from a measured node — see ``SIM_PART_SKIPPED``) ·
+``2`` usage/config (including an assert bound to an ``op`` analysis) · ``6`` deck
+build (no ground / node collision / unusable component value) or a failed
+apply · ``7`` libngspice missing or an engine failure/timeout. Heavy imports
+stay LAZY.
 """
 
 from __future__ import annotations
@@ -134,13 +137,15 @@ def _measured_table(spec, measured: dict, findings: list) -> str:
 def _deck_build_exit(exc: AkcliError) -> _ExitWith:
     """Map a deck-build ``AkcliError`` onto its process exit code.
 
-    ``SIM_NO_GROUND``/``SIM_NODE_COLLISION`` are op-list-class failures (exit 6);
-    ``BAD_CONFIG`` is a usage error (exit 2); anything else falls back to the
-    registry default via :attr:`AkcliError.exit_code`.
+    ``SIM_NO_GROUND``/``SIM_NODE_COLLISION``/``SIM_VALUE_INVALID`` are
+    op-list-class failures (exit 6); ``BAD_CONFIG`` is a usage error (exit 2);
+    anything else falls back to the registry default via
+    :attr:`AkcliError.exit_code`.
     """
     code = {
         "SIM_NO_GROUND": EXIT["OPLIST"],
         "SIM_NODE_COLLISION": EXIT["OPLIST"],
+        "SIM_VALUE_INVALID": EXIT["OPLIST"],
         "BAD_CONFIG": EXIT["USAGE"],
     }.get(exc.code, exc.exit_code)
     return _ExitWith(code, exc.as_error_line())
@@ -194,6 +199,7 @@ def _emit_deck(args: argparse.Namespace, d, deck_sha: str) -> int:
             "deck": d.text,
             "warnings": [_finding_dict(f) for f in d.warnings],
             "unmodeled": list(d.unmodeled),
+            "parts_skipped": list(getattr(d, "skipped", [])),
         })))
         return EXIT["OK"]
     if getattr(args, "out", None):
@@ -289,7 +295,10 @@ def _run_engine(args, path, spec, d, deck_sha, assertions, engine) -> int:
     measured = assertions.parse_meas_output(result.meas_lines)
     findings, measured = assertions.evaluate(spec, measured)
     all_findings = [*d.warnings, *findings]
-    ok = not any(f.severity in _FAIL_SEVERITIES for f in findings)
+    # The verdict is computed over the DECK findings too, not just the asserts:
+    # a part dropped from a measured node (SIM_PART_SKIPPED, ERROR) means the
+    # measurement did not include a series element, so PASS would be a lie.
+    ok = not any(f.severity in _FAIL_SEVERITIES for f in all_findings)
 
     if getattr(args, "json", False):
         _emit(_dumps(_stamp({
@@ -297,11 +306,21 @@ def _run_engine(args, path, spec, d, deck_sha, assertions, engine) -> int:
             "engine": lib,
             "measured": measured,
             "findings": [_finding_dict(f) for f in all_findings],
+            "parts_skipped": list(getattr(d, "skipped", [])),
             "ok": ok,
         })))
     else:
         header = f"# akcli sim\n  engine: {lib}\n  deck sha1: {deck_sha}"
+        dropped = list(getattr(d, "skipped", []))
+        if dropped:
+            header += (f"\n  parts skipped: {len(dropped)} "
+                       f"({', '.join(p['designator'] for p in dropped)})")
         table = _measured_table(spec, measured, findings)
+        if any(f.severity in _FAIL_SEVERITIES for f in d.warnings):
+            # The rows above can each satisfy their bound while the run is still
+            # invalid — say so instead of letting a PASS column stand alone.
+            table += ("\n  ! FAIL: the deck error(s) below invalidate the values "
+                      "above (a part on a measured node is missing from the deck)")
         rendered = _report.render(all_findings, "text", {}, source=str(path))
         _emit(header + "\n\n" + table + "\n\n" + rendered)
         if wave_target is not None and wave_written:
@@ -469,15 +488,20 @@ def _run_sweep(args, path, sch, spec, sweeps_arg, deck_only, sim_file,
             if key not in seen_warn:
                 seen_warn.add(key)
                 notices.append(w)
+        # e.g. SIM_PART_SKIPPED on a measured node: this corner's numbers exclude
+        # a series element, so the corner cannot be reported as passing.
+        deck_error = any(w.severity in _FAIL_SEVERITIES for w in d.warnings)
         deck_text = _inject_temp(d.text, temp) if temp is not None else d.text
         findings, measured, ok = _measure(engine, assertions, spec, deck_text,
                                            args.timeout)
+        ok = ok and not deck_error
         if not ok:
             any_fail = True
         corners.append({
             "params": {key: value for key, _kind, value in assignment},
             "measured": measured,
             "ok": ok,
+            "parts_skipped": list(getattr(d, "skipped", [])),
             "findings": [_finding_dict(f) for f in findings],
         })
 

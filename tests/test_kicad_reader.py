@@ -296,3 +296,20 @@ def test_read_pcb_inline(tmp_path):
     assert fp.value == "10k"
     assert fp.layer == "F.Cu"
     assert fp.rotation == pytest.approx(90.0)
+
+
+def test_malformed_number_is_structured_error(tmp_path):
+    """A corrupt numeric field raises AkcliError, never a raw ValueError."""
+    sch = (
+        '(kicad_sch (version 20231120) (generator "x")\n'
+        '  (uuid "aaaaaaaa-0000-0000-0000-000000000000")\n'
+        '  (junction (at 50.860.96 63.5) (diameter 0) (color 0 0 0 0)\n'
+        '    (uuid "bbbbbbbb-0000-0000-0000-000000000000"))\n'
+        ')\n'
+    )
+    p = tmp_path / "bad.kicad_sch"
+    p.write_text(sch, encoding="utf-8")
+    with pytest.raises(AkcliError) as ei:
+        kicad.read_sch(p)
+    assert ei.value.code == "KICAD_SEXPR_BAD_NUMBER"
+    assert "50.860.96" in ei.value.message

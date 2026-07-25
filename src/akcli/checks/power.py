@@ -15,6 +15,14 @@ Design notes
 * A *rail* is any named power (non-ground) net, union the config rails (which may
   name a custom rail that the heuristic would miss). Ground nets are reported
   separately and are the reference for the decoupling heuristic.
+* ``POWER_RAIL_NO_SOURCE`` reports a rail that is *consumed* (≥2 consumers) but
+  that nothing plausibly *feeds*. "Plausibly" is deliberately generous — a
+  driving pin type, a ``PWR_FLAG``, a connector/battery/test-point designator,
+  a configured ``[[rail]]``, an entry-style name (``VBUS``/``VBAT``/``VIN``…),
+  or any of those on a net the rail reaches through series parts — because the
+  rule's only job is catching the rail nobody wired at all.
+* **DNP parts satisfy nothing**: a Do-Not-Populate bypass cap does not decouple
+  a rail (the BOM checks are where DNP parts still count).
 * All findings are advisory hints for a human/agent; nothing here mutates ``sch``.
 """
 
@@ -23,7 +31,7 @@ from __future__ import annotations
 import re
 
 from ..config import Config
-from ..model import Component, Net, Schematic
+from ..model import Component, Net, PinType, Schematic
 from ..report import Finding, Severity
 from ._rails import implied_voltage as _implied_voltage, norm as _norm
 
@@ -35,6 +43,7 @@ POWER_NO_DECOUPLING = "POWER_NO_DECOUPLING"     # WARNING: IC rail w/o bypass ca
 POWER_RAIL_NOT_FOUND = "POWER_RAIL_NOT_FOUND"   # WARNING: config rail absent
 POWER_VOLTAGE_MISMATCH = "POWER_VOLTAGE_MISMATCH"  # WARNING: name volts != config
 POWER_CURRENT_BUDGET = "POWER_CURRENT_BUDGET"   # NOTE: summed annotated current
+POWER_RAIL_NO_SOURCE = "POWER_RAIL_NO_SOURCE"   # WARNING: rail consumed, never fed
 
 # Common rail names that carry no parseable voltage but are unambiguously power.
 _POWER_NAMES: frozenset[str] = frozenset(
@@ -54,6 +63,27 @@ _GROUND_NAMES: frozenset[str] = frozenset(
 _IC_PREFIXES: frozenset[str] = frozenset({"U", "IC"})
 # Capacitor designator prefix (decoupling candidates).
 _CAP_PREFIXES: frozenset[str] = frozenset({"C"})
+
+# --- "who could be feeding this rail?" (POWER_RAIL_NO_SOURCE) ----------------
+# Deliberately GENEROUS: this rule only fires when NOTHING plausible feeds a
+# rail, so every doubt is resolved in favour of silence.
+#
+# Designator prefixes that can bring power in from outside the schematic:
+# connectors/headers/sockets (J, P, X, XP, CN), batteries (BT), test points and
+# bench-supply pads (TP, G).
+_SOURCE_PREFIXES: frozenset[str] = frozenset(
+    {"J", "P", "X", "XP", "CN", "BT", "TP", "G"}
+)
+# Pin types that assert "I drive this net" (never required — most boards are
+# all-Passive; see the module note — but conclusive when present).
+_SOURCE_PIN_TYPES: frozenset[PinType] = frozenset({PinType.POWER_OUT, PinType.OUTPUT})
+# Rail names that ARE the board's input by convention: the source is off-board,
+# and a bare label with no symbol is the idiomatic way to draw that.
+_ENTRY_NAMES: frozenset[str] = frozenset(
+    {"VBUS", "VBAT", "VIN", "DCIN", "VDCIN", "VEXT", "VUSB", "VAC", "VBATT"}
+)
+# Cap the series-island walk (determinism + no pathological schematic blowup).
+_ISLAND_MAX_NETS = 40
 
 # Parameter keys (lower-cased) that annotate per-component current draw.
 _CURRENT_KEYS: frozenset[str] = frozenset(
@@ -135,6 +165,80 @@ def _consumers(net: Net) -> list[str]:
     return sorted({des for des, _pin in net.members})
 
 
+def _is_pwr_flag(comp: Component) -> bool:
+    """A KiCad ``PWR_FLAG`` pseudo-part (``power:PWR_FLAG`` / ``#FLG*``)."""
+    return ("pwr_flag" in (comp.library_ref or "").lower()
+            or comp.designator.lstrip("$").upper().startswith("#FLG"))
+
+
+def _entry_named(net: Net) -> bool:
+    """True when a net's NAME says it is a board input (``VBUS``, ``VBAT_5V``).
+
+    An off-board source (USB host, battery, DC jack) is very often drawn as a
+    bare label with no symbol at all, so an entry-named rail is never reported
+    as sourceless — the source is simply not on the schematic.
+    """
+    for name in _net_candidate_names(net):
+        n = _norm(name).lstrip("-")
+        if n in _ENTRY_NAMES:
+            return True
+        token = re.split(r"[^0-9A-Za-z]+", n)[0] if n else ""
+        if token.upper() in _ENTRY_NAMES:
+            return True
+    return False
+
+
+def _net_has_source(net: Net, comps: dict[str, Component],
+                    pin_types: dict[tuple[str, str], PinType]) -> bool:
+    """True when anything on ``net`` could plausibly be feeding it."""
+    for des, num in net.members:
+        if _prefix(des) in _SOURCE_PREFIXES:
+            return True                     # connector / battery / test point
+        comp = comps.get(des)
+        if comp is not None and _is_pwr_flag(comp):
+            return True                     # designer-asserted power source
+        if pin_types.get((des, str(num))) in _SOURCE_PIN_TYPES:
+            return True                     # a pin that says it drives
+    return False
+
+
+def _series_island(net: Net, nets_of_comp_all: dict[str, list[Net]],
+                   comps: dict[str, Component]) -> list[Net]:
+    """``net`` plus every net reachable through FITTED two-terminal parts.
+
+    The "supply island": a rail fed through a fuse/ferrite/diode/resistor is
+    sourced by whatever feeds the OTHER side, so the source search must cross
+    series elements. Ground is never crossed (a cap or a bottom divider leg is
+    a load, not a path) and DNP parts are not crossed at all.
+    """
+    island = [net]
+    seen = {id(net)}
+    frontier = [net]
+    while frontier and len(island) < _ISLAND_MAX_NETS:
+        cur = frontier.pop(0)
+        for des, _num in sorted(cur.members):
+            comp = comps.get(des)
+            if comp is not None and comp.dnp:
+                continue                    # DNP: no series path through it
+            touched = nets_of_comp_all.get(des)
+            if touched is None or len(touched) != 2:
+                continue                    # not a two-terminal series part
+            if touched[0] is cur:
+                other = touched[1]
+            elif touched[1] is cur:
+                other = touched[0]
+            else:
+                continue
+            if id(other) in seen:
+                continue
+            if any(_is_ground(x) for x in _net_candidate_names(other)):
+                continue
+            seen.add(id(other))
+            island.append(other)
+            frontier.append(other)
+    return island
+
+
 def _cfg_rail_for_net(net: Net, cfg_rails: list[dict]) -> dict | None:
     """Return the config rail whose ``name`` matches any of the net's names."""
     cand = {_norm(x) for x in _net_candidate_names(net)}
@@ -177,12 +281,28 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
         for des, _pin in net.members:
             nets_of_comp.setdefault(des, set()).add(net.name)
 
+    # Indexes for the sourceless-rail rule: every net a designator touches
+    # (unnamed nets included — a series part can bridge into one), and the pin
+    # electrical types (used only as positive evidence, never as a requirement).
+    nets_of_comp_all: dict[str, list[Net]] = {}
+    for net in sch.nets:
+        for des, _pin in net.members:
+            entry = nets_of_comp_all.setdefault(des, [])
+            if not any(n is net for n in entry):
+                entry.append(net)
+    pin_types: dict[tuple[str, str], PinType] = {
+        (c.designator, str(p.number)): p.electrical_type
+        for c in sch.components for p in c.pins
+    }
+
     # Which rails have a decoupling cap (cap touching the rail AND a ground net)?
     decoupled_rails: set[str] = set()
     rail_name_set = {n.name for n in rail_nets if n.name}
     for comp in sch.components:
         if _prefix(comp.designator) not in _CAP_PREFIXES:
             continue
+        if comp.dnp:
+            continue        # DNP: drawn but never fitted — decouples nothing
         touched = nets_of_comp.get(comp.designator, set())
         if not touched & ground_name_set:
             continue
@@ -247,6 +367,29 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                         refs=[net.name],
                     )
                 )
+
+        # Sourceless rail: consumed by ≥2 parts, fed by nothing we can find.
+        # Every doubt silences this rule (see _net_has_source / _series_island /
+        # _entry_named): a configured [[rail]] is an intent declaration, an
+        # entry-named rail arrives from off-board, and a rail fed through a
+        # series element inherits its upstream source.
+        if (len(consumers) >= 2 and cfg_rail is None
+                and not any(_entry_named(n) or _net_has_source(n, comp_by_des, pin_types)
+                            for n in _series_island(net, nets_of_comp_all,
+                                                    comp_by_des))):
+            findings.append(
+                Finding(
+                    POWER_RAIL_NO_SOURCE,
+                    Severity.WARNING,
+                    f"rail {net.name!r} has {len(consumers)} consumer(s) "
+                    f"({', '.join(consumers)}) but no source: nothing on it (or "
+                    "on the nets it reaches through series parts) is a "
+                    "power_out/output pin, a PWR_FLAG, or a "
+                    "connector/battery/test point — check that the supply is "
+                    "actually wired",
+                    refs=[net.name, *consumers],
+                )
+            )
 
         # Decoupling heuristic: ICs on this rail without any bypass cap.
         ic_consumers = [

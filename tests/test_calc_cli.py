@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from akcli import cli
 
 
@@ -54,7 +56,14 @@ def test_calc_bare_lists(capsys):
 
 
 def test_calc_unknown_name(capsys):
-    assert cli.main(["calc", "warpdrive"]) == 2
+    # argparse-native choices: unknown names fail at parse time with the
+    # full `choose from` list (and a USAGE envelope under --json)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["calc", "warpdrive"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid choice: 'warpdrive'" in err
+    assert "'eseries'" in err               # the list rides along
 
 
 def test_calc_bad_param_token(capsys):

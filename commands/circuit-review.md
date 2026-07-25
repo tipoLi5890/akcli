@@ -34,16 +34,23 @@ Steps (use the Bash tool; `akcli` is on PATH when the plugin is installed, other
    `akcli check <schematic> [-C <toml>] --fail-on never`
    (`--exit-zero` is the deprecated alias.)
    (use `--json` if you want to parse/group findings precisely). `check` runs ERC-lite + power +
-   BOM + net-hygiene (+ layout-overlap for `.kicad_sch`, + differential-pair/bus continuity
-   unless `[check].pairs = false`) by default; narrow with `--erc` / `--power` / `--bom` /
-   `--nets` / `--layout` / `--pairs` if asked.
+   BOM + net-hygiene (+ layout-overlap and document integrity for `.kicad_sch`,
+   + differential-pair/bus continuity unless `[check].pairs = false`) by default; narrow with
+   `--erc` / `--power` / `--bom` / `--nets` / `--layout` / `--integrity` / `--pairs` if asked.
+   `--integrity` is the write gate's document checks read-only (dangling endpoints, duplicate
+   uuids/designators, unresolved `lib_id`s, instance paths, no-connect conflicts) — on a file
+   akcli did not write, a hit there is a real defect (hand edit, bad merge, moved library).
 4. If a prior revision was given, also run `akcli diff <old> <schematic>` and fold net/component
    changes into the summary.
 
 Summarize for the user:
 - **Always surface the metadata caveats** `check` prints (passive-pin ratio, No-ERC suppressed
   count, unnamed-net count, frac-coord presence) — a "0 findings" pass on a board that is mostly
-  passive pins is NOT a clean bill of health; say so.
+  passive pins is NOT a clean bill of health; say so. The type-confidence demotion is per NET:
+  a finding on a fully-typed net keeps full severity even when the board-wide ratio is low.
+- **DNP parts satisfy nothing** in `check`/`review`: a `(dnp yes)` bypass cap, pull-up, load
+  cap, fuse, diode, TVS, or enable-tie resistor does not silence the matching rule. Do not
+  dismiss such a finding as a false positive because the part is drawn on the sheet.
 - Group findings by severity, give each a one-line cause + suggested fix, and cite the offending
   `REF.PIN` / net names.
 - Note that the schematic is authoritative and these checks are advisory ERC-lite (the secondary

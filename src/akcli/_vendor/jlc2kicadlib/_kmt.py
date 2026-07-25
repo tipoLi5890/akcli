@@ -335,5 +335,5 @@ class KicadFileHandler:
         return "\n".join(lines) + "\n"
 
     def writeFile(self, path) -> None:  # noqa: N802 - upstream API name
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(self.serialize())

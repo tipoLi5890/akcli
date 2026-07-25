@@ -18,6 +18,7 @@ from ._shared import (
     _did_you_mean,
     _draw_exit,
     _draw_symbol_sources,
+    _oplist_lib_ids,
     _dumps,
     _emit,
     _ExitWith,
@@ -851,13 +852,13 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         if args.json:
             _emit(_dumps({
                 "protocol_version": opsmod.PROTOCOL_VERSION,
-                # "altium" matches ops.capabilities.json's executor key;
-                # "altium_live" is a deprecated duplicate kept one release
+                # "altium" matches ops.capabilities.json's executor key (an
+                # informational column: Altium is import-only, there is no
+                # Altium write executor)
                 "ops": [{"name": name,
                          "required": list(opsmod._OP_REQUIRED.get(name, [])),
                          "kicad": (caps.get(name) or {}).get("kicad"),
-                         "altium": (caps.get(name) or {}).get("altium"),
-                         "altium_live": (caps.get(name) or {}).get("altium")}
+                         "altium": (caps.get(name) or {}).get("altium")}
                         for name in sorted(opsmod.OP_NAMES)],
                 "macros": [{"name": name,
                             "required": list(opsmod.MACRO_REQUIRED.get(name, []))}
@@ -870,7 +871,7 @@ def _cmd_ops(args: argparse.Namespace) -> int:
             support = ""
             entry = caps.get(name)
             if entry:
-                support = "  [kicad:" + ("yes" if entry.get("kicad") else "no")                           + " altium-live:" + ("yes" if entry.get("altium") else "no") + "]"
+                support = "  [kicad:" + ("yes" if entry.get("kicad") else "no")                           + " altium:" + ("yes" if entry.get("altium") else "no") + "]"
             lines.append(f"{name:26} required: {required or '-'}{support}")
         lines.append("-- macros (expanded to core ops before plan/draw; "
                      "label-on-pin connectivity) --")
@@ -1065,7 +1066,10 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         return EXIT["OPLIST"]
 
     cfg = _load_cfg(args, target)
-    sources = _draw_symbol_sources(args, cfg)
+    # lib_ids let the lib-table fallback resolve a nickname (Device:R) that
+    # neither --symbols nor the config [paths] provide
+    sources = _draw_symbol_sources(args, cfg, lib_ids=_oplist_lib_ids(oplist),
+                                   project_dir=target.parent)
 
     strict = do_apply and getattr(args, "strict_nets", False)
     # Connectivity diff (advisory unless --strict-nets): dry-apply the op-list
@@ -1238,7 +1242,13 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 
 def _cmd_draw(args: argparse.Namespace) -> int:
     """Apply an op-list to a .kicad_sch (dry-run unless --apply)."""
-    return _run_draw(args, do_apply=bool(getattr(args, "apply", False)))
+    do_apply = bool(getattr(args, "apply", False))
+    if do_apply and getattr(args, "dry_run", False):
+        # --dry-run is an explicit safety request: it wins over --apply.
+        sys.stderr.write("WARNING: both --apply and --dry-run given; "
+                         "honoring --dry-run (nothing will be written)\n")
+        do_apply = False
+    return _run_draw(args, do_apply=do_apply)
 
 
 def register(sub, common) -> None:

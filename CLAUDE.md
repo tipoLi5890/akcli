@@ -31,7 +31,8 @@ Every historically red release CI (0.4.0, 0.8.0, 0.9.0, 0.10.0) failed only on
 - **Text I/O always pins `encoding="utf-8"` and, on writes, `newline="\n"`**
   (Windows defaults: cp1252 locale codec + `\n` → `\r\n` translation, which
   breaks byte-count assertions and output determinism). Enforced by
-  `tests/test_text_io_portability.py` — an AST gate over `src/akcli`; new
+  `tests/test_text_io_portability.py` — an AST gate over `src/akcli`,
+  `tools/` and `hooks/` (`_vendor` excluded but hand-patched); new
   `write_text`/`read_text`/text-mode `open` calls must comply or CI fails.
 - Artifact files whose bytes matter (`.kicad_sch`) are written in **binary**
   (`os.fdopen(fd, "wb")` in `writers/kicad.py`) — keep it that way.
@@ -50,8 +51,10 @@ Every historically red release CI (0.4.0, 0.8.0, 0.9.0, 0.10.0) failed only on
 Follow `docs/releasing.md`. Order is load-bearing: bump versions
 (`pyproject.toml` + both plugin manifests), move CHANGELOG `[Unreleased]` →
 `[X.Y.Z]`, push `main`, **wait for CI green on that commit, only then**
-`git tag vX.Y.Z && git push origin vX.Y.Z` (the tag triggers the Release
-workflow immediately — it does not wait for CI). Release commits are squashed
+`git tag vX.Y.Z && git push origin vX.Y.Z`. The Release workflow now verifies
+CI green on the tagged commit itself (`ci-green` job; `workflow_dispatch`
+`force` is the documented bypass) — but tagging a red commit still wastes a
+version number, so the manual wait stays. Release commits are squashed
 feature batches, exactly the payload most likely to hide a Windows-only bug.
 PyPI dist name is `akcli-kicad` (import package and CLI stay `akcli`). PyPI publishing uses trusted publishing (OIDC, no token), gated on the `PYPI_TRUSTED_PUBLISHING`
 **repository** variable (Settings → Secrets and variables → Actions →
@@ -68,10 +71,14 @@ CI enforces all of these together; change them in ONE commit:
 1. `src/akcli/ops.py` tables: `_CORE_OPS`/`MACRO_OPS`, `_OP_REQUIRED`,
    `_OP_FIELDS` (must equal the schema branch's properties exactly),
    `_OP_OPTIONAL`/`MACRO_OPTIONAL` (feeds `ops template`), placeholders.
-2. `schemas/ops.schema.json` branch (macros too) + capabilities entry in
-   `schemas/ops.capabilities.json` (core ops only) — then **copy both to
-   `src/akcli/schemas/`** (mirrors must be byte-identical).
-3. Writer handler + `_HANDLERS` in `src/akcli/writers/kicad.py`.
+2. `schemas/ops.schema.json` branch (macros too; branches carry
+   `additionalProperties: false` + the universal `group` field) + capabilities
+   entry in `schemas/ops.capabilities.json` (core ops only) — then run
+   `python3 tools/sync_schemas.py` (mirrors in `src/akcli/schemas/` must be
+   byte-identical; `--check` for drift).
+3. Writer handler + `_HANDLERS` in `src/akcli/writers/kicad.py`
+   (`tests/test_ops.py` census asserts `_HANDLERS`/`_MACRO_EXPANDERS` match
+   the registry).
 4. Docs count gates: every "N ops"/"N macros" claim (English + 中文 regexes) in
    README×3 / ROADMAP / docs/ / skills/ / commands/ must match the registry
    (`tests/test_docs_conformance.py`); `tests/test_ops.py` census; the op-name
@@ -86,7 +93,7 @@ CI enforces all of these together; change them in ONE commit:
 ## Invariants (verified by tests — don't regress)
 
 - **Byte-identical re-apply**: deterministic UUIDv5 (root uuid +
-  `designator:op_index` or `tag:coords`; annotation `key`s ignore coords/index)
+  `designator` (op-index-free, so op-list edits keep part identity) or `tag:coords`; annotation `key`s ignore coords/index)
   + `_append_top_idempotent` replace-in-place. Every new op needs an
   apply-twice byte-equality test.
 - **Connectivity is the only hard write gate**; geometry/layout findings are

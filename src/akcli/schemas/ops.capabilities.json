@@ -8,8 +8,8 @@
     "kicad",
     "altium"
   ],
-  "altium_live_wired": false,
-  "altium_live_note": "the 'altium' executor column describes the experimental Windows-only live bridge, which has no CLI wiring: plan/draw always build target_format 'kicad'. Do not select an Altium write target.",
+  "altium_write_wired": false,
+  "altium_write_note": "Altium is IMPORT-ONLY: there is no Altium write executor and none is planned. The 'altium' column is an informational record of which ops an Altium writer would have to implement; plan/draw always build target_format 'kicad'. Do not select an Altium write target.",
   "ops": {
     "place_component": {
       "kicad": true,

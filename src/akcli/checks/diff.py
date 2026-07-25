@@ -99,8 +99,10 @@ class NetChange:
             "stable_id_b": self.stable_id_b,
             "method": self.method,
             "jaccard": round(self.jaccard, 4),
-            "added_members": [list(m) for m in self.added_members],
-            "removed_members": [list(m) for m in self.removed_members],
+            # "REF.PIN" strings — the ONE member encoding shared with
+            # `net`/`nets` (agents keep a single parser across the family)
+            "added_members": [f"{d}.{p}" for d, p in self.added_members],
+            "removed_members": [f"{d}.{p}" for d, p in self.removed_members],
             "name_changed": self.name_changed,
             "membership_changed": self.membership_changed,
             "confidence": round(self.confidence, 4),

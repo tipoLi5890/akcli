@@ -25,7 +25,7 @@ import os
 from pathlib import Path
 
 from .. import model, netbuild, units
-from ..errors import fail
+from ..errors import AkcliError, fail
 from ..kicad_escape import unescape_string
 from ..writers import geometry
 from ..model import (
@@ -63,7 +63,18 @@ def _av(node: sexpr.SNode | None, idx: int) -> str | None:
 
 def _fnum(node: sexpr.SNode | None, idx: int, default: float = 0.0) -> float:
     v = _av(node, idx)
-    return float(v) if v is not None else default
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except ValueError:
+        # Corrupt numeric field (bad merge, disk damage, hand edit): surface a
+        # structured parse error instead of a raw ValueError traceback, so the
+        # CLI's JSON envelope contract holds for malformed inputs too.
+        raise AkcliError(
+            "KICAD_SEXPR_BAD_NUMBER",
+            f"malformed number {v!r} in ({node.tag} ...)"
+            if node is not None else f"malformed number {v!r}") from None
 
 
 # ---------------------------------------------------------------------------

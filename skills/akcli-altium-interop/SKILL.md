@@ -4,22 +4,22 @@ description: >-
   Work with Altium Designer through the `akcli` CLI — Altium is akcli's read-only
   import surface into the KiCad-first flow: parse Altium .SchDoc/.SchLib/.PcbDoc
   files, export normalized JSON and Protel/KiCad/CSV netlists, deliver schematic
-  edits back into Altium (offline human draw instructions + importable netlist;
-  the Windows live bridge is shelved), and migrate Altium designs to KiCad with
+  edits back into Altium (offline human draw instructions + importable netlist —
+  there is no Altium write path at all), and migrate Altium designs to KiCad with
   netlist-diff verification. Use this
   skill whenever the task involves: reading, exporting, or converting an Altium file;
   getting a design out of Altium into another tool; getting changes into an Altium
-  schematic; an Altium-to-KiCad migration or equivalence check; or
-  the Altium live bridge. Triggers on keywords: Altium, Altium Designer, SchDoc, SchLib,
+  schematic; or an Altium-to-KiCad migration or equivalence check.
+  Triggers on keywords: Altium, Altium Designer, SchDoc, SchLib,
   PcbDoc, Protel netlist, OLE2/CFBF, Altium export, Altium import, migrate to KiCad,
-  AD to KiCad, live bridge, DelphiScript, X2.EXE.
+  AD to KiCad.
 ---
 
 # akcli-altium-interop — Altium Designer in and out through `akcli`
 
 This skill covers the Altium-specific interop surface of `akcli`: what Altium content
 parses, how to get designs **out** (JSON / netlists), how to get changes **in** (offline
-instructions or the optional Windows live bridge), and how to migrate AD → KiCad with
+human instructions — akcli never writes Altium), and how to migrate AD → KiCad with
 proof of equivalence. For general read/analyze/draw mechanics (op-list format, `plan`/
 `draw`, checks, exit codes, config), **see the akcli-circuit-design skill** — do not
 re-derive them here.
@@ -39,6 +39,12 @@ Parses:
   the project's top sheet and honors `PowerPortNamesTakePriority`. Sheet-entry
   edge-position scale follows the documented convention; validating against a
   real AD hierarchical design is still pending — flag it when it matters.
+  **Anything the reader does not model is counted, never dropped silently**: a read
+  emits `warning: altium: skipped N unsupported record(s): 26 (Bus) ×3, ...` on stderr
+  (and in `read --json`'s `warnings` array). Buses (RECORD 26) and bus entries (37) are
+  NOT read — if that warning names them, the netlist is missing bus connectivity and you
+  must say so instead of reporting a clean import. A `.PrjPcb` that lists more than one
+  top-level sheet also warns, naming the sheets that were ignored (only one is read).
 - **`.SchLib`** — text-record symbol libraries (symbol names + pin counts).
 - **`.PcbDoc`** — ASCII sections `Nets6`, `Components6`, `Classes6`, `Rules6`
   → nets, footprints, classes, rules; **plus binary copper**: `Tracks6`, `Vias6`,
@@ -81,11 +87,11 @@ so re-exports are diffable.
 
 ## Getting changes INTO Altium
 
-`akcli` has **no offline Altium write path** on any OS. Route A is the
-supported path; the live bridge (Route B) is **shelved** and kept only for
-reference.
+`akcli` has **no Altium write path at all** — on any OS, offline or live. (The
+Windows live-bridge scaffold that once existed was deleted in 0.17.) The offline
+route below is the only route.
 
-### Route A (default, offline): human draw instructions + importable netlist
+### Offline route: human draw instructions + importable netlist
 
 1. Author the edit as a normal op-list (see the akcli-circuit-design skill for the format),
    then translate each op into unambiguous human instructions. Good instructions state,
@@ -105,60 +111,8 @@ reference.
    `akcli export scratch.kicad_sch --format protel -o intended.net`).
 3. After the user edits in Altium, verify — never trust the human either:
    ```bash
-   akcli diff main.SchDoc main_edited.SchDoc --exit-zero
+   akcli diff main.SchDoc main_edited.SchDoc --fail-on never
    ```
-
-### Route B (SHELVED): the Windows Altium 22+ live bridge
-
-**Status: shelved indefinitely** (0.14 — ROADMAP "Deferred by decision"). Do
-not propose it for new work; use Route A. The notes below are kept only for a
-user who explicitly insists on driving the existing code.
-
-A file-based JSON bridge drives a **running** Altium Designer 22+ on Windows. The
-Python half (`src/akcli/drivers/altium_live/bridge.py`) is tested; the
-DelphiScript half (`src/akcli/drivers/altium_live/scripts/altium_api.pas`)
-is a scaffold **not yet validated on a
-real Windows box** — treat every live write as experimental. It is **not wired into
-the CLI** (`akcli draw` targets `.kicad_sch` only); call it from Python:
-
-```python
-from akcli.drivers.altium_live.bridge import ping, send, default_bridge_dir
-
-print(ping())  # altium_ping handshake; rejects protocol_version != 1 (PROTOCOL_MISMATCH)
-oplist = {
-    "protocol_version": 1,
-    "target_format": "altium",
-    "target_file": "C:\\work\\project\\main.SchDoc",
-    "ops": [
-        {"op": "place_component", "lib_id": "Resistor", "designator": "R99",
-         "x_mil": 1000, "y_mil": 2000, "value": "10k"},
-        {"op": "add_wire", "vertices": ["R99.1", [1100, 2000]]},
-    ],
-}
-print(send(oplist, reqdir=default_bridge_dir(), timeout=60.0))
-```
-
-Setup on the Windows box: open
-`src/akcli/drivers/altium_live/scripts/altium_api.PrjScr` in Altium once, then each
-request is served by running `altium_api>Run` (interactively via DXP → Run Script, or
-`X2.EXE -RScriptingSystem:RunScript(...)`). Both halves must agree on the bridge dir:
-env `AKCLI_ALTIUM_BRIDGE_DIR`, or the pointer file `%TEMP%\akcli-altium-bridge.path`
-for a pre-running Altium, else the default `%TEMP%\akcli-altium-bridge\`.
-
-Live-driver rules:
-- Supported ops: `place_component`, `set_component_transform`,
-  `set_component_parameters`, `add_wire`, `add_junction`, `add_no_connect`,
-  `add_net_label`, `place_power_port`/`place_gnd`/`place_vcc`, `add_text`.
-  `add_bus`/`add_bus_entry` return `OP_UNSUPPORTED` (KiCad-writer only).
-- v1 caveats: non-ASCII text decodes to `?`; `set_component_parameters` applies only
-  designator/comment (not footprint/custom params); net labels are always local scope;
-  no delete/move ops — additive placement plus transform/parameter edits only.
-- The whole op-list is one undo transaction (a single Ctrl+Z reverts it), but snapshot
-  or copy the project before any live write, and test on a throwaway copy first.
-- A `status: "ok"` response means **ops placed, not design verified** — re-export the
-  Altium netlist and diff it (see Verification below).
-- Transport failures are `BridgeBusy` (a held `.lock`) and stdlib `TimeoutError`
-  (default 30 s poll timeout); neither means Altium rejected the ops.
 
 ## AD → KiCad migration workflow
 
@@ -196,7 +150,7 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
    ```
 4. **Prove equivalence** — the step that makes this a migration, not a guess:
    ```bash
-   akcli diff main.SchDoc board.kicad_sch --exit-zero
+   akcli diff main.SchDoc board.kicad_sch --fail-on never
    ```
    Nets match by pin **membership** (Jaccard), not display name, so `N$1234`-style
    auto-name churn does not break it. A cross-format diff has no shared UniqueIDs, so
@@ -205,7 +159,11 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
 
 What will **not** carry over (plan around it, state it in the report):
 - Symbol artwork, sheet graphics, text/annotation placement — connectivity only.
-- Hierarchy: the KiCad writer is flat-only v1; the KiCad READER does follow `(sheet ...)` children (per-instance namespaces, sheet-pin<->hierarchical-label connectivity).
+- Hierarchy: the KiCad writer targets one sheet file per run — it can create a
+  `(sheet)` reference (`add_sheet`) and write a child file directly, but it cannot
+  place *into* a sub-sheet path from the parent, so a multi-sheet Altium design is
+  rebuilt sheet by sheet. The KiCad READER does follow `(sheet ...)` children
+  (per-instance namespaces, sheet-pin<->hierarchical-label connectivity).
 - Binary `.SchLib` symbol graphics; `.PcbDoc` fills/regions/texts/polygons (pads/tracks/
   vias/arcs DO read now, but nothing converts them to `.kicad_pcb` — read-side only).
 - Altium pin electrical types map only ints 0–7 (no `POWER_OUT`/`NO_CONNECT`), so
@@ -213,17 +171,17 @@ What will **not** carry over (plan around it, state it in the report):
 
 ## Verification: never trust a conversion
 
-Any time a design crosses a tool boundary — Altium → KiCad, op-list → live Altium,
-human edits from your instructions — diff netlists between source and result before
+Any time a design crosses a tool boundary — Altium → KiCad, or human edits made from
+your instructions — diff netlists between source and result before
 declaring success:
 
 ```bash
-akcli diff source.SchDoc result.kicad_sch --exit-zero    # membership-level diff
+akcli diff source.SchDoc result.kicad_sch --fail-on never    # membership-level diff
 akcli export source.SchDoc --format csv -o a.csv         # or compare flat CSVs
 akcli export result.kicad_sch --format csv -o b.csv
 ```
 
-`diff` exits 1 when membership changed (`--exit-zero` for report mode). Corroborate
-with `akcli check result.kicad_sch --exit-zero` and read its metadata caveats
+`diff` exits 1 when membership changed (`--fail-on never` for report mode). Corroborate
+with `akcli check result.kicad_sch --fail-on never` and read its metadata caveats
 (passive-pin ratio, No-ERC suppressed count, unnamed-net count) before calling the
 migration clean — a findings-free run on a mostly-untyped board proves little.

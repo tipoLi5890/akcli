@@ -46,8 +46,10 @@ A review is **strictly read-only**. Never modify the schematic under review, and
   `library audit`/`fab check`) takes the same
   `--fail-on {info,note,warning,error,never}` (`--exit-zero` is the deprecated
   alias for `--fail-on never`); the boolean proof `verify` takes `--exit-zero`.
-  `review analyze` takes `--fail-on {warning,error,critical}` (advisory: exit 0
-  without it). Tune the CI gate with `--fail-on`, never by hiding findings.
+  `review analyze` takes the same ladder plus `critical`
+  (`--fail-on {info,note,warning,error,critical,never}`) but with the opposite
+  default: advisory (exit 0) unless `--fail-on` is given. Tune the CI gate with
+  `--fail-on`, never by hiding findings.
 - **Waiver discipline — never waive without a reason.** The checker-agnostic
   `[[waiver]]` config table drops (`severity = "off"`) or demotes
   (`note`/`info`) a finding by `code`/`refs`, but a review may only rely on a
@@ -128,25 +130,42 @@ semantics), generate candidates and gate them through `akcli review validate`
 ### Step 2b — Structural checks, then interpret the caveats
 
 ```bash
-akcli check board.SchDoc --erc --power --bom --exit-zero -C akcli.toml
-akcli check board.SchDoc --exit-zero --json
-akcli check board.SchDoc --contract review.contract.toml --exit-zero   # if the project has a contract file
+akcli check board.SchDoc --erc --power --bom --fail-on never -C akcli.toml
+akcli check board.SchDoc --fail-on never --json
+akcli check board.SchDoc --contract review.contract.toml --fail-on never   # if the project has a contract file
+akcli check board.kicad_sch --integrity --fail-on never   # document integrity, read-only (.kicad_sch)
 ```
+
+Default families for a bare `check`: ERC-lite + power + BOM + net hygiene +
+layout + **integrity** (+ pair/bus continuity unless `[check].pairs = false`).
+`--integrity` is the write gate's own document checks run read-only over any
+`.kicad_sch`: dangling endpoints, duplicate uuids **and duplicate designators**,
+unresolved `lib_id`s, instance paths, no-connect conflicts. Findings here are
+file-structural, not electrical — a `DUPLICATE_UUID` or `UNRESOLVED_LIB_ID` on a
+file that was never written by akcli is a real defect (hand edit, bad merge, a
+library that moved) and belongs in the report at Major or above.
 
 `-C` supplies `[[rail]]` voltages, `mcu_designator`, and `[[erc_waiver]]` entries; omit it
 and discovery walks up from the schematic's directory. Interpret the metadata header before trusting findings:
 
 | Caveat | What it means for your review |
 |---|---|
-| high passive-pin ratio | When <20% of pins carry a real electrical type, driver-conflict and floating-input findings are **demoted to NOTE** and are unreliable — you must do the manual input/driver review in the heuristics section below. |
+| high passive-pin ratio | When <20% of pins carry a real electrical type, type-based findings (driver conflict, floating input, undriven power pin) are **demoted to NOTE** and are unreliable — you must do the manual input/driver review in the heuristics section below. The demotion is **per net, not per board**: a net whose *every* member pin carries a real type keeps full severity even on a low-confidence board (the message says which case applied), so a WARNING here is trustworthy despite the header ratio. |
 | No-ERC suppressed > 0 | Findings were hidden by No-ERC markers. List which nets carry them and confirm each suppression is justified; an unjustified one is itself a Minor finding. |
 | unnamed-net count high | The power check **ignores unnamed nets entirely** — a rail on an unnamed net is unchecked. Name-check the power tree manually (Step "Power tree" below). |
 | frac coords present | Altium sub-unit coordinates are in play; purely informational. |
 
 Finding codes you will see: `ERC_FLOATING_INPUT`, `ERC_DRIVER_CONFLICT`, `ERC_DANGLING_NET`,
 `ERC_NO_POWER`, `ERC_NO_GROUND`, `ERC_NET_ALIAS` (NOTE-only by design);
-`POWER_NO_DECOUPLING`, `POWER_VOLTAGE_MISMATCH`, `POWER_CURRENT_BUDGET`, `POWER_NO_RAILS`;
+`POWER_NO_DECOUPLING`, `POWER_VOLTAGE_MISMATCH`, `POWER_CURRENT_BUDGET`, `POWER_NO_RAILS`,
+`POWER_RAIL_NO_SOURCE` (WARNING — a recognized rail with ≥2 consumers and nothing that
+could feed it: no `power_out`/`output` pin, no `PWR_FLAG`, no connector/battery/test-point
+member, no entry-style rail name, no series-fed upstream source, no `[[rail]]` declaration.
+It fires only on a rail nobody wired, so treat a hit as Major until you find the source);
 `BOM_DUPLICATE_DESIGNATOR`, `BOM_MISSING_VALUE`, `BOM_MISSING_FOOTPRINT`, `BOM_REFDES_GAP`;
+integrity: `DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`,
+`DUPLICATE_DESIGNATOR`, `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`,
+`NO_CONNECT_CONFLICT`;
 `CONTRACT_PASS` (INFO — a contract rule was checked and held), `CONTRACT_WAIVED` (NOTE —
 a rule was demoted/dropped by a waiver), `CONTRACT_EXCEPTION_EXPIRED` (an approved
 exception's expiry has passed — the rule is enforced again; report as a finding, not a pass).
@@ -157,6 +176,15 @@ Known blind spots — never let a clean `check` close these out:
 - Power/ground rules are net-**name** based, not pin-type based.
 - The decoupling heuristic only asks "does *some* C bridge this rail and ground" — it checks
   no cap count, value, or per-pin proximity.
+
+**DNP parts satisfy nothing** (`check` and `review` alike): a `(dnp yes)` bypass
+cap does not decouple, a DNP pull-up does not pull up, a DNP fuse/diode is not in
+the series path, a DNP load cap does not load the crystal, a DNP resistor does not
+tie an enable pin. The presence-satisfier searches gate on fitted parts, so a rule
+still fires with the part drawn on the sheet — do NOT dismiss such a finding as a
+false positive because "the cap is right there". BOM/enumeration rules deliberately
+still see DNP parts. When reviewing, list the DNP population and check that nothing
+electrically load-bearing sits in it.
 
 ### Step 3 — Netlist spot-checks against the datasheet
 
@@ -176,8 +204,8 @@ assume exit 0 means a hit.
 ### Step 4 — Pinmap cross-check against the expected table
 
 ```bash
-akcli pinmap board.SchDoc --mcu U3 --exit-zero
-akcli pinmap board.SchDoc --mcu U3 --expected pins.csv --exit-zero
+akcli pinmap board.SchDoc --mcu U3 --fail-on never
+akcli pinmap board.SchDoc --mcu U3 --expected pins.csv --fail-on never
 ```
 
 `--expected` accepts a 2-column CSV (`pin,signal`, optional header) or JSON (a `{pin: signal}`
@@ -190,8 +218,8 @@ The schematic always wins; a mismatch is a finding to report, never a schematic 
 ### Step 5 — Revision diff (when reviewing v2 against v1)
 
 ```bash
-akcli diff v1.SchDoc v2.SchDoc --exit-zero
-akcli diff v1.SchDoc v2.SchDoc --exit-zero --json
+akcli diff v1.SchDoc v2.SchDoc --fail-on never
+akcli diff v1.SchDoc v2.SchDoc --fail-on never --json
 akcli review diff v1.findings.json v2.findings.json
 ```
 
@@ -280,6 +308,7 @@ Rules for the report body:
 ## Exit codes and flags
 
 See the akcli-circuit-design skill for the full exit-code table and global flags. In this skill's
-review mode, always pass `--exit-zero` to `check`/`diff`/`pinmap` and treat findings via the
+review mode, always pass `--fail-on never` (`--exit-zero` is its deprecated alias) to
+`check`/`diff`/`pinmap` and treat findings via the
 report, not the exit code. Inputs must be schematics — `.SchLib`, `.PcbDoc`, and `.kicad_pcb`
 exit `5` for `check`/`diff`/`pinmap` (use `akcli read` on those instead).

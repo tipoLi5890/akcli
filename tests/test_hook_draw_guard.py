@@ -8,7 +8,9 @@ the CLI's own gates always stand behind the hook.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -115,3 +117,74 @@ def test_fails_open_on_missing_ops_file(workspace: Path):
         bash_payload("akcli draw board.kicad_sch --ops nope.json --apply"),
         workspace)
     assert proc.returncode == 0 and not proc.stderr
+
+
+# --- absolute-path resolution (the Windows fail-open class) ----------------
+#
+# On Windows the guard used to split the command with POSIX semantics, which
+# consumes the backslashes in `--ops C:\proj\ops.json`; the resulting token
+# ("C:projops.json") failed os.path.exists() and the guard fell through to
+# fail-open on EVERY call. These tests pin absolute-path handling on the
+# current platform and, via _tokenize, on Windows semantics from any host.
+
+
+def _hook_module():
+    spec = importlib.util.spec_from_file_location("_draw_guard", HOOK)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_blocks_invalid_oplist_via_absolute_path(workspace: Path):
+    """An absolute --ops path must still reach the validator (and block)."""
+    ops = (workspace / "bad.json").resolve()
+    proc = run_hook(
+        bash_payload(f'akcli draw board.kicad_sch --ops "{ops}" --apply'),
+        workspace)
+    assert proc.returncode == 2
+    assert "structurally invalid" in proc.stderr
+
+
+def test_tokenize_preserves_windows_backslash_paths(monkeypatch):
+    """Windows semantics, asserted from any host: backslashes survive.
+
+    Would have failed before the fix — POSIX splitting turns the path into
+    `C:projops.json`, which is exactly how the guard fails open on Windows.
+    """
+    mod = _hook_module()
+    monkeypatch.setattr(mod.os, "name", "nt", raising=False)
+    tokens = mod._tokenize(r'akcli draw C:\proj\board.kicad_sch '
+                           r'--ops C:\proj\ops.json --apply')
+    assert tokens is not None
+    assert mod._extract(tokens, "--ops") == r"C:\proj\ops.json"
+    assert mod._extract_target(tokens) == r"C:\proj\board.kicad_sch"
+
+
+def test_tokenize_strips_quotes_on_windows(monkeypatch):
+    mod = _hook_module()
+    monkeypatch.setattr(mod.os, "name", "nt", raising=False)
+    tokens = mod._tokenize(r'akcli draw board.kicad_sch '
+                           r'--ops "C:\my proj\ops.json" --apply')
+    assert tokens is not None
+    assert mod._extract(tokens, "--ops") == r"C:\my proj\ops.json"
+
+
+def test_tokenize_posix_absolute_path(monkeypatch):
+    mod = _hook_module()
+    monkeypatch.setattr(mod.os, "name", "posix", raising=False)
+    tokens = mod._tokenize("akcli draw /tmp/p/board.kicad_sch "
+                           "--ops /tmp/p/ops.json --apply")
+    assert tokens is not None
+    assert mod._extract(tokens, "--ops") == "/tmp/p/ops.json"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path semantics")
+def test_blocks_invalid_oplist_native_windows_path(workspace: Path):
+    ops = str((workspace / "bad.json").resolve())
+    assert "\\" in ops
+    proc = run_hook(
+        bash_payload(f"akcli draw board.kicad_sch --ops {ops} --apply"),
+        workspace)
+    assert proc.returncode == 2
+    assert "structurally invalid" in proc.stderr

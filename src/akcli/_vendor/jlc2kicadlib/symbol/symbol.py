@@ -21,6 +21,80 @@ supported_value_types = [
     "Frequency",
 ]  # define which attribute/value from JLCPCB/LCSC will be added in the "value" field
 
+# --- akcli deviations (see ../PROVENANCE.md) --------------------------------- #
+# Reference prefixes of two-pin passive parts. EasyEDA gives their pins a
+# meaningless electric code (a plain 0603 resistor ships two "input" pins), so
+# the converter passes ``passive`` down to the pin handler as the default.
+PASSIVE_PREFIXES = frozenset({"R", "C", "L", "FB", "RN", "VR"})
+PASSIVE_TAGS = ("resistor", "capacitor", "inductor", "ferrite")
+
+# Value-carrying EasyEDA attributes, most specific first. ``Value`` is last
+# because on many parts it merely repeats the MPN (guarded against below).
+VALUE_ATTR_KEYS = ("Resistance", "Capacitance", "Inductance", "Frequency", "Value")
+
+# Unit suffixes dropped when normalizing to the KiCad house style ("10kΩ" ->
+# "10k", "100nF" -> "100n"). Frequencies keep their "Hz".
+_UNIT_SUFFIXES = ("ohms", "ohm", "Ω", "ω", "F", "H")
+
+
+def _quote_safe(text):
+    """Neutralize characters that would break the quoted s-expression string."""
+    return (
+        str(text or "")
+        .replace("\\", "{backslash}")
+        .replace('"', "{dblquote}")
+        .replace("\n", " ")
+    )
+
+
+def normalize_value(raw):
+    """Normalize an EasyEDA value attribute to KiCad house style, or ``""``."""
+    text = str(raw or "").strip().replace("μ", "u").replace("µ", "u")
+    text = re.sub(r"\s+", "", text)
+    if not text:
+        return ""
+    if not re.match(r"^[0-9.]", text):
+        return text                      # not a magnitude (e.g. "N/A"): as-is
+    if not text.lower().endswith("hz"):
+        for suffix in _UNIT_SUFFIXES:
+            if len(text) > len(suffix) and text.endswith(suffix):
+                text = text[: -len(suffix)]
+                break
+    # "10K" -> "10k" (KiCad writes SI multipliers lower-case except M/G)
+    if text[-1:] in ("K", "N", "P", "U", "R"):
+        text = text[:-1] + text[-1].lower()
+    return text
+
+
+def component_value(c_para):
+    """The part's actual value ("10k", "100n") from EasyEDA attributes, or ``""``."""
+    if not isinstance(c_para, dict):
+        return ""
+    mpn_like = {
+        str(c_para.get(k, "")).strip()
+        for k in ("name", "Manufacturer Part", "Supplier Part")
+    }
+    for key in VALUE_ATTR_KEYS:
+        raw = str(c_para.get(key, "") or "").strip()
+        if not raw or raw in mpn_like:
+            continue                     # empty, or just a repeat of the MPN
+        normalized = normalize_value(raw)
+        if normalized:
+            return normalized
+    return ""
+
+
+def default_electrical_type(prefix, tags, pin_count):
+    """``"passive"`` for two-pin R/C/L-class parts, else ``""`` (no override)."""
+    if pin_count != 2:
+        return ""
+    if str(prefix or "").upper() in PASSIVE_PREFIXES:
+        return "passive"
+    blob = " ".join(str(t) for t in (tags or [])).lower()
+    if any(word in blob for word in PASSIVE_TAGS):
+        return "passive"
+    return ""
+
 
 def create_symbol(
     symbol_component_uuid,
@@ -40,6 +114,8 @@ def create_symbol(
     kicad_symbol = kicad_symbol()
 
     ComponentName = ""
+    ComponentValue = ""        # akcli: actual R/C/L value, "" when the part has none
+    ComponentMPN = ""          # akcli: manufacturer part number (Value used to hold it)
     for component_uuid in symbol_component_uuid:
         response = requests.get(
             f"https://easyeda.com/api/components/{component_uuid}",
@@ -79,6 +155,22 @@ def create_symbol(
                         data["result"]["dataStr"]["head"]["c_para"][value_type],
                     )
                 )
+
+        # akcli: value + MPN attributes, and the passive-class pin-type default
+        symbol_c_para = data["result"]["dataStr"]["head"].get("c_para") or {}
+        if not ComponentValue:
+            ComponentValue = component_value(symbol_c_para)
+        if not ComponentMPN:
+            ComponentMPN = str(
+                symbol_c_para.get("Manufacturer Part")
+                or symbol_c_para.get("name")
+                or ""
+            ).strip()
+        kicad_symbol.default_electrical_type = default_electrical_type(
+            symmbol_prefix,
+            data["result"].get("tags"),
+            sum(1 for line in symbol_shape if str(line).startswith("P~")),
+        )
 
         if not ComponentName:
             ComponentName = component_title
@@ -122,7 +214,7 @@ def create_symbol(
     (property "Reference" "{symmbol_prefix}" (id 0) (at 0 1.27 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "{ComponentName}" (id 1) (at 0 -2.54 0)
+    (property "Value" "{_quote_safe(ComponentValue) or ComponentName}" (id 1) (at 0 -2.54 0)
       (effects (font (size 1.27 1.27)))
     )
     (property "Footprint" "{footprint_name}" (id 2) (at 0 -10.16 0)
@@ -137,7 +229,10 @@ def create_symbol(
     (property "LCSC" "{component_id}" (id 5) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    {get_type_values_properties(6, component_types_values)}{kicad_symbol.drawing}
+    (property "MPN" "{_quote_safe(ComponentMPN) or ComponentName}" (id 6) (at 0 0 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    {get_type_values_properties(7, component_types_values)}{kicad_symbol.drawing}
   )
 """
     # ruff: enable [E501]
@@ -155,7 +250,7 @@ def create_symbol(
             skip_existing,
         )
     else:
-        with open(filename, "w") as f:
+        with open(filename, "w", encoding="utf-8", newline="\n") as f:
             logging.info(f"writing in {filename} file")
             f.write(template_lib_header)
             f.write(template_lib_footer)

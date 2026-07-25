@@ -21,7 +21,7 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    (markdown column names can be forced with `--key-header`/`--value-header`), then pass
    `pins.json` as `--expected`. If it is already a `.csv`/`.json` table, pass it through directly.
 2. Run the pin map:
-   `akcli pinmap <schematic> [--mcu <REF>] [-C <toml>] [--expected <table.csv|.json>] --exit-zero`
+   `akcli pinmap <schematic> [--mcu <REF>] [-C <toml>] [--expected <table.csv|.json>] --fail-on never`
    (add `--json` if you want to parse it).
 
 Report:

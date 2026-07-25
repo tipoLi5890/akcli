@@ -288,7 +288,9 @@ def _add_exit_policy_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fail-on", dest="fail_on",
                         choices=["info", "note", "warning", "error", "never"],
                         help="minimum finding severity that exits non-zero "
-                             "(default: warning; never always exits 0)")
+                             "(default: warning — findings gate by default; "
+                             "never always exits 0. `akcli review analyze` "
+                             "is the opposite: advisory unless --fail-on)")
     parser.add_argument("--exit-zero", action="store_true",
                         help="always exit 0 (deprecated alias for "
                              "--fail-on never)")
@@ -418,8 +420,23 @@ def _schematic_md(sch) -> str:
 # --------------------------------------------------------------------------- #
 # draw helpers shared by draw / arrange / pins / jlc bom
 # --------------------------------------------------------------------------- #
-def _draw_symbol_sources(args: argparse.Namespace, cfg) -> list:
-    """Collect symbol sources for the writer: --symbols paths + config paths."""
+def _draw_symbol_sources(args: argparse.Namespace, cfg, *,
+                         lib_ids=None, project_dir=None) -> list:
+    """Collect symbol sources for the writer: --symbols paths + config paths.
+
+    When ``lib_ids`` is given (the ``lib_id``s an op-list/lookup actually needs),
+    the **library tables** are consulted as a LAST resort: a nickname that the
+    explicit sources cannot serve is looked up in the project and per-user global
+    ``sym-lib-table`` (:func:`..libtable.discover`), so ``place_component
+    Device:R`` works against an installed KiCad instead of failing
+    ``SYMBOL_NOT_FOUND``. Discovered libraries are appended *after* the explicit
+    sources, so an explicit ``--symbols`` always wins.
+
+    ``project_dir`` is where the project tables are looked for (default: CWD).
+    Global-table discovery honours ``KICAD_CONFIG_HOME`` (see
+    :func:`..libtable._kicad_config_bases`), which is how tests point it at a
+    fixture table instead of the machine's real KiCad install.
+    """
     sources: list = []
     for s in getattr(args, "symbols", None) or []:
         sources.append(s)
@@ -427,7 +444,64 @@ def _draw_symbol_sources(args: argparse.Namespace, cfg) -> list:
     for key, val in (getattr(cfg, "paths", None) or {}).items():
         if isinstance(val, str) and val.lower().endswith(".kicad_sym"):
             sources.append(val)
+    if lib_ids:
+        sources.extend(_table_symbol_sources(lib_ids, sources, project_dir))
     return sources
+
+
+def _oplist_lib_ids(oplist) -> list[str]:
+    """Every ``lib_id`` an op-list references, in first-seen order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for op in (oplist or {}).get("ops") or ():
+        lib_id = op.get("lib_id") if isinstance(op, dict) else None
+        if isinstance(lib_id, str) and lib_id and lib_id not in seen:
+            seen.add(lib_id)
+            out.append(lib_id)
+    return out
+
+
+def _table_symbol_sources(lib_ids, explicit: list, project_dir=None) -> list[str]:
+    """``.kicad_sym`` paths the lib-tables register for the needed nicknames.
+
+    Deterministic (first-seen nickname order) and best-effort: an unreadable
+    table, an unresolvable ``${VAR}`` uri or a missing file is simply skipped —
+    the caller then reports the original ``SYMBOL_NOT_FOUND``.
+    """
+    nicks: list[str] = []
+    seen: set[str] = set()
+    for lib_id in lib_ids or ():
+        nick = str(lib_id or "").split(":", 1)[0] if ":" in str(lib_id or "") else ""
+        if nick and nick not in seen:
+            seen.add(nick)
+            nicks.append(nick)
+    if not nicks:
+        return []
+    # a nickname whose library is already passed explicitly needs no lookup
+    stems = {Path(str(s)).stem for s in explicit if isinstance(s, (str, Path))}
+    nicks = [n for n in nicks if n not in stems]
+    if not nicks:
+        return []
+
+    from .. import libtable
+    try:
+        ws = libtable.discover(Path(project_dir) if project_dir else Path.cwd())
+    except Exception:
+        return []
+    out: list[str] = []
+    for nick in nicks:
+        where = ws.locate_sym_nick(nick)
+        if where is None:
+            continue                       # nickname in neither table
+        table = ws.sym_table if where == "project" else ws.global_sym_table
+        entry = table.get(nick) if table is not None else None
+        if entry is None or (entry.type or "KiCad").lower() != "kicad":
+            continue                       # unregistered, or a non-KiCad plugin
+        path, unresolved = ws.resolve_uri(entry.uri)
+        if unresolved or path.suffix.lower() != ".kicad_sym" or not path.is_file():
+            continue
+        out.append(str(path))
+    return out
 
 
 def _draw_exit(results: list, findings: list) -> int:

@@ -61,7 +61,7 @@ shell から直接、設計を読み込み・チェックし・書き込めま�
 
 ```bash
 akcli read  board.kicad_sch --summary                            # 正規化 JSON、コンテキスト予算に収める
-akcli check board.kicad_sch                                      # ERC-lite + power + BOM + 接続性
+akcli check board.kicad_sch                                      # ERC-lite + power + BOM + 接続性 + 整合性
 akcli draw  board.kicad_sch --ops ops.json                       # dry-run: 変更 + net diff を表示
 akcli draw  board.kicad_sch --ops ops.json --apply --strict-nets # アトミック書き込み + 検証 + バックアップ
 akcli undo  board.kicad_sch                                      # 直前の書き込みを取り消す
@@ -78,15 +78,15 @@ akcli undo  board.kicad_sch                                      # 直前の書�
 
 | コマンド | 機能 |
 |---|---|
-| `read` · `net` · `component` · `pins` | KiCad または Altium を単一の正規化 JSON モデルに解析。net・部品・ピン座標を照会。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | バージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch` を生成。net-diff の安全ゲートと 1 コマンドの `undo` が保護。 |
-| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + intent／contract チェック、回路図 ↔ PCB の等価性、net メンバーシップ差分、MCU ピン → net マップ。 |
-| `review` | 6 つの検出器ファミリ（signal／validation／pcb／emc／domain／gerber）にわたる、確信度別のアドバイザリ設計レビュー。 |
-| `sim` | SPICE デッキにレンダリングし、KiCad 同梱の ngspice 上でアサート。コーナースイープ。データシートの点からダイオードモデルをフィッティング。 |
-| `jlc` | JLCPCB/LCSC を検索（在庫・価格・Basic／Extended）。部品をインプロセスで KiCad ライブラリに変換。データシートを取得。 |
+| `read` · `net` · `component` · `pins` | KiCad または Altium を単一の正規化 JSON モデルに解析。net（net 全体、またはピン単位の `net --at`／`--same`／`--why`）・部品・ピン座標を照会。 |
+| `new` · `plan` · `draw` · `ops` · `arrange` | バージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch`（ルートファイル、または既存階層の子シート）を生成。net-diff の安全ゲートと 1 コマンドの `undo` が保護。シンボルは `--symbols`、設定のパス、最後にプロジェクトとグローバルの `sym-lib-table` から解決。 |
+| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + ドキュメント整合性 + intent／contract チェック、回路図 ↔ PCB の等価性、net メンバーシップ差分、MCU ピン → net マップ。 |
+| `review` | 6 つの検出器ファミリ（signal／validation／pcb／emc／domain／gerber）にわたる、確信度別のアドバイザリ設計レビュー。DNP 指定の部品はどのルールも満たしません。 |
+| `sim` | SPICE デッキにレンダリングし、KiCad 同梱の ngspice 上でアサート。コーナースイープ。データシートの点からダイオードモデルをフィッティング。部品値は正規化され、確実に解釈できない値は推測せず拒否します。 |
+| `jlc` | JLCPCB/LCSC を検索（在庫・価格・Basic／Extended）。部品をインプロセスで KiCad ライブラリに変換（電気タイプ付きピン、実際の `Value`）。データシートを取得。 |
 | `calc` | **60** 個の規格準拠オフライン計算機（E 系列、IPC-2221、インピーダンス、I²C プルアップ、buck／boost……）。各項目が根拠を明示。 |
 | `library` · `fab` · `release` | ライブラリワークスペースの監査／修復、バージョン管理された fab プロファイルのチェック、追跡可能な manifest を書き出す release preflight。 |
-| `render` · `doc` · `view` | 純標準ライブラリの SVG レンダリング、Markdown のピンアウトブック、localhost の `/calc` + `/live` ダッシュボード。 |
+| `export` · `render` · `doc` · `view` | ネットリスト出力（Protel／KiCad／CSV——KiCad 形式は再インポートに必要な UUID sheetpath の同一性を保持）、純標準ライブラリの SVG レンダリング、Markdown のピンアウトブック、localhost の `/calc` + `/live` ダッシュボード。 |
 
 代表的な 2 例——設計レビューと部品検索：
 
@@ -102,8 +102,8 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述します——さらにすべてのエラーコードには
 機械可読な `remediation`（修復ヒント）が付きます。
 
-- **Claude Code** — 同梱プラグインをインストールすると、5 つの `/akcli:circuit-*` コマンド（review・
-  pinmap・draw・diff・parts）と、設計・レビュー・回路作成・Altium 連携・部品調達・計算機・リリース判定に
+- **Claude Code** — 同梱プラグインをインストールすると、8 つの `/akcli:circuit-*` コマンド（review・
+  pinmap・draw・diff・parts・sim・datasheet・release）と、設計・レビュー・回路作成・Altium 連携・部品調達・計算機・リリース判定に
   またがる 12 個の skills が使えます。
 - **Codex** — 同梱プラグインをインストールするか、skills フォルダを `.agents/skills/` に置けば自動検出
   されます。[docs/codex-plugin.md](../docs/codex-plugin.md) を参照。
@@ -154,7 +154,7 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 
 ## ロードマップ
 
-**提供済み（v0.15.0）：** 22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet`、net-diff
+**提供済み（v0.16.0）：** 22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet`、net-diff
 安全レール、`new`／多段 `undo`）、net を保つ `arrange --groups` の再レイアウト、アドバイザリな `akcli
 review` エンジン（6 つの検出器ファミリ、電源入口保護を含む。さらに datasheet facts store、`propose`／
 `tree`／`validate`）、ERC／power／BOM／diff／pinmap／intent／contract チェック（waiver と SARIF 付き）、

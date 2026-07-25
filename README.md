@@ -60,7 +60,7 @@ Read a design, check it, and draw into it — straight from the shell:
 
 ```bash
 akcli read  board.kicad_sch --summary                            # normalized JSON, context-budgeted
-akcli check board.kicad_sch                                      # ERC-lite + power + BOM + connectivity
+akcli check board.kicad_sch                                      # ERC-lite + power + BOM + connectivity + integrity
 akcli draw  board.kicad_sch --ops ops.json                       # dry-run: shows changes + net diff
 akcli draw  board.kicad_sch --ops ops.json --apply --strict-nets # atomic write + verify + backup
 akcli undo  board.kicad_sch                                      # revert the last write
@@ -77,15 +77,15 @@ One normalized model behind every command, so each check, diff, and report works
 
 | Command | What it does |
 |---|---|
-| `read` · `net` · `component` · `pins` | Parse KiCad or Altium into one normalized JSON model; query nets, components, and pin coordinates. |
-| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate and one-command `undo`. |
-| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + intent / contract checks, schematic ↔ PCB equivalence, net-membership diff, MCU pin → net map. |
-| `review` | Advisory, confidence-graded design review across six detector families (signal / validation / pcb / emc / domain / gerber). |
-| `sim` | Render to a SPICE deck and assert on KiCad's bundled ngspice; sweep corners; fit diode models from datasheet points. |
-| `jlc` | Search JLCPCB/LCSC (stock, price, Basic/Extended), convert a part into a KiCad library in-process, fetch datasheets. |
+| `read` · `net` · `component` · `pins` | Parse KiCad or Altium into one normalized JSON model; query nets (whole-net or pin-level: `net --at` / `--same` / `--why`), components, and pin coordinates. |
+| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` — a root file or a child sheet of an existing hierarchy — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate and one-command `undo`. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
+| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + document-integrity + intent / contract checks, schematic ↔ PCB equivalence, net-membership diff, MCU pin → net map. |
+| `review` | Advisory, confidence-graded design review across six detector families (signal / validation / pcb / emc / domain / gerber); DNP parts satisfy no rule. |
+| `sim` | Render to a SPICE deck and assert on KiCad's bundled ngspice; sweep corners; fit diode models from datasheet points. Component values are normalized, or refused rather than guessed. |
+| `jlc` | Search JLCPCB/LCSC (stock, price, Basic/Extended), convert a part into a KiCad library in-process (typed pins, real `Value`), fetch datasheets. |
 | `calc` | **60** standards-cited offline calculators (E-series, IPC-2221, impedance, I²C pull-ups, buck/boost…), each citing its reference. |
 | `library` · `fab` · `release` | Library-workspace audit/repair, versioned fab-profile checks, and a release preflight that writes a traceable manifest. |
-| `render` · `doc` · `view` | Pure-stdlib SVG render, a Markdown pinout book, and a localhost `/calc` + `/live` dashboard. |
+| `export` · `render` · `doc` · `view` | Netlist export (Protel / KiCad / CSV — the KiCad form carries the UUID sheetpath identity a re-import needs), pure-stdlib SVG render, a Markdown pinout book, and a localhost `/calc` + `/live` dashboard. |
 
 Two headline examples — a design review and a part search:
 
@@ -101,8 +101,8 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 capabilities` self-describes the entire CLI surface in one JSON document — and every error code ships a
 machine-readable `remediation` hint.
 
-- **Claude Code** — install the bundled plugin for five `/akcli:circuit-*` commands (review, pinmap,
-  draw, diff, parts) plus twelve skills spanning design, review, authoring, Altium interop, parts
+- **Claude Code** — install the bundled plugin for eight `/akcli:circuit-*` commands (review, pinmap,
+  draw, diff, parts, sim, datasheet, release) plus twelve skills spanning design, review, authoring, Altium interop, parts
   sourcing, calculators, and release gating.
 - **Codex** — install the bundled plugin, or drop the loose skill folders into `.agents/skills/` for
   auto-discovery. See [docs/codex-plugin.md](docs/codex-plugin.md).
@@ -153,7 +153,7 @@ by the core loop:
 
 ## Roadmap
 
-**Shipped (v0.15.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`,
+**Shipped (v0.16.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`,
 net-diff safety rails, `new` / multi-level `undo`), net-preserving `arrange --groups` re-layout, the
 advisory `akcli review` engine (six detector families, now including power-entry protection, plus a
 datasheet facts store, `propose` / `tree` / `validate`), ERC / power / BOM / diff / pinmap / intent /

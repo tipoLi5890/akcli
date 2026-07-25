@@ -17,6 +17,11 @@ This module turns those records into the normalized, format-agnostic model:
   net-labels / power-ports / ports / sheet-entries -> :class:`model.NetPrimitives`
   -> :func:`netbuild.build_nets`.
 
+Every record id this module does NOT consume is counted into a **skipped-record
+histogram** and surfaced as a single ``Schematic.warnings`` entry (see
+:func:`_skipped_warning`) — an unhandled record never vanishes silently. Buses
+(RECORD 26 / bus entry 37) are *not* read: they show up in that histogram.
+
 Canonical coordinate system is origin top-left, **+Y down**, unit **mils**; the
 Altium schematic is +Y *up*, so every Y is **negated** on ingest (a uniform
 transform that preserves net geometry exactly).
@@ -25,6 +30,7 @@ transform that preserves net geometry exactly).
 from __future__ import annotations
 
 import os
+from collections import Counter
 
 from .. import netbuild
 from ..errors import fail
@@ -42,6 +48,8 @@ from . import _cfbf
 from .altium_records import (
     RECORD_COMPONENT,
     RECORD_DESIGNATOR,
+    RECORD_IMPL_44,
+    RECORD_IMPL_48,
     RECORD_IMPL_FOOTPRINT,
     RECORD_IMPL_MODEL,
     RECORD_JUNCTION,
@@ -58,6 +66,7 @@ from .altium_records import (
     gi,
     parse_records,
     pin_electrical_type,
+    record_name,
 )
 
 # PinConglomerate low 2 bits -> orientation unit vector (Altium Location units).
@@ -74,6 +83,50 @@ _LABEL_SCOPE = {
 }
 
 _TRUE = {"T", "TRUE", "1"}
+
+# Every RECORD id this module actually consumes (directly, or structurally via an
+# OwnerIndex chain: 44/48 are the implementation links walked by `_footprints`).
+# Anything else is DROPPED — and must be counted, not silently vanish: buses
+# (26 / 37) in particular carry connectivity this reader does not model.
+_HANDLED_RECORDS = frozenset({
+    RECORD_COMPONENT, RECORD_PIN, RECORD_SHEET_SYMBOL, RECORD_SHEET_ENTRY,
+    RECORD_POWER_PORT, RECORD_PORT, RECORD_NO_ERC, RECORD_NET_LABEL,
+    RECORD_WIRE, RECORD_JUNCTION, 32, 33, RECORD_DESIGNATOR, RECORD_PARAMETER,
+    RECORD_IMPL_44, RECORD_IMPL_MODEL, RECORD_IMPL_FOOTPRINT, RECORD_IMPL_48,
+})
+
+# Distinct ids named in one warning before it collapses into "+N more id(s)".
+_HISTOGRAM_LIMIT = 12
+
+
+def _skipped_records(recs: list[dict]) -> Counter[int]:
+    """Histogram of RECORD ids present in ``recs`` that this reader drops.
+
+    Records with no ``RECORD`` id (the NUL padding tail of a stream) are not
+    counted — they carry nothing.
+    """
+    hist: Counter[int] = Counter()
+    for r in recs:
+        rid = _rid(r)
+        if rid is not None and rid not in _HANDLED_RECORDS:
+            hist[rid] += 1
+    return hist
+
+
+def _skipped_warning(hist: Counter[int]) -> str | None:
+    """``"altium: skipped 5 unsupported record(s): 26 (Bus) ×3, 37 (BusEntry) ×2"``.
+
+    Deterministic order (count desc, then id asc) so the warning is snapshot-safe.
+    """
+    if not hist:
+        return None
+    items = sorted(hist.items(), key=lambda kv: (-kv[1], kv[0]))
+    shown = items[:_HISTOGRAM_LIMIT]
+    parts = [f"{record_name(rid)} ×{n}" for rid, n in shown]
+    if len(items) > len(shown):
+        parts.append(f"+{len(items) - len(shown)} more id(s)")
+    return (f"altium: skipped {sum(hist.values())} unsupported record(s): "
+            + ", ".join(parts))
 
 
 def _rid(rec: dict) -> int | None:
@@ -425,7 +478,9 @@ def _read_hier(
     prims.power_priority = power_priority
     sheet_names: list[str] = []
     frac_present = False
+    skipped: Counter[int] = Counter()
     for ns, _p, recs, children in loaded:
+        skipped += _skipped_records(recs)
         comps, by_index = _build_components(recs)
         for c in comps:
             c.sheet = ns
@@ -447,6 +502,7 @@ def _read_hier(
                                                  scope="hier", sheet=ns))
 
     nets = netbuild.build_nets(prims)
+    warn = _skipped_warning(skipped)
     return Schematic(
         source_path=str(path),
         source_format="altium",
@@ -454,7 +510,7 @@ def _read_hier(
         nets=nets,
         sheets=sheet_names,
         no_erc_points=list(prims.no_erc),
-        warnings=[],
+        warnings=[warn] if warn else [],
         metadata=_metadata(components, nets, frac_present),
     )
 
@@ -481,6 +537,7 @@ def read(
     prims.power_priority = power_priority
     nets = netbuild.build_nets(prims)
     frac_present = any(k.endswith("_Frac") for r in recs for k in r)
+    warn = _skipped_warning(_skipped_records(recs))
     return Schematic(
         source_path="<bytes>",
         source_format="altium",
@@ -488,7 +545,7 @@ def read(
         nets=nets,
         sheets=[],
         no_erc_points=list(prims.no_erc),
-        warnings=[],
+        warnings=[warn] if warn else [],
         metadata=_metadata(components, nets, frac_present),
     )
 

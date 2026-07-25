@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import NoReturn
 
 from . import __version__
 from .commands import calc as _calc_cmd
@@ -79,6 +80,27 @@ _GLOBAL_DEFAULTS = {
 }
 
 
+# Set by main() before parsing so _Parser.error can honor --json even though
+# argparse aborts before the parsed namespace exists.
+_JSON_REQUESTED = False
+
+
+class _Parser(argparse.ArgumentParser):
+    """ArgumentParser whose failures stay machine-readable under ``--json``.
+
+    Plain argparse prints usage text to stderr and exits 2 — the one error
+    class an agent hits most (wrong flag, wrong choice, unknown command) was
+    also the only one that ignored ``--json``. ``add_subparsers`` defaults
+    ``parser_class`` to ``type(self)``, so every subparser inherits this.
+    """
+
+    def error(self, message: str) -> NoReturn:
+        if _JSON_REQUESTED:
+            _emit_json_error("USAGE", f"{self.prog}: {message}", EXIT["USAGE"])
+        self.print_usage(sys.stderr)
+        self.exit(EXIT["USAGE"], f"{self.prog}: error: {message}\n")
+
+
 def _global_flags() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("-C", "--config", metavar="PATH", default=argparse.SUPPRESS,
@@ -98,7 +120,7 @@ def _global_flags() -> argparse.ArgumentParser:
 
 def build_parser() -> argparse.ArgumentParser:
     common = _global_flags()
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="akcli",
         description="AI-native KiCad design agent: draw and edit .kicad_sch from "
                     "JSON op-lists (net-diff safety rails, one-command undo), run "
@@ -144,6 +166,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _JSON_REQUESTED
+    raw = sys.argv[1:] if argv is None else list(argv)
+    _JSON_REQUESTED = "--json" in raw
+    # Reset BEFORE parsing: argparse failures reach _emit_json_error via
+    # _Parser.error during parse_args, and a stale touched-flag from a prior
+    # in-process main() call would silently swallow the JSON envelope.
+    _shared_mod._reset_stdout_tracking()
     parser = build_parser()
     args = parser.parse_args(argv)
     # Backfill global-flag defaults (they use argparse.SUPPRESS so a value given before
@@ -161,7 +190,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return EXIT["USAGE"]
 
-    _shared_mod._reset_stdout_tracking()
     try:
         return handler(args)
     except _ExitWith as exc:
@@ -195,6 +223,22 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT["NOT_FOUND"]
     except BrokenPipeError:
         return EXIT["OK"]
+    except Exception as exc:  # noqa: BLE001 — last-resort envelope guard
+        # An unexpected exception (a bug, or input mangled in a way no reader
+        # guard anticipated) must still honour the CLI contract: stdout parses
+        # as JSON under --json, stderr carries the traceback for the report.
+        if getattr(args, "debug", False):
+            raise
+        import traceback
+        if getattr(args, "json", False):
+            _emit_json_error(
+                "INTERNAL", f"unexpected {type(exc).__name__}: {exc}",
+                EXIT["PARSE"])
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write(
+            f"ERROR: INTERNAL: unexpected {type(exc).__name__}: {exc} "
+            "(re-run with --debug to raise; please report this)\n")
+        return EXIT["PARSE"]
 
 
 def _exit_name(code: int) -> str:

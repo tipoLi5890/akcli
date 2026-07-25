@@ -191,12 +191,47 @@ def _cmd_calc(args: argparse.Namespace) -> int:
     return EXIT["OK"]
 
 
+class _CalcNameChoices:
+    """Lazy ``choices`` for the ``calc`` NAME positional.
+
+    Gives argparse-NATIVE validation (an unknown name fails at parse time
+    with the full ``choose from`` list — and, under ``--json``, the standard
+    USAGE error envelope) while the calculator registry stays unimported
+    until a ``calc`` invocation actually parses a name. Everything else
+    (``akcli --help``, every other command) keeps zero calc import cost.
+    """
+
+    _VERBS = ("list", "info", "batch")
+
+    def __contains__(self, name: object) -> bool:
+        if name in self._VERBS:
+            return True
+        from ..calc.registry import CALCS
+        return name in CALCS
+
+    def __iter__(self):
+        from ..calc.registry import CALCS
+        return iter([*self._VERBS, *sorted(CALCS)])
+
+
 def register(sub, common) -> None:
     p = sub.add_parser("calc", parents=[common],
                        help="engineering calculators (E-series, IPC-2221, via, "
-                            "SMPS, 555, I2C, ... — every result cites its source)")
-    p.add_argument("name", nargs="?",
-                   help="calculator name, or `list` / `info <name>` / `batch <file>`")
+                            "SMPS, 555, I2C, ... — every result cites its source)",
+                       epilog=("subcommands:\n"
+                               "  list             every calculator, grouped "
+                               "(--json: machine-readable table)\n"
+                               "  info NAME        one calculator's params, "
+                               "defaults + reference\n"
+                               "  batch FILE|-     run a JSON job list "
+                               '({"jobs": [{"calc", "params"}, ...]})\n'
+                               "  NAME key=value   run one calculator"),
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("name", nargs="?", metavar="NAME",
+                   choices=_CalcNameChoices(),
+                   help="calculator name, or `list` / `info <name>` / "
+                        "`batch <file>` (unknown names fail at parse time "
+                        "with the full list)")
     p.add_argument("params", nargs="*", metavar="key=value",
                    help="inputs, engineering notation ok (4k7, 100n, 35u)")
     p.add_argument("--md", action="store_true",

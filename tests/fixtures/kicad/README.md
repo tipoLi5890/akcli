@@ -3,8 +3,28 @@
 Hand-authored, valid S-expression KiCad files used by the KiCad reader/netbuild tests.
 The dev/CI box has **no KiCad libraries installed**, so every symbol these schematics
 reference is vendored here and also cached inline (`lib_symbols`) in each schematic.
-Nothing here was exported by KiCad — coordinates and UUIDs are hand-chosen so the files
-are small and reviewable.
+Every **schematic** here is hand-authored — coordinates and UUIDs are hand-chosen so the
+files are small and reviewable. The one exception is
+`netlist_power_entry.kicad10.net`, which *is* a real `kicad-cli` export kept as
+netlist ground truth (see below).
+
+## Netlist ground truth
+
+`netlist_power_entry.kicad10.net` — `kicad-cli 10.0.4 sch export netlist` run on
+`tests/fixtures/corpus/power_entry.kicad_sch`. It pins the grammar and the UUID identity
+(`(design)`, per-comp `(sheetpath)` + `(tstamps)`, `(libparts)`) that
+`src/akcli/exporters.py` must agree with, so `tests/test_e2e_netlist.py` can arbitrate the
+exporter **everywhere**, not only on a box with KiCad installed (where the same test
+re-derives it live and asserts the fixture has not rotted).
+
+Four machine-specific atoms were normalized on commit; nothing structural was touched:
+
+| Field | KiCad wrote | Committed as |
+|---|---|---|
+| `(design (source ..))` | absolute path of the dev checkout | repo-relative posix path |
+| `(design (date ..))` | export wall-clock time | `""` (determinism) |
+| `(comp (property (name "Sheetname") (value ..)))` | localized root-sheet name | `"Root"` |
+| `(libraries (library (uri ..)))` | `${KICAD10_SYMBOL_DIR}` | `${KICAD_SYMBOL_DIR}` |
 
 ## Versions covered
 

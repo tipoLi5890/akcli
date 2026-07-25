@@ -171,3 +171,24 @@ def test_cli_waivers_apply_to_review(tmp_path, capsys):
     doc = json.loads(capsys.readouterr().out)
     assert {f["code"] for f in doc["findings"]} == {"REVIEW_RC_CUTOFF"}
     assert doc["metadata"]["config_waived"].startswith("1")
+
+
+def test_bare_review_is_usage_exit_2(capsys):
+    # regression: `sys.stderr.write(...) or EXIT` returned the 49-char count
+    assert cli.main(["review"]) == 2
+    assert "review analyze" in capsys.readouterr().err
+
+
+def test_bare_review_facts_is_usage_exit_2(capsys):
+    assert cli.main(["review", "facts"]) == 2
+    assert "facts add" in capsys.readouterr().err
+
+
+def test_fail_on_never_is_explicit_advisory(tmp_path, capsys):
+    # `never` unifies the ladder with check/diff/pinmap: explicit advisory
+    tgt = _seed_review_sheet(tmp_path)
+    assert cli.main(["review", "analyze", str(tgt),
+                     "--fail-on", "never"]) == 0
+    capsys.readouterr()
+    assert cli.main(["review", "analyze", str(tgt),
+                     "--fail-on", "note"]) == 1        # WARNING >= note

@@ -238,3 +238,79 @@ def test_rename_net_validation():
     errs = ops.validate_oplist(_doc([
         {"op": "rename_net", "from": "A", "to": "B", "scope": "power"}]))
     assert any("scope" in e.message for e in errs)
+
+
+def test_top_level_array_root_names_the_wrapper(tmp_path):
+    # the most natural agent mistake gets the exact wrapper skeleton back
+    p = tmp_path / "arr.json"
+    p.write_text(json.dumps([{"op": "add_junction", "at": [0, 0]}]))
+    with pytest.raises(AkcliError) as exc:
+        ops.load_oplist(p)
+    assert '"ops": [...]' in exc.value.message
+
+
+def test_missing_vertices_is_one_error_not_two():
+    errs = ops.validate_oplist(_doc([{"op": "add_wire"}]))
+    assert len(errs) == 1
+    assert errs[0].code == "OP_UNSUPPORTED"
+    assert "missing required field 'vertices'" in errs[0].message
+
+
+def test_wrong_type_vertices_is_op_unsupported_not_wire_code():
+    errs = ops.validate_oplist(_doc([{"op": "add_wire", "vertices": "oops"}]))
+    assert [e.code for e in errs] == ["OP_UNSUPPORTED"]
+
+
+def test_place_component_at_field_gets_coordinate_hint():
+    errs = ops.validate_oplist(_doc([
+        {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+         "at": [0, 0]},
+    ]))
+    hint = next(e for e in errs if "unknown field 'at'" in e.message)
+    assert "x_mil" in hint.message
+
+
+def test_duplicate_annotation_key_lint():
+    errs = ops.validate_oplist(_doc([
+        {"op": "add_text", "text": "ONE", "at": [0, 0], "key": "n"},
+        {"op": "add_text", "text": "TWO", "at": [500, 0], "key": "n"},
+    ]))
+    assert len(errs) == 1 and errs[0].op_index == 1
+    assert "duplicate annotation key" in errs[0].message
+    # different tags may share a key (uuids are seeded per tag)
+    assert ops.validate_oplist(_doc([
+        {"op": "add_text", "text": "T", "at": [0, 0], "key": "n"},
+        {"op": "add_rectangle", "start": [0, 0], "end": [100, 100],
+         "key": "n"},
+    ])) == []
+    # keyless annotations never collide (coord+index seeded)
+    assert ops.validate_oplist(_doc([
+        {"op": "add_text", "text": "A", "at": [0, 0]},
+        {"op": "add_text", "text": "B", "at": [0, 0]},
+    ])) == []
+
+
+def test_writer_annotation_key_collision_guard():
+    from akcli.writers import kicad as kwriter
+
+    ctx: dict = {}
+    uid1 = kwriter._annotation_uuid(
+        "00000000-0000-0000-0000-000000000000", "text",
+        {"key": "n"}, "0:0", 0, ctx)
+    # the same op re-claimed at the same index is idempotent
+    assert kwriter._annotation_uuid(
+        "00000000-0000-0000-0000-000000000000", "text",
+        {"key": "n"}, "0:0", 0, ctx) == uid1
+    with pytest.raises(AkcliError) as ei:
+        kwriter._annotation_uuid(
+            "00000000-0000-0000-0000-000000000000", "text",
+            {"key": "n"}, "9:9", 3, ctx)
+    assert "collides" in str(ei.value)
+
+
+def test_writer_handlers_census_matches_registry():
+    """Lockstep step 3 (writer handler) has a gate like every other step."""
+    from akcli.writers import kicad as kwriter
+
+    assert set(kwriter._HANDLERS) == set(ops.OP_NAMES)
+    assert set(ops._MACRO_EXPANDERS) == set(ops.MACRO_OPS)

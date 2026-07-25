@@ -274,7 +274,7 @@ def write_instance(
 # --------------------------------------------------------------------------- #
 # deterministic instance UUID (idempotent op-list replay)
 # --------------------------------------------------------------------------- #
-def deterministic_uuid(sheet_uuid: str, designator: str, op_index: int) -> str:
+def deterministic_uuid(sheet_uuid: str | None, designator: str, op_index: int) -> str:
     """UUIDv5 from ``(sheet_uuid, "<designator>:<op_index>")`` (SPEC §3.5).
 
     Replaying the same op-list against the same sheet yields the *same* symbol

@@ -8,6 +8,7 @@ ABSOLUTE_OFFSET_Y = -63.5
 
 __all__ = [
     "handlers",
+    "electrical_type",
     "h_R",
     "h_E",
     "h_P",
@@ -22,6 +23,59 @@ __all__ = [
 
 def mil2mm(data):
     return float(data) / 3.937
+
+
+# --- akcli deviation: pin electrical types (see ../PROVENANCE.md) ------------
+# EasyEDA's ``electric`` code space is only five values wide; KiCad's is eleven.
+# The straight code map (upstream behaviour) can therefore never emit
+# ``passive`` / ``power_out`` / ``no_connect``, which makes every converted
+# resistor two *input* pins and trips akcli's floating-input ERC rule. The map
+# below keeps the code semantics and adds two context overrides applied by
+# :func:`electrical_type`.
+EASYEDA_ELECTRICAL = {
+    "0": "unspecified",        # EasyEDA "Undefined"
+    "1": "input",
+    "2": "output",
+    "3": "bidirectional",
+    "4": "power_in",           # EasyEDA "Power" (no in/out distinction)
+}
+
+# Pin names that mean "leave me unconnected" (EasyEDA has no NC code).
+_NC_NAMES = frozenset({
+    "NC", "N.C.", "N/C", "NC.", "DNC", "D.N.C.", "DNU",
+    "NOCONNECT", "NO_CONNECT", "DONOTCONNECT", "DO_NOT_CONNECT",
+})
+
+# A "Power" pin whose name reads like a *supplied* rail is a power OUTPUT
+# (regulator/reference/charge-pump output); everything else stays power_in.
+_POWER_OUT_RE = re.compile(
+    r"^(VOUT|VO|VOUTP|VOUTN|VOUTA|VOUTB|VREG|VREF|VDDOUT|VCCOUT|VBUSOUT"
+    r"|VPP|LDOOUT|SWOUT)\d*$"
+)
+
+
+def _norm_pin_name(name):
+    return re.sub(r"[\s\-]+", "", str(name or "")).upper()
+
+
+def electrical_type(code, pin_name="", default_type=""):
+    """KiCad pin electrical type for an EasyEDA ``electric`` code.
+
+    ``default_type`` is the component-level fallback the converter derives from
+    the part's class (``passive`` for two-pin R/C/L-class parts, whose EasyEDA
+    pins carry a meaningless ``input``/``output``/``undefined`` code). It never
+    overrides Bidirectional or Power — those two codes are authored
+    deliberately even on passive-class parts.
+    """
+    name = _norm_pin_name(pin_name)
+    if name in _NC_NAMES:
+        return "no_connect"
+    code = str(code)
+    if code == "4":
+        return "power_out" if _POWER_OUT_RE.match(name) else "power_in"
+    if default_type and code in ("", "0", "1", "2"):
+        return default_type
+    return EASYEDA_ELECTRICAL.get(code, "unspecified")
 
 
 def h_R(data, translation, kicad_symbol):
@@ -123,21 +177,15 @@ def h_P(data, translation, kicad_symbol):
     ]
     """
 
-    if data[1] == "0":
-        electrical_type = "unspecified"
-    elif data[1] == "1":
-        electrical_type = "input"
-    elif data[1] == "2":
-        electrical_type = "output"
-    elif data[1] == "3":
-        electrical_type = "bidirectional"
-    elif data[1] == "4":
-        electrical_type = "power_in"
-    else:
-        electrical_type = "unspecified"
-
     pin_number = data[2]
     pin_name = data[13]
+
+    # akcli deviation: context-aware pin types (see ../PROVENANCE.md)
+    pin_type = electrical_type(
+        data[1],
+        pin_name=pin_name,
+        default_type=getattr(kicad_symbol, "default_electrical_type", ""),
+    )
 
     x1 = round(mil2mm(float(data[3]) - translation[0]), 3)
     y1 = round(-mil2mm(float(data[4]) - translation[1]), 3)
@@ -164,7 +212,7 @@ def h_P(data, translation, kicad_symbol):
     number_size = mil2mm(float(data[24].replace("pt", ""))) if data[24] else 1
 
     kicad_symbol.drawing += f"""
-      (pin {electrical_type} line
+      (pin {pin_type} line
         (at {x1} {y1} {rotation})
         (length {length})
         (name "{pin_name}" (effects (font (size {name_size} {name_size}))))

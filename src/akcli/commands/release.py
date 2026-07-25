@@ -15,7 +15,11 @@ Gates (each skipped-with-reason when its input is absent, never silently):
 5. ``sch-pcb``        — schematic <-> board equivalence (``--pcb``)
 6. ``fab``            — fab profile policy (``--pcb`` + ``--fab-profile``)
 7. ``order``          — order manifest completeness (``--order``)
-8. ``git``            — clean worktree (unless ``--allow-dirty``)
+7b. ``sim``           — quantitative SPICE assertions (``--sim`` sim.json;
+                        requested-but-unrunnable FAILS, never skips)
+8. ``review``         — calibrated review allowlist (``--review-policy``)
+8b. ``gerber``        — fab package completeness (``--gerbers``)
+9. ``git``            — clean worktree (unless ``--allow-dirty``)
 """
 
 from __future__ import annotations
@@ -58,6 +62,46 @@ def _gate(name: str, findings: list) -> dict:
 
 def _skipped(name: str, reason: str) -> dict:
     return {"gate": name, "status": "skipped", "reason": reason, "findings": []}
+
+
+def _sim_gate(sch, spec_path: Path) -> dict:
+    """Run a ``sim.json`` assertion spec as a release gate.
+
+    An explicitly requested gate that cannot run must FAIL, never skip — a
+    PASS manifest may not ship just because the release machine lacked
+    libngspice.
+    """
+    from ..errors import AkcliError
+    from ..sim import assertions as sim_assertions
+    from ..sim import deck as sim_deck
+    from ..sim import engine as sim_engine
+    from ._shared import _ExitWith as _EW
+    from .sim import _measure  # the CLI's own engine/assert loop
+
+    def _fail(code: str, message: str) -> dict:
+        return {"gate": "sim", "status": "fail", "findings": [
+            {"code": code, "severity": "error", "message": message}]}
+
+    try:
+        spec = sim_assertions.load(spec_path)
+    except AkcliError as exc:
+        return _fail(exc.code, exc.message)
+    if sim_engine.available() is None:
+        return _fail("NGSPICE_MISSING",
+                     "sim gate requested but libngspice was not found — "
+                     "install KiCad or set AKCLI_NGSPICE")
+    try:
+        d = sim_deck.build(sch, spec)
+    except AkcliError as exc:
+        return _fail(exc.code, exc.message)
+    try:
+        findings, _measured, _ok = _measure(
+            sim_engine, sim_assertions, spec, d.text, timeout=60.0)
+    except _EW as exc:
+        msg = exc.msg.removeprefix("ERROR: ")
+        code, sep, rest = msg.partition(": ")
+        return _fail(code if sep else "NGSPICE_FAILED", rest if sep else msg)
+    return _gate("sim", findings)
 
 
 def _sha256(path: Path) -> str:
@@ -158,6 +202,18 @@ def _cmd_release_preflight(args: argparse.Namespace) -> int:
                            "sha256": _sha256(Path(args.order))}
     else:
         gates.append(_skipped("order", "no --order manifest given"))
+
+    # 7b. sim (quantitative SPICE assertions) -------------------------------------
+    if getattr(args, "sim", None):
+        sim_path = Path(args.sim)
+        if not sim_path.is_file():
+            raise _ExitWith(EXIT["NOT_FOUND"],
+                            f"ERROR: no such sim spec: {sim_path}")
+        inputs["sim"] = {"path": str(sim_path), "sha256": _sha256(sim_path)}
+        gates.append(_sim_gate(sch, sim_path))
+    else:
+        gates.append(_skipped(
+            "sim", "no --sim spec given (simulation stays outside the gate)"))
 
     # 8. review policy (calibrated allowlist only) --------------------------------
     if getattr(args, "review_policy", None):
@@ -280,7 +336,7 @@ def register(sub, common) -> None:
     pp = rel_sub.add_parser(
         "preflight", parents=[common],
         help="run all gates (check/intent/contract/library/sch-pcb/fab/"
-             "order/git) and write a release manifest")
+             "order/sim/review/gerber/git) and write a release manifest")
     pp.add_argument("--sch", metavar="FILE", help="schematic (.kicad_sch)")
     pp.add_argument("--pcb", metavar="FILE", help="board (.kicad_pcb)")
     pp.add_argument("--intent", metavar="FILE", help="design-intent JSON")
@@ -288,6 +344,10 @@ def register(sub, common) -> None:
     pp.add_argument("--fab-profile", dest="fab_profile", metavar="FILE",
                     help="fab profile TOML")
     pp.add_argument("--order", metavar="FILE", help="order manifest TOML")
+    pp.add_argument("--sim", metavar="FILE",
+                    help="sim.json assertion spec — runs the quantitative "
+                         "simulation gate on the bundled ngspice (a requested "
+                         "gate that cannot run FAILS, never skips)")
     pp.add_argument("--gerbers", metavar="DIR",
                     help="fab output dir — gates on gerber package "
                          "completeness/alignment/staleness")

@@ -148,3 +148,35 @@ def test_sheet_recursion_is_refused(tmp_path):
     )
     with pytest.raises(AkcliError):
         kreader.read_sch(tmp_path / "root.kicad_sch")
+
+
+def test_child_sheet_is_writable(tmp_path, capsys):
+    """Ops apply to a CHILD sheet of a hierarchy (audit: previously every op
+    was refused with INVALID_INSTANCES_PATH because the child's symbols carry
+    /<top-root>/<sheet> paths, not this file's own root uuid)."""
+    import json
+
+    from akcli.cli import main
+
+    _write_design(tmp_path, 1)
+    child = tmp_path / "child.kicad_sch"
+    ops = tmp_path / "ops.json"
+    ops.write_text(json.dumps({
+        "protocol_version": 1, "target_format": "kicad",
+        "ops": [{"op": "add_text", "text": "reviewed", "at": [4000, 4000]}],
+    }), encoding="utf-8")
+    rc = main(["draw", str(child), "--ops", str(ops), "--apply"])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "reviewed" in child.read_text(encoding="utf-8")
+
+
+def test_flat_file_bad_instances_path_still_refused(tmp_path):
+    """The relaxed rule still rejects a single-segment path naming a WRONG
+    root — flat-file corruption stays caught."""
+    from akcli.readers import sexpr as sx
+    from akcli.writers import connectivity
+
+    bad = _child_sch({"/99999999-0000-4000-8000-000000000099": "R1"})
+    findings = connectivity.verify(sx.parse(bad))
+    assert [f for f in findings if f.code == "INVALID_INSTANCES_PATH"]

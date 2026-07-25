@@ -60,7 +60,7 @@ fix before any check is built on top.
    ┌────────┴─────────┐               ┌──────────┴──────────┐         ┌──────────┴──────────────┐
    │ Altium readers   │               │ KiCad readers       │         │ Executors               │
    │ _cfbf, records,  │               │ sexpr, kicad,       │         │ writers/kicad (xplat)   │
-   │ sch, schlib, pcb │               │ kicad_lib           │         │ drivers/altium_live (win)│
+   │ sch, schlib, pcb │               │ kicad_lib           │         │ (the ONLY write path)   │
    │ (READ-ONLY)      │               │ (read + symbol defs)│         │ drivers/kicad_cli (verify)│
    └──────────────────┘               └─────────────────────┘         └─────────────────────────┘
 ```
@@ -72,13 +72,13 @@ fix before any check is built on top.
   `netbuild.py` turns primitives → `Net[]`, so Altium and KiCad share the exact same net-inference logic
   (the STAT fix is written once).
 - **HW/FW raise only raw data; all derived logic is in this tool / SW.** (project rule.)
-- **Altium is analysis-only, never written offline.** KiCad gets a full cross-platform writer. Altium
-  write/draw only via the optional Windows live driver.
+- **Altium is import/analysis-only, never written.** KiCad gets a full cross-platform writer; there
+  is NO Altium write path (the Windows live-driver scaffold was deleted in 0.17).
 - **Canonical coordinate system:** origin **top-left, +Y down**, unit **mils**, default **50-mil grid**
   (KiCad convention). Every reader normalizes *into* this system on ingest (the Altium reader negates Y).
 - **All internal KiCad-writer geometry is integer nanometres** (`1 mil = 25_400 nm`, `1 mm = 1_000_000 nm`);
   convert to string only at serialize time.
-- **Every emitted JSON carries `schema_version`; the op-list and bridge carry `protocol_version`.**
+- **Every emitted JSON carries `schema_version`; the op-list carries `protocol_version`.**
 
 ### 1.2 Coordinate-unit contract (LOCKED — resolves reviewer disagreement)
 
@@ -261,7 +261,11 @@ class NetPrimitives:
 
 ### 2.2 Op vocabulary (13 LOCKED ops + 3 additive v0.2 ops + 1 additive v0.4 op + 1 additive hierarchical op + 4 additive v0.10 ops)
 
-| op | purpose | KiCad writer | Altium live |
+The **Altium** column is informational only: it records which ops an Altium writer would have to
+implement. Altium is import-only — there is no Altium write executor and none is planned
+(`plan`/`draw` always build `target_format: "kicad"`).
+
+| op | purpose | KiCad writer | Altium (informational) |
 |---|---|---|---|
 | `place_component` | place a symbol instance | ✅ | ✅ |
 | `set_component_transform` | rotate/mirror an existing component | ✅ | ✅ |
@@ -427,8 +431,8 @@ without an origin), both exit 6.
 |---|---|---|---|---|---|
 | `model.py` | LOCKED dataclasses + `PinType` enum + Altium/KiCad type maps + `NetPrimitives` | (all of §1.3) `to_json(obj)->dict`, `Schematic.export()->dict` | stdlib `dataclasses,enum,hashlib` | `Net.stable_id` = sha1 of sorted membership; `to_json` stamps `schema_version` | `test_model.py` |
 | `ops.py` | op-list vocab constants, `PROTOCOL_VERSION=1`, hand-rolled validator | `PROTOCOL_VERSION:int`; `OP_NAMES:frozenset`; `validate_oplist(doc:dict)->list[OpError]`; `load_oplist(path)->dict`; `Op` typed accessors | `errors`, `schemas/*` (read at import) | Zero-dep structural validator mirroring `ops.schema.json` (`jsonschema` only in dev); rejects free angles, odd wire arrays, unknown ops with `ERROR` codes | `test_ops.py` |
-| `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, ALTIUM_UNSUPPORTED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, PROTOCOL_MISMATCH, TARGET_LOCKED, PATH_OUTSIDE_ROOT, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, BINFETCH_DOWNLOAD, BINFETCH_CHECKSUM, BAD_CONFIG`. `TARGET_LOCKED` (→ exit 6) is raised by the KiCad writer when a `~<name>.lck` GUI lock is present and `--allow-open` was not passed. Exit table: §8 | `test_errors.py` |
-| `safety.py` | hard limits + safe IO helpers used everywhere | `MAX_FILE_BYTES, MAX_SECTORS, MAX_RECORDS, MAX_DIR_ENTRIES, MAX_DECODED_BYTES, MAX_SEXPR_DEPTH, MAX_ATOM_BYTES, MAX_NODES`; `safe_path(base,cand)->Path`; `run_subprocess(argv,timeout,maxout)->CompletedProcess`; `atomic_write_with_backup(path,data,backup_dir)->None` | stdlib `os,subprocess,resource,signal,pathlib,shutil` | `safe_path`: realpath both, reject escapes/symlinks, never expand env from untrusted files; `run_subprocess`: `shell=False`, abs exe, `--` before paths, timeout, output cap; `atomic_write`: snapshot→temp-in-same-dir→fsync→`os.replace` | `test_safety.py`, `test_fuzz_safety.py` |
+| `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, ALTIUM_UNSUPPORTED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, KICAD_SEXPR_BAD_NUMBER, INTERNAL, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, PROTOCOL_MISMATCH, TARGET_LOCKED, PATH_OUTSIDE_ROOT, GROUP_UNKNOWN, GROUP_NO_ORIGIN, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, NGSPICE_MISSING, NGSPICE_FAILED, NETWORK, SIM_NO_GROUND, SIM_NODE_COLLISION, SIM_VALUE_INVALID, SIM_OP_ASSERT_UNSUPPORTED, BINFETCH_DOWNLOAD, BINFETCH_CHECKSUM, BAD_CONFIG, BRIDGE_BUSY, BRIDGE_TIMEOUT` (the `BRIDGE_*` pair is reserved/unraised). `TARGET_LOCKED` (→ exit 6) is raised when a `~<name>.lck` GUI lock is present and `--allow-open` was not passed — by the KiCad writer, and by the `relink-symbols`/`library repair` apply paths (`safety.refuse_if_gui_locked`). Exit table: §8 | `test_errors.py` |
+| `safety.py` | hard limits + safe IO helpers used everywhere | `MAX_FILE_BYTES, MAX_SECTORS, MAX_RECORDS, MAX_DIR_ENTRIES, MAX_DECODED_BYTES, MAX_SEXPR_DEPTH, MAX_ATOM_BYTES, MAX_NODES`; `safe_path(base,cand)->Path`; `run_subprocess(argv,timeout,maxout)->CompletedProcess`; `atomic_write_with_backup(path,data,backup_dir)->None`; `refuse_if_gui_locked(paths,*,allow_open,what)->None` | stdlib `os,subprocess,resource,signal,pathlib,shutil` | `safe_path`: realpath both, reject escapes/symlinks, never expand env from untrusted files; `refuse_if_gui_locked`: the ONE `~<name>.lck` guard shared by `draw`/`arrange`/`undo`/`relink-symbols`/`library repair` apply paths → `TARGET_LOCKED`; `run_subprocess`: `shell=False`, abs exe, `--` before paths, timeout, output cap; `atomic_write`: snapshot→temp-in-same-dir→fsync→`os.replace` | `test_safety.py`, `test_fuzz_safety.py` |
 | `units.py` | all coordinate conversions + grid + tolerance | `ALTIUM_SCH_MIL_PER_UNIT=10.0`; `MIL_PER_MM=1/0.0254`; `NM_PER_MIL=25400`; `NM_PER_MM=1_000_000`; `altium_to_mil(i,frac)->float`; `mil_to_nm(m)->int`; `nm_to_mm_str(nm)->str`; `snap_mil(m,grid=50)->float`; `approx_eq(a,b,tol_nm)->bool` | stdlib | `nm_to_mm_str` strips trailing zeros/dot (KiCad float style); integer-nm math only | `test_units.py` |
 | `config.py` | discover + parse + validate `akcli.toml` | `find_config(start:Path)->Path\|None`; `load_config(path)->Config`; `class Config` (`mcu_designator, rails:list, paths:dict, erc_waivers:list`) | `tomllib`, `errors`, `safety` | walk-up discovery from cwd; `--config` override; paths resolve relative to toml dir; reject unknown keys → `BAD_CONFIG`; schema in §3.11 | `test_config.py` |
 | `report.py` | render findings + metadata caveats; text + `--json` | `render(findings,fmt,meta)->str`; `class Finding(code,severity,message,refs)`; `Severity` enum | `model`, `errors` | Always prints metadata header: passive-pin ratio, No-ERC suppressed count, unnamed-net count, frac-coord presence — so a vacuous pass is never read as clean | `test_report.py` |
@@ -468,8 +472,8 @@ without an origin), both exit 6.
 | `geometry.py` | coord/transform core (the module that makes wires hit pins) | `pin_world(sym,inst,pin)->tuple[int,int]` (nm); `transform_point(pt,rot,mirror,origin)->...`; `grid_snap_nm(pt,grid)->...`; `mil_to_nm/nm_to_mm_str` re-exports | `units`, `model` | Integer-nm; rotation 0/90/180/270 + mirror (x/y) matrices, **rotate-then-mirror**, Y-down; transform child `(property)` positions/angles too | `test_geometry.py` |
 | `sexpr_writer.py` | KiCad-faithful serializer | `serialize(node:SNode)->str` | `sexpr`, `units` | 2-space indent, KiCad string quoting/escaping, float via `nm_to_mm_str`, preserve untouched-node text + child order. **Gate:** byte-identical no-op round-trip | `test_roundtrip_byte_identity.py` |
 | `lib_cache.py` | `lib_symbols` cache resolution & copy | `ensure_cached(doc,lib_id,sources)->None`; `SYMBOL_NOT_FOUND` on miss | `kicad_lib`, `sexpr`, `errors`, `config` | Requalify parent → `Nick:Name`, keep child unit names unqualified (`Name_0_1`); **flatten** an `(extends)`-derived symbol into one standalone entry (base inlined under the derived name, units renamed, derived properties overlaid, `extends` dropped — KiCad's own save behavior; its loader will not resolve a bare `(extends "Base")` against a qualified cached base); **dedup by lib_id**; copy full pin electrical types (ERC needs them); symbol source = config `.kicad_sym` paths and/or template `.kicad_sch` | `test_lib_cache.py` (incl. `C_Polarized` extends fixture) |
-| `instances.py` | refdes/instances/sheet-path + `#PWR` allocation | `write_instance(doc,sym,ref,path)->None`; `alloc_pwr_ref(doc)->str`; `instances_path(doc,sheet)->str` | `sexpr`, `errors` | Write BOTH `(property "Reference")` AND `(instances (project … (path … (reference …)(unit …))))`, in sync; derive project name + root-sheet uuid; flat-only v1 (sub-sheet → `HIERARCHICAL_UNSUPPORTED`); `#PWR0xx` unique alloc; **deterministic UUIDv5** = `uuid5(sheet_uuid, designator+":"+op_index)` for idempotency | `test_instances.py` |
-| `connectivity.py` | pure-Python ERC-lite — **primary** post-write gate | `verify(doc)->list[Finding]`; `auto_junctions(doc)->None` | `model`, `geometry`, `errors` | Exact-coincidence of every new wire endpoint vs pin/label/junction/port; auto-insert `(junction)` at 3+ way meets; honor `(no_connect)`; duplicate-UUID + unresolved-lib_id + invalid-instances-path checks. **Runs with no KiCad installed** | `test_writer_connectivity.py` |
+| `instances.py` | refdes/instances/sheet-path + `#PWR` allocation | `write_instance(doc,sym,ref,path)->None`; `alloc_pwr_ref(doc)->str`; `instances_path(doc,sheet)->str` | `sexpr`, `errors` | Write BOTH `(property "Reference")` AND `(instances (project … (path … (reference …)(unit …))))`, in sync; derive project name + root-sheet uuid; `instances_path` writes onto the target file's OWN root sheet only — an op naming a sub-sheet path → `HIERARCHICAL_UNSUPPORTED` (a child `.kicad_sch` is instead authored as its own draw target; the connectivity gate accepts its parent-hierarchy path); `#PWR0xx` unique alloc; **deterministic UUIDv5** = `uuid5(sheet_uuid, designator+":0")` for idempotency (op-index-free: inserting/reordering ops must not change untouched parts' identity) | `test_instances.py` |
+| `connectivity.py` | pure-Python ERC-lite — **primary** post-write gate | `verify(doc)->list[Finding]`; `auto_junctions(doc)->None` | `model`, `geometry`, `errors` | Exact-coincidence of every new wire endpoint vs pin/label/junction/port; auto-insert `(junction)` at 3+ way meets; honor `(no_connect)`; `DUPLICATE_UUID` + `DUPLICATE_DESIGNATOR` (same `(reference, unit)` on two symbol nodes — the re-apply/uuid-seed-mismatch symptom) + `UNRESOLVED_LIB_ID` + `INVALID_INSTANCES_PATH` (accepts `/<own-root>` **or** a multi-segment `/<top-root>/<sheet>…` parent-hierarchy path, so a child sheet file is writable) + `NO_CONNECT_CONFLICT`. Also exposed read-only as `check --integrity` over any `.kicad_sch`. **Runs with no KiCad installed** | `test_writer_connectivity.py` |
 | `kicad.py` | op-list executor → surgical `.kicad_sch` edits | `apply(oplist:dict,path:str,apply:bool)->list[OpResult]` | all writers + `ops`,`safety`,`errors` | Per op: snap pin-ref endpoints to `pin_world`; emit per-pin `(pin "N" (uuid …))`; **atomic write w/ backup** (snapshot→temp→fsync→re-parse+connectivity verify on TEMP→`os.replace` only on pass); mtime/hash optimistic lock; reject op-list with higher major `protocol_version` → `PROTOCOL_MISMATCH`; `--dry-run` emits ops+verify, no write | `test_kicad_writer.py` |
 
 ### 3.6 Checks (`src/akcli/checks/`)
@@ -503,9 +507,6 @@ without an origin), both exit 6.
 |---|---|---|---|---|---|
 | `kicad_cli.py` | optional secondary verify wrapper | `available()->bool`; `version()->tuple\|None`; `erc(path)->dict\|None`; `netlist(path)->dict\|None` | `safety`, `errors` | `shutil.which`-gated; `sch erc --format json` (≥8), fall back `export netlist` (7); **never** pass `--exit-code-violations` (erc exits 0 even with violations); nonzero/crash = our write bug; absence non-fatal (connectivity.py is primary) | `test_kicad_cli.py` (skipif no `kicad-cli`) |
 | `jlc2kicad.py` | LCSC→KiCad library conversion (in-process) | `convert(lcsc,out_dir,*,with_3d,lib_name,footprint_lib,model_path,force)->ConvertResult` | `_vendor.jlc2kicadlib` | Orchestrates the vendored converter: resolve CAD uuids via EasyEDA `products/<C>/svgs`, then vendored `create_footprint`/`create_symbol`; `footprint_lib` = output dir **and** the fp-lib-table nickname stamped into the symbol's Footprint field; `model_path` ∈ `relative`/`absolute`/`${VAR}` for the 3D reference; error mapping `NETWORK`/`CONVERT_PART_NOT_FOUND`/`CONVERT_FAILED`/`CONVERT_NO_ARTIFACTS`; networked (the only one besides `jlc search/show`) | `test_jlc2kicad.py` (offline fixtures, injected transport) |
-| `altium_live/bridge.py` | optional Windows file-based JSON bridge (offline-unit-testable) | `send(op:dict,reqdir:Path,timeout)->dict`; `ping()->dict` | `safety`, `ops`, `errors` | atomic `request.json.tmp`→rename; poll `response.json` every 200 ms; `.lock` single-flight; `altium_ping` handshake returns `{protocol_version,altium_version}`; reject `protocol_version` mismatch → `PROTOCOL_MISMATCH`; per-run unique 0700 dir, `O_NOFOLLOW`. **Offline test mocks response.json** | `test_bridge.py` |
-| `altium_live/scripts/altium_api.pas` | DelphiScript half (Windows + Altium 22+) | (Altium scripting entry) | — | **Clean-room** from Altium's public scripting API + documented method; reads request.json, drives running Altium, writes response.json. **Validated only on user's Windows box** | manual (Windows) |
-| `altium_live/scripts/altium_api.PrjScr` | Altium script project wrapper | — | — | pairs with `.pas` | manual (Windows) |
 
 
 ### 3.8 Vendored third-party source (`src/akcli/_vendor/`)
@@ -560,6 +561,7 @@ neither copied nor consulted.
 | `hooks/hooks.json` | SessionStart Python-version warning | §5.4 — stderr only, exit 0 | `jq . hooks/hooks.json` in CI |
 | `pyproject.toml` | PyPI dist + console_scripts | §7 — setuptools backend, `packages.find where=["src"]`, EDA classifier | `python -m build && twine check dist/*` |
 | `tools/sync_version.py` | stamp plugin.json/marketplace.json from pyproject version | `main()`; CI fails on drift | `test_sync_version.py` |
+| `tools/sync_schemas.py` | copy `schemas/*.json` into the packaged mirror `src/akcli/schemas/` (`--check` = drift only, no write) | `main()`; the mirrors must be byte-identical | `test_schema_exports.py` |
 | `.gitattributes` | binary/text fixture rules | §6 — `tests/fixtures/** binary`, golden/`*.kicad_sch text eol=lf` | implicit (Windows CI) |
 | `.github/workflows/ci.yml` | CI matrix + validators | §6.4 | self |
 | `examples/akcli.toml.example` | tested reference config incl. `[[erc_waiver]]` | §3.11 | `test_config.py` |
@@ -634,8 +636,8 @@ and in the packaged mirror (`tests/test_schema_exports.py`).
 
 | File | Purpose |
 |---|---|
-| `ops.schema.json` | §2.5 — own `$id` namespace, own ERROR enum, `protocol_version` const |
-| `ops.capabilities.json` | per-op executor support matrix (KiCad writer vs Altium live) |
+| `ops.schema.json` | §2.5 — own `$id` namespace, own ERROR enum, `protocol_version` const; every op branch declares `additionalProperties: false` (plus the universal `group` tag), so schema validation catches field typos too |
+| `ops.capabilities.json` | per-op executor support matrix (KiCad writer + the informational `altium` column); document-level `altium_write_wired: false` / `altium_write_note` (published as `ops.altium_write_wired` by `akcli capabilities --json`) |
 | `schematic.schema.json` | `Schematic` export shape + `schema_version` |
 | `netlist.schema.json` | net membership + Altium net-naming rules (same-name merge, priority, single-pin gating) |
 | `diff.schema.json` | `akcli diff --json` findings envelope |
@@ -671,7 +673,7 @@ After F is frozen, these groups proceed **in parallel** (each owns disjoint file
 | **K — KiCad readers** | `readers/sexpr.py, readers/kicad.py, readers/kicad_lib.py` + tests | F, N (uses `build_nets`) | F frozen |
 | **W — KiCad writer** | `writers/{geometry,sexpr_writer,lib_cache,instances,connectivity,kicad}.py` + tests | F, K (uses `sexpr`,`kicad_lib`) | **K's `sexpr.py`+`kicad_lib.py` exist** |
 | **C — Checks** | `checks/{erc,power,bom,diff,pinmap}.py` + tests | F, model populated by A/N/K | A+N (and K for KiCad inputs) ready |
-| **D — Drivers** | `drivers/kicad_cli.py, drivers/altium_live/*` + tests | F (ops, errors) | F frozen |
+| **D — Drivers** | `drivers/kicad_cli.py, drivers/jlc2kicad.py` + tests | F (ops, errors) | F frozen |
 | **ADP — Adapter** | `adapters/{dts,pinout_md}.py` + tests | F | F frozen |
 | **Docs** | `README.md, INSTALL.md, SECURITY.md, THIRD_PARTY_NOTICES.md, CHANGELOG.md, LICENSE, docs/*, tools/sync_version.py, .github/workflows/ci.yml, examples/*` | F (exact names) | F frozen |
 | **X — CLI glue** | `cli.py` (+ `test_cli.py`) | A, N, K, W, C, D | those groups expose stable APIs |
@@ -862,7 +864,8 @@ where = ["src"]
 
 **Exit-code table (`errors.EXIT`):** 0 success/no findings · 1 check findings present · 2 usage/arg error ·
 3 parse error (corrupt OLE2/sexpr) · 4 file not found · 5 unsupported format · 6 op-list/verify failure ·
-7 external tool missing. `check` is lint-style (non-zero on findings) with `--exit-zero` for report mode.
+7 external tool missing · 8 query miss (entity absent from a file that parsed). `check` is lint-style
+(non-zero on findings) with `--fail-on never` for report mode (`--exit-zero` is a deprecated alias).
 
 | # | Risk | Mitigation | macOS-validatable? |
 |---|---|---|---|
@@ -872,17 +875,16 @@ where = ["src"]
 | 4 | Unbounded FAT/miniFAT loops, header allocation bombs | `safety` caps + cycle detection + header validation; `test_fuzz_safety` | ✅ |
 | 5 | S-expr recursion → uncatchable SIGSEGV | iterative parser, depth/atom/node caps, ban `setrecursionlimit` | ✅ |
 | 6 | KiCad wires don't connect (geometry/units) | integer-nm math, pin-world snapping, `connectivity.verify` primary gate, byte-identity gate | ✅ (no KiCad needed for primary gate) |
-| 7 | Non-deterministic UUIDs → non-idempotent writes | UUIDv5 from sheet-uuid+designator+op-index | ✅ |
-| 8 | `(instances)` path / `#PWR` wrong → empty netlist / R? | write both legacy + instances path; flat-only v1 | ✅ |
+| 7 | Non-deterministic UUIDs → non-idempotent writes; an edited op-list re-identifying untouched parts → the whole design duplicated downstream of the edit | UUIDv5 from sheet-uuid+designator (op-index-free; `#PWR` refs recovered by position+net), byte-identity re-apply gate, and `DUPLICATE_DESIGNATOR` as an ERROR in the write gate / `check --integrity` | ✅ |
+| 8 | `(instances)` path / `#PWR` wrong → empty netlist / R? | write both legacy + instances path; ops target one file's own root sheet (sub-sheet path → `HIERARCHICAL_UNSUPPORTED`), while the gate accepts a child file's parent-hierarchy path so child sheets are writable; `INVALID_INSTANCES_PATH` in the write gate and `check --integrity` | ✅ |
 | 9 | `bin/akcli` `$CLAUDE_PLUGIN_ROOT` empty / python 3.9 | self-locating wrapper + interpreter discovery | ✅ |
 | 10 | DIFF noise (coordinate-named nets) | match by membership/UniqueID, never display name | ✅ |
 | 11 | Licensing: proprietary header + false "clean-room" | relicense parser to MIT (strip `LicenseRef-Proprietary`); own schema namespace; `THIRD_PARTY_NOTICES` crediting altium-mcp chain | ✅ |
-| 12 | Path traversal via lib_id / config / bridge | `safety.safe_path` allowlist; per-run 0700 bridge dir, `O_NOFOLLOW` | ✅ |
+| 12 | Path traversal via lib_id / config | `safety.safe_path` allowlist; atomic writes stay inside the project root | ✅ |
 | 13 | Destructive write corrupts user schematic | snapshot+temp+fsync+verify-temp+`os.replace`, mtime lock, `--apply` required | ✅ |
 | 14 | kicad-cli erc exit-code misread | never pass `--exit-code-violations`; parse JSON; advisory only | ⚠️ needs kicad-cli (CI ubuntu only) |
 | 15 | PCB binary sections (Pads/Tracks) | `altium_pcb_bin` decodes Tracks6/Vias6/Arcs6/Pads6; cross-validated vs KiCad's pcbnew importer on real boards; fills/regions/texts/polygons still guarded/deferred | ✅ (read + verify) |
-| 16 | **Altium authoritative netlist / ERC / live write** | optional Windows live driver; python `bridge.py` offline-unit-testable with mocked response | **❌ Windows + Altium 22+ only** |
-| 17 | DelphiScript half (`altium_api.pas/.PrjScr`) | scaffolded + iterated on user's Windows box | **❌ Windows-only/unvalidatable here** |
+| 16 | **Altium authoritative netlist / ERC / write-back** | out of scope by the 0.14 KiCad-first decision: Altium is IMPORT-ONLY. The Windows live-driver scaffold (`altium_live/`) was DELETED in 0.17 — net equivalence is proved by `akcli verify` against the imported model instead | **❌ not supported (by design)** |
 | 18 | Multi-sheet/hierarchical merge unvalidated (no real fixture) | synthetic multi-sheet fixtures + loud caveat | ✅ synthetic only |
 | 19 | Version drift across 3 manifests | pyproject is SoT; `tools/sync_version.py` + CI check | ✅ |
 | 20 | Repo public over-promises | Roadmap section; public claims match shipped features | ✅ |
@@ -890,10 +892,10 @@ where = ["src"]
 **Summary of platform split:**
 - **Fully buildable + validated on macOS/Linux/CI:** all Altium **read/analyze**, net inference, all checks,
   report, op-list + validator, KiCad **read + write/draw** (primary connectivity gate is pure Python), CLI,
-  plugin, docs, safety/fuzz, `bridge.py` offline unit tests.
+  plugin, docs, safety/fuzz.
 - **Cross-platform but needs `kicad-cli` (CI ubuntu + KiCad 8):** the *optional secondary* ERC verify.
-- **Windows + Altium 22+ only (cannot be validated from this macOS session):** Altium authoritative
-  netlist/ERC and the live write/draw driver (`altium_api.pas`/`.PrjScr`).
+- **Not supported anywhere (by design):** writing Altium files or driving a running Altium — Altium is
+  import-only; every write path targets `.kicad_sch`.
 
 ---
 
@@ -938,8 +940,8 @@ whitelists the only permitted CWD-relative default-path literals.
 ### Appendix B — Licensing posture (LOCKED)
 - Repo LICENSE = **MIT**. The ported parser logic is **relicensed** (same author) — strip the
   `SPDX-License-Identifier: LicenseRef-Proprietary` header on port; record provenance in the commit/NOTICE.
-- altium-mcp is used as an **independent-design reference for high-level patterns only** (file-based JSON
-  bridge, a protocol-version field, structured `ERROR: CODE` strings). **No schema bytes copied** — our
+- altium-mcp is used as an **independent-design reference for high-level patterns only** (
+  a protocol-version field, structured `ERROR: CODE` strings). **No schema bytes copied** — our
   `$id`, titles, ERROR enum, and `protocol_version` are original. `THIRD_PARTY_NOTICES.md` credits both
   flaco-source/altium-mcp (2026) and coffeenmusic/Siddharth Ahuja (2025) with full MIT text. The word
   "clean-room" is replaced everywhere by *"independent reimplementation; no source copied; attribution

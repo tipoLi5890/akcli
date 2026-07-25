@@ -159,3 +159,39 @@ def test_preflight_dirty_worktree_fails_unless_allowed(proj, capsys):
     assert doc["git"]["dirty"] is True               # recorded, not hidden
     by = {g["gate"]: g for g in doc["gates"]}
     assert by["git"].get("allow_dirty") is True
+
+
+# --------------------------------------------------------------------------- #
+# sim gate (opt-in via --sim; requested-but-unrunnable FAILS, never skips)
+# --------------------------------------------------------------------------- #
+def test_preflight_sim_gate_skipped_without_spec(proj, capsys):
+    main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
+          "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    by = {g["gate"]: g for g in doc["gates"]}
+    assert by["sim"]["status"] == "skipped"
+    assert "--sim" in by["sim"]["reason"]
+
+
+def test_preflight_sim_gate_fails_when_engine_missing(proj, capsys,
+                                                      monkeypatch):
+    import akcli.sim.engine as sim_engine
+    monkeypatch.setattr(sim_engine, "available", lambda: None)
+    spec = proj / "sim.json"
+    spec.write_text(json.dumps({
+        "protocol_version": 1, "analyses": {"op": ""}, "assert": [],
+    }), encoding="utf-8")
+    code = main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
+                 "--sim", str(spec), "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 1 and doc["result"] == "FAIL"
+    by = {g["gate"]: g for g in doc["gates"]}
+    assert by["sim"]["status"] == "fail"
+    assert by["sim"]["findings"][0]["code"] == "NGSPICE_MISSING"
+    assert doc["inputs"]["sim"]["sha256"]      # the spec is manifest-bound
+
+
+def test_preflight_sim_spec_missing_file_is_not_found(proj, capsys):
+    code = main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
+                 "--sim", str(proj / "nope.json")])
+    assert code == 4

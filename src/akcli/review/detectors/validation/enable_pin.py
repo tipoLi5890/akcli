@@ -50,7 +50,14 @@ def run(ctx: topo.ReviewCtx) -> list[Finding]:
             if not _en_name(pin.name):
                 continue
             net = ctx.net_of.get((ref, str(pin.number)))
-            if net is None or len(net.members) > 1:
+            if net is None:
+                continue
+            # Only FITTED neighbours tie the pin: a DNP pull resistor leaves
+            # the enable floating on the shipped board (topo.is_fitted).
+            tied = [(r, p) for r, p in net.members
+                    if (r, str(p)) != (ref, str(pin.number))
+                    and not topo.is_dnp(ctx.comps.get(r))]
+            if tied:
                 continue                       # driven / tied: fine here
             out.append(Finding(
                 code="REVIEW_EN_FLOATING", severity=Severity.WARNING,

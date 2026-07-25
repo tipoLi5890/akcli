@@ -36,7 +36,6 @@ body:
         - CLI
         - plugin-skill
         - JLC-parts
-        - Altium-live
         - other
     validations:
       required: true

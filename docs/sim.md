@@ -132,9 +132,16 @@ $ akcli sim board_v8.kicad_sch --deck-only --json
   "deck_sha": "299eaa7e9ffd",
   "deck": "* akcli sim: board_v8.kicad_sch\nR1 _3V3 MID 10k\n…\n.end\n",
   "warnings": [],
-  "unmodeled": []
+  "unmodeled": [],
+  "parts_skipped": []
 }
 ```
+
+`parts_skipped` lists **every** part the deck left out — skipped *and* unmodeled
+— as `{designator, status, reason, nodes, measured}`, where `measured` is `true`
+when that part sits in series on a node an assertion measures (`SIM_PART_SKIPPED`
+in the findings table below). The same field appears in the full-run `--json`
+envelope and in each `--sweep` corner.
 
 `deck_sha` is a short SHA-1 of the deck text — a stable fingerprint you can use
 to tell whether a schematic edit actually changed what gets simulated.
@@ -230,9 +237,23 @@ Each assert names exactly **one** measurement source and its bound(s).
   4. otherwise → `tran`.
 
   If the inferred analysis was never configured in `analyses`, `load` fails with
-  `BAD_CONFIG` — e.g. a `FIND v(mid) AT=0` assert against a spec that only
-  declares `{"op": ""}` infers `tran` and is rejected until you add a `tran`
-  analysis or set `"analysis": "op"` explicitly.
+  `BAD_CONFIG` — add the analysis, or pin the assert to one you declared.
+
+> **`op` analyses cannot carry assertions.** ngspice's `meas` reads a *plot*, and
+> an operating-point run produces none, so `meas op …` always errors — the whole
+> run then surfaced as a generic engine failure (exit 7). An assert bound to `op`
+> (explicitly, or because `op` is the only analysis declared) is therefore
+> rejected up front with `SIM_OP_ASSERT_UNSUPPORTED` (exit 2). To assert on an
+> operating point, use a **single-point `dc` sweep**, which does support `.meas`:
+>
+> ```json
+> {"analyses": {"dc": "Vsupply 3.3 3.3 1"},
+>  "assert": [{"name": "vmid", "meas": "FIND v(mid) AT=3.3",
+>              "analysis": "dc", "approx": "1.65", "tol": "0.02"}]}
+> ```
+>
+> An `op` analysis with **no** asserts is still fine (it runs, and its node
+> voltages show up in a `--wave` capture).
 
 ---
 
@@ -258,6 +279,16 @@ strict **first-hit-wins ladder**:
    `unmodeled` — never guessed at.** An unmodeled part is commented out of the
    deck and reported as a `SIM_UNMODELED` warning, so a missing model is loud,
    not a silent lie.
+
+> **Nothing leaves the deck silently.** Every part the deck does not emit —
+> skipped (`Sim.Enable=0`, a `spec.models` `skip`, a connector/test-point, a
+> `DNP`/`NP`/`OPEN` value) *or* unmodeled — is reported as `SIM_PART_SKIPPED` and
+> listed in the `parts_skipped` field of the `--json` output. When such a part has
+> two or more connected nodes and one of them is **measured** by an assertion, the
+> finding is an **ERROR** and the run cannot pass: a skipped `R2` in a measured
+> divider changes the very value being asserted, so a `PASS` there would be
+> meaningless. Model it (`Sim.Device`/`Sim.Params` or a `spec.models` entry) or
+> stop asserting on that node.
 
 > **Diode/BJT terminal order comes from pin NAMES, not pin numbers.** SPICE node
 > order is positional and semantic (`D <anode> <cathode>`, `Q <collector> <base>
@@ -298,6 +329,30 @@ SPICE `M` means **milli** and mega must be written `MEG`. The tool parses with
 the mega meaning and renders SPICE `MEG`, so a `1M` resistor lands as `1MEG` and
 a `25m` value stays `25m`. It also strips trailing unit words (`4.7kohm`,
 `100nF`, `10uH`).
+
+#### The value gate — what an `R`/`C`/`L` value may say
+
+`spice_value()` is deliberately lenient (text it cannot parse passes through), so
+every value that is actually **emitted** as a passive goes through
+`models.passive_value()` first. Understood forms:
+
+| Written | Emitted | Note |
+|---|---|---|
+| `4700`, `4.7k`, `100n`, `1e-7` | unchanged | plain engineering notation |
+| `1M` | `1MEG` | KiCad mega → SPICE mega |
+| `2M2`, `1k5` | `2.2MEG`, `1.5k` | IEC 60062 embedded decimal |
+| `600R`, `4R7` | `600`, `4.7` | IEC 60062 `R` = decimal **and** ohms marker |
+| `4.7 k`, `220 ohm`, `100 nF` | `4.7k`, `220`, `100n` | a unit/prefix split off by a space is re-joined, never dropped |
+| `10k 1%`, `100n 50V X7R` | `10k`, `100n` | trailing rating/tolerance tokens dropped → `SIM_VALUE_NORMALIZED` warning |
+| `DNP`, `NP`, `OPEN`, `NO POP` | *(nothing)* | deliberately unpopulated → the part is skipped |
+| `LED red`, `TBD`, `1%` | — | **`SIM_VALUE_INVALID`** (exit 6): not a value |
+| `600R` on an **`L`** | — | **`SIM_VALUE_INVALID`**: an ohms-marked value is an impedance rating, not an inductance — a ferrite bead's `600R` is 600 Ω at its test frequency, never 600 H (the same rule rejects a farad-marked value on an `R`, etc.) |
+
+> ### ⚠️ Why this is a hard gate
+> `"10k 1%"` used to reach ngspice verbatim, where it parses as **10** — a
+> 10k/10k divider off 3.3 V then measured **3.30 V** instead of 1.65 V, and the
+> run exited `0` with `PASS`. A confident wrong number is worse than an error, so
+> a value the tool cannot parse confidently now refuses to simulate.
 
 Two more hard-won gotchas the deck builder handles so you never see them:
 
@@ -391,15 +446,17 @@ spaces is handled (ngspice `wrdata`s to a fixed name, then the file is moved).
 | Exit | When |
 |---|---|
 | `0` | All assertions passed (or `--exit-zero`, or `--deck-only`). |
-| `1` | At least one assertion failed or a measurement never produced a result. |
-| `2` | Usage/config error — neither `--sim` nor `--deck-only` given, or a `BAD_CONFIG` in `sim.json`. |
+| `1` | At least one assertion failed, a measurement never produced a result, or the deck raised an ERROR-severity finding (`SIM_PART_SKIPPED` — a part missing from a measured node). |
+| `2` | Usage/config error — neither `--sim` nor `--deck-only` given, a `BAD_CONFIG` in `sim.json`, or `SIM_OP_ASSERT_UNSUPPORTED` (an assertion bound to an `op` analysis). |
 | `4` | `sim.json` file not found. |
-| `6` | Deck build failure — `SIM_NO_GROUND` (no ground net; pass `--gnd <net>`) or `SIM_NODE_COLLISION` (two nets sanitize to the same node), or a `PROTOCOL_MISMATCH`. |
+| `6` | Deck build failure — `SIM_NO_GROUND` (no ground net; pass `--gnd <net>`), `SIM_NODE_COLLISION` (two nets map to one node — including one name reused in two sheet scopes), `SIM_VALUE_INVALID` (a component value SPICE cannot take), or a `PROTOCOL_MISMATCH`. |
 | `7` | libngspice missing (`NGSPICE_MISSING`) or an engine failure/timeout (`NGSPICE_FAILED`). A deck that ngspice cannot parse (e.g. `Error: circuit not parsed.`) is an engine failure: the run exits `7` with the parse error on stderr — it is never mistaken for a clean pass, even for a zero-assertion spec. |
 
 `--exit-zero` forces `0` even when assertions fail (useful for reporting-only
 runs). Deck `WARNING`-severity findings (unmodeled parts, dangling pins) render
-but never change the exit code.
+but never change the exit code; deck `ERROR`-severity findings **do** — a part
+dropped from a measured node means the numbers above it are not the circuit you
+asked about.
 
 Under `--json`, a failing exit still prints machine-readable JSON on stdout:
 `{schema_version, error: {code, message, exit, remediation}}` (e.g.
@@ -413,6 +470,8 @@ Findings raised by the sim pipeline:
 | `SIM_ASSERT_FAIL` | ERROR | Measurement ran but violated its bound. |
 | `SIM_MEAS_FAILED` | ERROR | The measurement itself failed (e.g. a `WHEN` edge that never crossed) or produced no result. |
 | `SIM_UNMODELED` | WARNING | A component had no SPICE model and was omitted from the deck. |
+| `SIM_PART_SKIPPED` | WARNING / **ERROR** | A part is absent from the deck (skipped or unmodeled). ERROR when it has ≥2 connected nodes and one of them is measured by an assertion — the measurement excluded a series element, so the run cannot pass. Every occurrence is also listed in the `parts_skipped` JSON field. |
+| `SIM_VALUE_NORMALIZED` | WARNING | A component value carried trailing tokens beyond the value itself (`"10k 1%"`, `"100n 50V X7R"`); only the leading value reached ngspice. Move ratings/tolerance into their own field if that is not what you meant. |
 | `SIM_DANGLING_PIN` | WARNING | A pin sat on no net; tied to a unique `NC_<ref>_<pin>` node. |
 | `SIM_BAD_STIMULUS` | WARNING | A stimulus had an unknown `kind` and was skipped. |
 | `SIM_PIN_ORDER_ASSUMED` | WARNING | A diode/transistor's pin names could not identify the SPICE terminal order; it was emitted in schematic pin-number order — verify polarity. |
@@ -595,6 +654,16 @@ $ echo $?
 > sanitizes it to node `_3V3`. The stimulus `node` field is matched against the
 > *net* name (`+3V3`), so use `"+3V3"` there — using `"3V3"` would create a new,
 > floating node and the divider would read 0 V.
+
+> **A SPICE deck is flat — sheet-local names must be unique.** Net labels are
+> sheet-scoped in KiCad, so two instances of one child sheet each own a net named
+> `MID`; ngspice has no hierarchy, so emitting both would silently wire them
+> together and every measurement on that node would be meaningless. The deck
+> builder refuses instead: `SIM_NODE_COLLISION` (exit 6) naming the two sheet
+> scopes. Give them distinct names (`MID_A`/`MID_B`) or promote them to one global
+> label if they really are one net. The same error catches two *different* names
+> that sanitize to the same token (`VIN+` and `VIN-` both → `VIN_`), since ngspice
+> node names are case- and punctuation-insensitive after sanitizing.
 
 ## Worked example — the spiro rev C demod channel
 

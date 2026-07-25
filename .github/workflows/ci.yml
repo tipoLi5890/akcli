@@ -232,6 +232,24 @@ jobs:
           "
       - name: Run tests with kicad-cli available
         run: python -m pytest -q
+      - name: Run KiCad ground-truth tests live (fail if any case is skipped)
+        run: |
+          set -euo pipefail
+          # Fixture-first is only a real gate if these actually RUN: both files
+          # skip themselves when kicad-cli is missing, so a broken install (or
+          # a broken availability probe) would otherwise turn the whole
+          # ground-truth suite into a silent green.
+          python -m pytest -q -rs -m "" \
+            tests/test_e2e_draw.py tests/test_kicad_cli.py \
+            | tee /tmp/kicad-tests.log
+          # Matches the "kicad-cli not installed" skip reason in both files;
+          # capability-fallback skips (e.g. KiCad < 8 emits no JSON ERC report)
+          # stay allowed.
+          if grep -qE "^SKIPPED .*kicad-cli not installed" /tmp/kicad-tests.log; then
+            echo "::error::KiCad ground-truth tests were skipped despite kicad-cli being installed" >&2
+            grep -E "^SKIPPED" /tmp/kicad-tests.log >&2
+            exit 1
+          fi
       - name: Run sim engine + sim CLI tests live (fail if any live case is skipped)
         run: |
           set -euo pipefail

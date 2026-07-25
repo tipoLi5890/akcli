@@ -19,7 +19,11 @@ therefore:
   **type-confidence** = the fraction of pins that carry a real
   (non-Passive, non-Unspecified) electrical type. When that confidence is low /
   degenerate the findings are **downgraded to low-severity NOTEs** that state why,
-  so a mostly-Passive board never emits garbage. The matrix
+  so a mostly-Passive board never emits garbage. The demotion is decided **per
+  NET**, not board-wide: it exists because an *untyped* pin might be the driver
+  the rule cannot see, so a net whose every member pin IS typed keeps full
+  severity even on a low-confidence board (otherwise one untyped connector
+  would disable the typed rules for the whole schematic). The matrix
   (``_CONFLICT_MATRIX``) covers the high-signal cells of KiCad's default
   pin-conflict matrix (open-collector/open-emitter/tri-state vs push-pull and
   power drivers); ``ERC_POWER_IN_UNDRIVEN`` flags a supply pin on a net that is
@@ -197,6 +201,22 @@ def _pin_index(sch: Schematic) -> dict[tuple[str, str], Pin]:
     return index
 
 
+def _net_fully_typed(member_pins: list[tuple[tuple[str, str], Pin | None]]) -> bool:
+    """True when EVERY member pin of a net carries an informative type.
+
+    The type-confidence demotion exists for one reason: an UNTYPED pin might be
+    the driver/receiver the rule cannot see, so the verdict is unreliable. On a
+    net whose every pin resolves AND carries a real electrical type that excuse
+    is gone — the rule saw the whole net — so the finding keeps full severity
+    even when the BOARD-wide confidence is low (one untyped connector must not
+    disable typed rules everywhere).
+    """
+    return bool(member_pins) and all(
+        pin is not None and pin.electrical_type in _INFORMATIVE_TYPES
+        for _ref, pin in member_pins
+    )
+
+
 def _type_confidence(sch: Schematic) -> tuple[float, int, int]:
     """Fraction of pins carrying a real electrical type. Returns (conf, typed, total)."""
     pins = [p for c in sch.components for p in c.pins]
@@ -224,13 +244,17 @@ class _Waivers:
 
 
 def _conf_suffix(low: bool, conf: float) -> str:
-    """Trailing explanation appended when a type-based rule is demoted."""
+    """Trailing explanation appended when a type-based rule is demoted.
+
+    ``low`` is the PER-NET verdict (board confidence below the floor *and* this
+    net still carrying untyped pins) — see :func:`_net_fully_typed`.
+    """
     if not low:
         return ""
     return (
         f" [type-confidence low: only {conf:.0%} of pins carry an electrical type; "
-        "this type-based ERC rule is unreliable on a mostly-Passive board — "
-        "downgraded to a NOTE]"
+        "this net still has untyped pins, so the type-based ERC rule is "
+        "unreliable — downgraded to a NOTE]"
     )
 
 
@@ -307,6 +331,11 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
             (ref, pin_index.get(ref))
             for ref in net.members
         ]
+        # Type-confidence demotion is decided PER NET, not board-globally: a
+        # fully-typed net is judged on complete information even on a board
+        # whose overall confidence is low (one untyped connector must not
+        # silence typed rules elsewhere).
+        net_low_conf = low_conf and not _net_fully_typed(member_pins)
 
         # (b) dangling single-pin net (robust; not type-gated). Respect No-ERC,
         #     explicit no-connect pins, and waivers.
@@ -349,9 +378,10 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
             findings.append(
                 Finding(
                     ERC_DRIVER_CONFLICT,
-                    Severity.NOTE if low_conf else Severity.WARNING,
+                    Severity.NOTE if net_low_conf else Severity.WARNING,
                     f"net {label} has {len(strong)} push-pull drivers "
-                    f"({', '.join(refs)}) — output contention" + _conf_suffix(low_conf, conf),
+                    f"({', '.join(refs)}) — output contention"
+                    + _conf_suffix(net_low_conf, conf),
                     refs=[*refs, label],
                     pos=(first.x_mil, first.y_mil) if first is not None else None,
                     anchors=drv_anchors,
@@ -377,7 +407,7 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                             if p.electrical_type in pair]
                 refs = [f"{d}.{n}" for (d, n), _p in involved]
                 names_pretty = " + ".join(sorted(t.value for t in pair))
-                sev = Severity.NOTE if low_conf else base_sev
+                sev = Severity.NOTE if net_low_conf else base_sev
                 first_pin = involved[0][1]
                 findings.append(
                     Finding(
@@ -385,7 +415,7 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                         sev,
                         f"net {label} mixes {names_pretty} pins "
                         f"({', '.join(refs)}) — pin-type conflict"
-                        + _conf_suffix(low_conf, conf),
+                        + _conf_suffix(net_low_conf, conf),
                         refs=[*refs, label],
                         pos=(first_pin.x_mil, first_pin.y_mil),
                         anchors=[anchor("pin", r,
@@ -415,9 +445,10 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                     findings.append(
                         Finding(
                             ERC_FLOATING_INPUT,
-                            Severity.NOTE if low_conf else Severity.WARNING,
+                            Severity.NOTE if net_low_conf else Severity.WARNING,
                             f"{ref_str}{pname} is an INPUT on net {label} with no "
-                            "driver (floating input)" + _conf_suffix(low_conf, conf),
+                            "driver (floating input)"
+                            + _conf_suffix(net_low_conf, conf),
                             refs=[ref_str],
                             pos=pos,
                             anchors=[anchor("pin", ref_str, pos), anchor("net", label)],
@@ -448,11 +479,11 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                     findings.append(
                         Finding(
                             ERC_POWER_IN_UNDRIVEN,
-                            Severity.NOTE if low_conf else Severity.WARNING,
+                            Severity.NOTE if net_low_conf else Severity.WARNING,
                             f"{ref_str}{pname} is a POWER_IN pin on net {label}, "
                             "which is neither a recognized power/ground rail nor "
                             "driven by any POWER_OUT pin"
-                            + _conf_suffix(low_conf, conf),
+                            + _conf_suffix(net_low_conf, conf),
                             refs=[ref_str],
                             pos=pos,
                             anchors=[anchor("pin", ref_str, pos),

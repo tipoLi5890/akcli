@@ -73,9 +73,14 @@ Inputs: `.SchDoc`, `.SchLib`, `.PcbDoc`, `.PcbLib`, `.kicad_sch`, `.kicad_sym`, 
 
 ```bash
 # Design review (ERC-lite + power rails + BOM hygiene). Lint-style: exits 1 when findings exist.
-akcli check <file> -C akcli.toml          # all checks
+akcli check <file> -C akcli.toml          # all checks (ERC + power + BOM + nets + layout +
+                                          # integrity + pairs)
 akcli check <file> --erc --power --bom               # select checks
-akcli check <file> --exit-zero                       # report mode (always exit 0)
+akcli check <file> --integrity                       # write-gate document checks, read-only
+                                                     # (.kicad_sch: dangling endpoints, duplicate
+                                                     # uuids/designators, unresolved lib_ids,
+                                                     # instance paths, NC conflicts)
+akcli check <file> --fail-on never                   # report mode (always exit 0)
 
 # Net-level revision diff. Nets matched by MEMBERSHIP (not display name); components by
 # UniqueID, then (value, footprint, pin-count) signature, then refdes.
@@ -132,6 +137,11 @@ akcli draw board.kicad_sch --ops ops.json --apply      # atomic snapshot->temp->
 akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # extra symbol source (repeatable)
 ```
 
+A `lib_id` nickname that `--symbols` and config `[paths]` do not cover is looked up
+in the project and global `sym-lib-table` as a last resort, so `Device:R` resolves
+against an installed KiCad — but pass `--symbols` explicitly when the result must
+be reproducible on another machine.
+
 `--apply` writes only if the pure-Python connectivity verifier passes (zero dangling endpoints);
 otherwise the write is rejected and the original file is untouched. **After applying, re-read
 (`akcli read` / `akcli net`) to confirm the change** — never assume the write was correct.
@@ -150,10 +160,11 @@ otherwise the write is rejected and the original file is untouched. **After appl
 
 ## Exit codes
 
-`0` success / no findings · `1` check findings present (lint-style; `--exit-zero` forces 0) ·
+`0` success / no findings · `1` check findings present (lint-style; `--fail-on never` forces 0) ·
 `2` usage/arg error · `3` parse error (corrupt OLE2/S-expr) · `4` file not found ·
 `5` unsupported format · `6` op-list / verify failure (also covers `TARGET_LOCKED`, a
-KiCad GUI lock on the target — see `--allow-open` on `draw`/`arrange`/`undo`) ·
+KiCad GUI lock on the target — every write path refuses on it: `draw`, `arrange`,
+`undo`, `relink-symbols --apply`, `library repair --apply`; `--allow-open` overrides) ·
 `7` required external tool missing / network unreachable ·
 `8` query miss (`QUERY_MISS` — `net`/`component` asked for a name the file does not contain).
 
@@ -165,7 +176,11 @@ subcommand: `-C/--config`, `-v`/`-vv`, `-q/--quiet`, `--json`, `--no-color`, `--
 
 ## Companion slash commands
 
-`/circuit-review` (check + optional diff) · `/circuit-pinmap` (pinmap, optional `--expected`) ·
-`/circuit-diff` (diff two revisions) · `/circuit-draw` (build + validate an op-list and draw;
-user-triggered only, it writes files) · `/circuit-parts` (jlc search → show → add → plan →
-draw: source a real part and place it; networked + writes files, user-triggered only).
+Eight `/circuit-*` commands: `/circuit-review` (review engine + checks, optional diff) ·
+`/circuit-pinmap` (pinmap, optional `--expected`) · `/circuit-diff` (diff two revisions) ·
+`/circuit-sim` (deck inspection + SPICE assertions; read-only) · `/circuit-release`
+(`release preflight` GO/NO-GO with a manifest) · `/circuit-draw` (build + validate an
+op-list and draw; user-triggered only, it writes files) · `/circuit-parts` (jlc search →
+show → add → plan → draw: source a real part and place it; networked + writes files,
+user-triggered only) · `/circuit-datasheet` (datasheet fetch → audited facts; networked +
+writes files, user-triggered only).

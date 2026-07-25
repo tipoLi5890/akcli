@@ -50,6 +50,7 @@ only at serialize time through :func:`units.nm_to_mm_str`.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import os
 import shutil
@@ -395,6 +396,7 @@ def _resolve_pin_inst(
     if not syms:
         fail("VERIFY_FAILED", f"pin reference {ref!r} matches no placed component")
     symdef = None
+    available: list[str] = []
     for sym in syms:
         lib_id = _inst_lib_id(sym)
         try:
@@ -406,6 +408,7 @@ def _resolve_pin_inst(
         for pin in kicad_lib.unit_pins(symdef, unit):
             if pin.number == pin_number:
                 return comp, pin, geometry.pin_world(symdef, comp, pin)
+            available.append(pin.number)
     if symdef is not None:
         owners = sorted({p.owner_part_id for p in symdef.pins if p.number == pin_number})
         if owners:
@@ -414,7 +417,12 @@ def _resolve_pin_inst(
                 f"pin {ref}.{pin_number} is on unit {owners[0]} which is not placed; "
                 f'place it first (place_component with "unit": {owners[0]})',
             )
-    fail("VERIFY_FAILED", f"component {ref!r} has no pin {pin_number!r}")
+    hint = ""
+    if available:
+        close = difflib.get_close_matches(pin_number, available, n=1)
+        did_you_mean = f" — did you mean {close[0]!r}?" if close else ""
+        hint = f"{did_you_mean} (valid pins: {', '.join(sorted(set(available)))})"
+    fail("VERIFY_FAILED", f"component {ref!r} has no pin {pin_number!r}{hint}")
 
 
 def _resolve_pin_world(doc: SNode, ctx: dict, ref: str, pin_number: str) -> tuple[int, int]:
@@ -780,15 +788,17 @@ def _place_symbol(
     pin_numbers = [p.number for p in kicad_lib.unit_pins(symdef, unit)]
 
     root = _root_uuid(doc)
-    # Unit 1 keeps the historical seed so existing files replay byte-identically.
+    # Symbol/pin uuids are seeded from the DESIGNATOR alone (op_index pinned
+    # to 0): editing an op-list — inserting or reordering ops — must not
+    # change the identity of untouched parts, or a re-apply duplicates the
+    # whole design downstream of the edit. (Unit >1 carries a #u suffix.)
     ref_seed = designator if unit == 1 else f"{designator}#u{unit}"
-    sym_uuid = instances.deterministic_uuid(root, ref_seed, op_index)
+    sym_uuid = instances.deterministic_uuid(root, ref_seed, 0)
     # A pin NUMBER may legitimately repeat within one symbol (multi-unit parts
     # with shared pads, e.g. dual DirectFETs: unit A pins 1,2,3 / unit B pins
     # 1,4,5). Seed later occurrences with a #k suffix so their uuids stay
     # unique — otherwise the two "(pin "1" ...)" nodes collide and the
-    # connectivity gate refuses the write (DUPLICATE_UUID). The first
-    # occurrence keeps the historical seed, so existing files replay unchanged.
+    # connectivity gate refuses the write (DUPLICATE_UUID).
     pin_uuids = []
     _seen: dict[str, int] = {}
     for n in pin_numbers:
@@ -796,7 +806,7 @@ def _place_symbol(
         _seen[n] = k + 1
         base = f"{designator}.pin{n}" if unit == 1 else f"{designator}#u{unit}.pin{n}"
         seed = base if k == 0 else f"{base}#{k + 1}"
-        pin_uuids.append(instances.deterministic_uuid(root, seed, op_index))
+        pin_uuids.append(instances.deterministic_uuid(root, seed, 0))
 
     # Idempotent replay: a same-uuid instance already present is replaced wholesale.
     sym = _make_symbol(lib_id, pos_nm, rotation, mirror, sym_uuid, pin_numbers, pin_uuids, unit)
@@ -1098,24 +1108,37 @@ def _emit_net_label(
     return uid
 
 
-def _existing_pwr_ref_for_op(doc: SNode, root: str | None, op_index: int) -> str | None:
-    """Reference of a power symbol a prior replay of ``op_index`` placed, else ``None``.
+def _existing_pwr_ref_for_op(doc: SNode, pos_nm: tuple[int, int],
+                             net_name: str) -> str | None:
+    """Reference of a power symbol a prior replay placed HERE, else ``None``.
 
-    A power port's ``#PWR0<n>`` reference is *auto-allocated* (it isn't carried in
-    the op), so on replay :func:`instances.alloc_pwr_ref` would hand out the *next*
-    free number — a different designator and therefore a different deterministic
-    uuid, breaking idempotency.  Recover the original instead: the symbol this op
-    placed has a uuid equal to ``deterministic_uuid(root, <its own ref>, op_index)``.
-    Reusing that ref keeps re-applies byte-identical.
+    A power port's ``#PWR0<n>`` reference is *auto-allocated* (it isn't carried
+    in the op), so on replay :func:`instances.alloc_pwr_ref` would hand out the
+    *next* free number — a different designator and therefore a different
+    deterministic uuid, breaking idempotency.  Recover the original by the op's
+    own identity — position + net name — which survives op-list edits (uuids
+    are designator-seeded, so they cannot disambiguate power ports).
     """
     for sym in _placed_symbols(doc):
         ref = _symbol_reference(sym)
         if not ref or not ref.startswith("#"):
             continue
-        un = sym.find("uuid")
-        if un is None or len(un.children or []) < 2:
+        at = sym.find("at")
+        if at is None or len(at.children or []) < 3:
             continue
-        if un.children[1].value == instances.deterministic_uuid(root, ref, op_index):
+        try:
+            sx = units.mm_to_nm(float(at.children[1].value))
+            sy = units.mm_to_nm(float(at.children[2].value))
+        except ValueError:
+            continue
+        if (sx, sy) != pos_nm:
+            continue
+        value = None
+        for prop in sym.find_all("property"):
+            kids = prop.children or []
+            if len(kids) >= 3 and _unescape_atom(kids[1].value) == "Value":
+                value = _unescape_atom(kids[2].value)
+        if value == net_name:
             return ref
     return None
 
@@ -1142,7 +1165,8 @@ def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
     rotation = int(op.get("rotation", 0))
     # Reuse the ref from a prior replay of this op so the auto-allocated #PWR
     # designator (and thus the deterministic uuid) stays stable -> idempotent.
-    ref = _existing_pwr_ref_for_op(doc, _root_uuid(doc), idx) or instances.alloc_pwr_ref(doc)
+    ref = (_existing_pwr_ref_for_op(doc, pos, str(net_name))
+           or instances.alloc_pwr_ref(doc))
     uid = _place_symbol(
         doc, ctx, list(src_libs), lib_id, ref,
         pos, rotation, "none", idx, path,
@@ -1179,7 +1203,7 @@ def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     angle = float(op.get("angle", 0))
     root = _root_uuid(doc)
-    uid = _annotation_uuid(root, "text", op, f"{p[0]}:{p[1]}", idx)
+    uid = _annotation_uuid(root, "text", op, f"{p[0]}:{p[1]}", idx, ctx)
     node = _list(
         _atom("text"),
         _atom(_q(str(op["text"]))),
@@ -1192,7 +1216,7 @@ def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
 
 
 def _annotation_uuid(root: str | None, tag: str, op: dict,
-                     coord_seed: str, idx: int) -> str:
+                     coord_seed: str, idx: int, ctx: dict | None = None) -> str:
     """Deterministic uuid for a graphic/annotation node.
 
     Default seed follows the wire convention (coordinates + op index). An
@@ -1203,7 +1227,16 @@ def _annotation_uuid(root: str | None, tag: str, op: dict,
     """
     key = op.get("key")
     if isinstance(key, str) and key:
-        return instances.deterministic_uuid(root, f"{tag}:key:{key}", 0)
+        uid = instances.deterministic_uuid(root, f"{tag}:key:{key}", 0)
+        claimed = ctx.setdefault("annotation_uids", {}) if ctx is not None else {}
+        prev = claimed.setdefault(uid, (idx, tag, key))
+        if prev != (idx, tag, key):
+            raise AkcliError(
+                "OP_UNSUPPORTED",
+                f"op [{idx}] {tag} key {key!r} collides with op [{prev[0]}] "
+                f"(same key seeds the same uuid; the later op would replace "
+                "the earlier node) — use distinct keys")
+        return uid
     return instances.deterministic_uuid(root, f"{tag}:{coord_seed}", idx)
 
 
@@ -1221,7 +1254,7 @@ def _op_add_rectangle(doc, op, idx, src_libs, path, ctx) -> list[str]:
     width_nm = geometry.mil_to_nm(float(op.get("stroke_width_mil", 0) or 0))
     root = _root_uuid(doc)
     uid = _annotation_uuid(root, "rectangle", op,
-                           f"{a[0]}:{a[1]}:{b[0]}:{b[1]}", idx)
+                           f"{a[0]}:{a[1]}:{b[0]}:{b[1]}", idx, ctx)
     node = _list(
         _atom("rectangle"),
         _list(_atom("start"), _mm(a[0]), _mm(a[1])),
@@ -1250,7 +1283,7 @@ def _op_add_text_box(doc, op, idx, src_libs, path, ctx) -> list[str]:
                geometry.mil_to_nm(float(size[1])))
     angle = float(op.get("angle", 0))
     root = _root_uuid(doc)
-    uid = _annotation_uuid(root, "text_box", op, f"{p[0]}:{p[1]}", idx)
+    uid = _annotation_uuid(root, "text_box", op, f"{p[0]}:{p[1]}", idx, ctx)
     node = _list(
         _atom("text_box"),
         _atom(_q(str(op["text"]))),
