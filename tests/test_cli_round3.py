@@ -319,7 +319,9 @@ def test_calc_unknown_did_you_mean(capsys):
         main(["calc", "eserie"])
     assert exc.value.code == EXIT["USAGE"]
     err = capsys.readouterr().err
-    assert "invalid choice: 'eserie'" in err and "'eseries'" in err
+    # choices-list quoting varies by Python version (3.12 drops the quotes);
+    # assert on the content, not the punctuation
+    assert "invalid choice: 'eserie'" in err and "eseries" in err
 
 
 def test_calc_info_unknown_did_you_mean(capsys):

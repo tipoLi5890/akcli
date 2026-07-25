@@ -62,8 +62,10 @@ def test_calc_unknown_name(capsys):
         cli.main(["calc", "warpdrive"])
     assert exc.value.code == 2
     err = capsys.readouterr().err
+    # argparse quotes the choices list on some Python versions and not on
+    # others (3.12 dropped the quotes) — assert format-agnostically.
     assert "invalid choice: 'warpdrive'" in err
-    assert "'eseries'" in err               # the list rides along
+    assert "eseries" in err                 # the list rides along
 
 
 def test_calc_bad_param_token(capsys):
