@@ -12,6 +12,7 @@ wins.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -78,8 +79,16 @@ def test_posix_prefix_root():
 def test_offprefix_posix_exe_still_finds_the_distro_default():
     # /usr/lib/kicad/bin/kicad-cli — its own prefix has no share/kicad
     roots = libtable.kicad_data_roots("/usr/lib/kicad/bin/kicad-cli")
-    assert roots.index(Path("/usr/lib/kicad/share/kicad")) < \
-        roots.index(Path("/usr/share/kicad"))
+    assert Path("/usr/lib/kicad/share/kicad") in roots
+    if os.name == "nt":
+        # The distro fallbacks are POSIX-only by design — a Windows host has no
+        # /usr tree, so offering one would be a dead candidate in every probe.
+        # Assert that here rather than skipping: the platform split is the
+        # behaviour under test, on both sides of it.
+        assert Path("/usr/share/kicad") not in roots
+    else:
+        assert roots.index(Path("/usr/lib/kicad/share/kicad")) < \
+            roots.index(Path("/usr/share/kicad"))
 
 
 def test_windows_install_prefix_root():
