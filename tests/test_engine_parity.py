@@ -28,6 +28,10 @@ Rules pinned:
    in both: netbuild keeps the nets apart AND ``verify`` flags the free end.
    Case 3 is the important half — the failure mode is one engine forgiving a
    near-coincidence the other does not.
+4. **Bare T (exactly on the mid-span, no junction) = not connected** in both:
+   the eeschema rule. ``verify`` used to accept it, which made
+   ``check --integrity`` and ``nets`` give opposite answers on hand-drawn or
+   imported boards (the ``draw`` path hid it — ``auto_junctions`` runs first).
 """
 
 from __future__ import annotations
@@ -248,6 +252,33 @@ def test_near_miss_is_disconnected_in_both_engines(tmp_path: Path):
     assert dangling[0].refs == [f"({_MID_X} {_SPAN_Y + _ONE_MIL_MM})"]
 
     # mil engine: no merge — the stem pin is alone, the span keeps its two pins
+    assert _net_of(path, ("R3", "1")) == frozenset({("R3", "1")})
+    assert _net_of(path, ("R1", "2")) == frozenset({("R1", "2"), ("R2", "2")})
+
+
+# --------------------------------------------------------------------------- #
+# (d) on-grid T with NO junction: NOT connected in BOTH engines
+# --------------------------------------------------------------------------- #
+def test_bare_t_junction_is_disconnected_in_both_engines(tmp_path: Path):
+    """Exactly coincident, no junction — eeschema keeps the nets apart.
+
+    The third case is the one the two engines used to disagree on: netbuild
+    runs the eeschema dialect (``t_midspan_connects=False``) while ``verify``
+    accepted a mid-span touch as attached, so ``check --integrity`` called a
+    hand-drawn board clean while ``akcli nets`` reported two nets. (Files akcli
+    itself draws never reach here: ``auto_junctions`` inserts the junction
+    first — case (b) above.)
+    """
+    text = _sch(_SPAN_Y, with_junction=False)
+    path = _write(tmp_path, "bare_t.kicad_sch", text)
+
+    # nm engine: the stem's end is on the span, but nothing joins them
+    dangling = [f for f in connectivity.verify(sexpr.parse(text))
+                if f.code == connectivity.DANGLING_ENDPOINT]
+    assert len(dangling) == 1, [f.code for f in dangling]
+    assert dangling[0].refs == [f"({_MID_X} {_SPAN_Y})"]
+
+    # mil engine: no merge either
     assert _net_of(path, ("R3", "1")) == frozenset({("R3", "1")})
     assert _net_of(path, ("R1", "2")) == frozenset({("R1", "2"), ("R2", "2")})
 

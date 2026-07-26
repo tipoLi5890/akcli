@@ -102,3 +102,61 @@ def test_text_io_pins_encoding_and_newline() -> None:
         "platform-dependent text I/O (Windows: cp1252 locale encoding + "
         "\\n -> \\r\\n translation); pin encoding='utf-8' and, on writes, "
         "newline='\\n':\n  " + "\n  ".join(problems))
+
+
+# ------------------------------------------------ vendored patch sentinel ----
+# The AST gate above skips ``_vendor/`` — vendored code is not ours to
+# restyle. But three vendored writers DO carry the fix by hand (PROVENANCE.md
+# "Local modifications" 5): they emit .kicad_sym / .kicad_mod / .step wrappers
+# whose bytes matter, and their text contains Ω/µ. Re-vendoring from upstream
+# silently reverts them — the exact 0.8.0 + 0.10.0 failure class, only this
+# time invisible to the gate. So pin the known-patched call sites by name:
+# this is a sentinel over three lines, NOT a general rule for _vendor.
+
+VENDOR = ROOT / "src" / "akcli" / "_vendor" / "jlc2kicadlib"
+
+PATCHED_WRITES = {
+    # module (relative to _vendor/jlc2kicadlib) -> what it writes
+    "footprint/model3d.py": ".step/.wrl 3D-model wrapper",
+    "symbol/symbol.py": ".kicad_sym symbol library",
+    "_kmt.py": ".kicad_mod footprint",
+}
+
+
+def _text_write_opens(path: Path) -> list[tuple[int, set[str]]]:
+    """(lineno, kwargs) for every text-mode writing builtin ``open`` call."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id == "open":
+            mode = _open_mode(node)
+            if "b" not in mode and any(c in mode for c in "wax+"):
+                out.append((node.lineno, _kwarg_names(node)))
+    return out
+
+
+def test_vendored_writers_keep_the_windows_patch() -> None:
+    problems: list[str] = []
+    for rel, what in sorted(PATCHED_WRITES.items()):
+        path = VENDOR / rel
+        if not path.is_file():
+            problems.append(f"{rel}: vendored file is gone (writes {what})")
+            continue
+        writes = _text_write_opens(path)
+        if not writes:
+            problems.append(f"{rel}: no text-mode write open() left — the "
+                            f"{what} writer moved; re-pin this sentinel")
+            continue
+        for lineno, kw in writes:
+            missing = {"encoding", "newline"} - kw
+            if missing:
+                problems.append(
+                    f"{rel}:{lineno}: text write without "
+                    f"{'/'.join(sorted(missing))}= ({what})")
+    assert not problems, (
+        "a hand-applied Windows text-I/O patch was lost from the vendored "
+        "JLC2KiCadLib (re-vendoring reverts it silently). Re-apply "
+        "encoding='utf-8', newline='\\n' and see "
+        "src/akcli/_vendor/jlc2kicadlib/PROVENANCE.md, 'Local modifications' "
+        "item 5:\n  " + "\n  ".join(problems))

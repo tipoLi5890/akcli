@@ -10,7 +10,7 @@ import json
 import pytest
 
 from akcli import cli, report
-from akcli.checks import _rails
+from akcli import classify
 from akcli.errors import EXIT
 
 
@@ -26,17 +26,17 @@ from akcli.errors import EXIT
     ],
 )
 def test_implied_voltage(name, volts):
-    assert _rails.implied_voltage(name) == volts
+    assert classify.implied_voltage(name) == volts
 
 
 # --- #2c rail name matching: exact + `<rail>_suffix` -------------------------
 def test_rail_matches_prefix():
     rails = {"V3V3"}
-    assert _rails.rail_matches("V3V3", rails)
-    assert _rails.rail_matches("V3V3_AUX", rails)
-    assert _rails.rail_matches("V3V3-IO", rails)
-    assert not _rails.rail_matches("V3V3X", rails)   # no separator -> not a match
-    assert not _rails.rail_matches("V5", rails)
+    assert classify.rail_matches("V3V3", rails)
+    assert classify.rail_matches("V3V3_AUX", rails)
+    assert classify.rail_matches("V3V3-IO", rails)
+    assert not classify.rail_matches("V3V3X", rails)   # no separator -> not a match
+    assert not classify.rail_matches("V5", rails)
 
 
 # --- #1 footprint falls back to the RECORD-41 parameter ----------------------

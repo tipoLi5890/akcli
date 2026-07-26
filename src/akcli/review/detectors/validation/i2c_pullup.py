@@ -4,6 +4,17 @@ Judged through akcli's own ``calc i2c-pullup`` (NXP UM10204-cited). The
 sink-current floor R_min = (VDD−0.4 V)/3 mA needs no bus-capacitance guess;
 the rise-time ceiling does, so a weak pull-up is only ever a NOTE with the
 C_b assumption stated — never a confident claim.
+
+Bus recognition is by net-name TOKEN, not by a name suffix: a net is a bus
+line when one of its ``_``/``.``/``-``-separated tokens is ``SDA``/``SCL``
+(optionally numbered — ``I2C1_SDA``, ``SDA0_3V3``). Two further tokens,
+``SDATA`` and ``SCLK``, name the same lines on plenty of boards but are also
+what I²S and SPI call their data/clock — so they only count when BOTH lines
+of one bus (same remaining base name) are present: ``SENSOR_SDATA`` +
+``SENSOR_SCLK`` is a bus, a lone ``SPI_SCLK`` next to ``SPI_MOSI`` is not.
+Generic ``DAT``/``CLK`` are deliberately NOT recognized at all — on a real
+board they name everything from an SD card to a shift register, and a
+missing-pull-up warning on those is pure noise.
 """
 
 from __future__ import annotations
@@ -14,8 +25,11 @@ from ....report import Finding, Severity, anchor
 from ... import Detector, Rule, register
 from ... import topo
 
-_SDA_RX = re.compile(r"(^|[_./])SDA\d*([_./]|$)", re.IGNORECASE)
-_SCL_RX = re.compile(r"(^|[_./])SCL\d*([_./]|$)", re.IGNORECASE)
+_TOKEN_SPLIT = re.compile(r"[^0-9A-Za-z]+")
+# token (digits stripped) -> bus line. "Strong" tokens are I²C-exclusive;
+# "weak" ones are shared with I²S/SPI and need their partner line (see above).
+_STRONG_TOKENS: dict[str, str] = {"SDA": "SDA", "SCL": "SCL"}
+_WEAK_TOKENS: dict[str, str] = {"SDATA": "SDA", "SCLK": "SCL"}
 
 # Rise-time ceiling needs the bus capacitance nobody drew: assume a typical
 # short-bus figure and SAY SO. Standard-mode numbers keep the ceiling
@@ -28,7 +42,8 @@ RULES = (
         code="REVIEW_I2C_NO_PULLUP",
         title="I²C bus line has no pull-up resistor",
         explain=(
-            "A net named SDA*/SCL* with ≥2 members reaches no resistor tied "
+            "A net whose name carries an SDA/SCL token (≥2 members) reaches "
+            "no resistor tied "
             "to a power rail. Open-drain I²C needs a pull-up per line; some "
             "MCUs provide weak internal pull-ups, but those are usually too "
             "weak for spec rise times — confirm deliberately, or fit the "
@@ -87,21 +102,66 @@ def _pullups(ctx: topo.ReviewCtx, net) -> list[tuple[str, object]]:
     return sorted(out, key=lambda t: t[0])
 
 
-def _match(net, rx) -> bool:
+def _line_of_name(name: str | None) -> tuple[str, str, bool] | None:
+    """``(kind, base, strong)`` for a bus-line NAME, else ``None``.
+
+    ``kind`` is ``SDA``/``SCL``; ``base`` is the rest of the name (the bus
+    instance — ``SENSOR`` in ``SENSOR_SDA``), so two lines are paired only
+    when they belong to the same bus; ``strong`` marks an I²C-exclusive
+    token.
+    """
+    tokens = [t.upper() for t in _TOKEN_SPLIT.split(name or "") if t]
+    for i, tok in enumerate(tokens):
+        core = tok.rstrip("0123456789")
+        kind = _STRONG_TOKENS.get(core)
+        if kind is not None:
+            return kind, "_".join(tokens[:i] + tokens[i + 1:]), True
+        kind = _WEAK_TOKENS.get(core)
+        if kind is not None:
+            return kind, "_".join(tokens[:i] + tokens[i + 1:]), False
+    return None
+
+
+def _line_of_net(net) -> tuple[str, str, bool] | None:
+    """First bus-line classification among every name the net answers to."""
     from ....checks.power import _net_candidate_names
-    return any(rx.search(n or "") for n in _net_candidate_names(net))
+    for name in _net_candidate_names(net):
+        hit = _line_of_name(name)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _bus_lines(ctx: topo.ReviewCtx) -> list[tuple[str, str, object]]:
+    """``(kind, base, net)`` for every recognized bus line, in net order.
+
+    A line found only through a WEAK token is kept only when its partner
+    line (same base, other kind) is on the board too — that is what keeps
+    ``SPI_SCLK`` off this report while ``SENSOR_SCLK`` + ``SENSOR_SDATA``
+    stays on it.
+    """
+    found: list[tuple[str, str, object, bool]] = []
+    for net in ctx.sch.nets:
+        if len(net.members) < 2:
+            continue
+        hit = _line_of_net(net)
+        if hit is None:
+            continue
+        kind, base, strong = hit
+        found.append((kind, base, net, strong))
+    kinds_by_base: dict[str, set[str]] = {}
+    for kind, base, _net, _strong in found:
+        kinds_by_base.setdefault(base, set()).add(kind)
+    return [(kind, base, net) for kind, base, net, strong in found
+            if strong or kinds_by_base.get(base) == {"SDA", "SCL"}]
 
 
 def run(ctx: topo.ReviewCtx) -> list[Finding]:
     from ....calc import compute
 
     out: list[Finding] = []
-    buses: dict[str, dict] = {}      # kind -> {net, pullup ref, value}
-    for net in ctx.sch.nets:
-        kind = ("SDA" if _match(net, _SDA_RX)
-                else "SCL" if _match(net, _SCL_RX) else None)
-        if kind is None or len(net.members) < 2:
-            continue
+    buses: dict[tuple[str, str], dict] = {}   # (base, kind) -> pull-up record
+    for kind, base, net in _bus_lines(ctx):
         pulls = _pullups(ctx, net)
         anchors = [anchor("net", net.name)]
         if not pulls:
@@ -117,7 +177,7 @@ def run(ctx: topo.ReviewCtx) -> list[Finding]:
         r_ref, rail = pulls[0]
         r = topo.parse_value(ctx.comps[r_ref].value)
         vdd = topo.net_implied_voltage(rail)
-        buses.setdefault(kind, {"net": net.name, "ref": r_ref, "r": r})
+        buses.setdefault((base, kind), {"net": net.name, "ref": r_ref, "r": r})
         if r is None or vdd is None:
             continue                          # no value / no rail voltage: no guess
         env = compute("i2c-pullup",
@@ -154,9 +214,14 @@ def run(ctx: topo.ReviewCtx) -> list[Finding]:
                          "likely out of spec"),
                 remediation="verify against the real bus capacitance",
                 **common))
-    sda, scl = buses.get("SDA"), buses.get("SCL")
-    if (sda and scl and sda["r"] is not None and scl["r"] is not None
-            and abs(sda["r"] - scl["r"]) > 1e-9):
+    # Mismatch is judged PER BUS (same base name): a board with two I2C buses
+    # must not have SENSOR_SDA's pull-up compared against DISPLAY_SCL's.
+    for base in sorted({b for b, _k in buses}):
+        sda, scl = buses.get((base, "SDA")), buses.get((base, "SCL"))
+        if not (sda and scl) or sda["r"] is None or scl["r"] is None:
+            continue
+        if abs(sda["r"] - scl["r"]) <= 1e-9:
+            continue
         out.append(Finding(
             code="REVIEW_I2C_PULLUP_MISMATCH", severity=Severity.NOTE,
             message=(f"SDA pull-up {sda['ref']} and SCL pull-up {scl['ref']} "

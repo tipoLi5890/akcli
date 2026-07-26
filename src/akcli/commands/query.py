@@ -98,6 +98,11 @@ def _cmd_read(args: argparse.Namespace) -> int:
         warnings = getattr(obj, "warnings", None) or []
         if warnings:
             payload["warnings"] = list(warnings)
+        # Document parameters (Title/Revision/...) are cheap and identifying —
+        # exactly what --summary is for. Absent when the file carries none.
+        title_block = getattr(obj, "title_block", None) or {}
+        if title_block:
+            payload["title_block"] = dict(title_block)
         return payload
 
     def _emit_schematic(obj) -> int:

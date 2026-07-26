@@ -32,7 +32,14 @@ read-only** access — no code path modifies a `.SchDoc`/`.SchLib`/`.PcbDoc`, ev
 Parses:
 - **`.SchDoc`** — components, pins (electrical-tip coordinates), designators,
   parameters, footprints, wires/junctions/net labels/power ports/ports/No-ERC markers
-  → full inferred netlist. Hierarchical designs are followed: sheet symbols
+  → full inferred netlist. Two Altium-specific resolutions worth knowing when you read
+  the output: a `Comment="=<ParamName>"` is an **indirection** to that component's own
+  parameter, not a literal, and one it cannot resolve is reported
+  (`warning: altium: N unresolved Comment parameter reference(s) (imported literally)`);
+  and only a `ModelType=PCBLIB` (or absent) model becomes a `footprint`, `IsCurrent=T`
+  winning — a SIM/SI/3D model name never lands there. Document-level parameters
+  (Title/Revision/DocumentNumber/Date) surface as `title_block` in `read --json`.
+  Hierarchical designs are followed: sheet symbols
   (RECORD 15/16) recurse into child `.SchDoc`s with per-instance namespaces and
   sheet-entry↔child-port pairing (Altium *Automatic* scope: ports merge globally
   only in designs without sheet symbols). `.PrjPcb` is accepted too — akcli reads

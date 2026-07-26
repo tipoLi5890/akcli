@@ -56,6 +56,14 @@
     {
       "code": "POWER_RAIL",
       "severity": "info",
+      "message": "rail 'VBAT_F': 2 consumer(s): D1, F1",
+      "refs": [
+        "VBAT_F"
+      ]
+    },
+    {
+      "code": "POWER_RAIL",
+      "severity": "info",
       "message": "rail 'VBUS': 2 consumer(s): C3, R1",
       "refs": [
         "VBUS"

@@ -229,6 +229,68 @@ def test_kicad_netlist_stays_balanced_and_parses():
         assert text.endswith("\n")
 
 
+# --------------------------------------------------------------------------- #
+# net naming: only the KiCad emitter qualifies names, and it qualifies exactly
+# what eeschema qualifies (arbitrated against real kicad-cli in test_e2e_netlist)
+# --------------------------------------------------------------------------- #
+def _nets(text: str) -> dict[str, sexpr.SNode]:
+    """``name -> (net ...)`` node."""
+    nets = sexpr.parse(text).find("nets")
+    assert nets is not None
+    return {n.find("name")[1].value: n for n in nets.find_all("net")}
+
+
+def test_kicad_netlist_qualifies_sheet_scoped_names_only():
+    """Local labels get the sheet path; power ports / global labels stay bare."""
+    # power_entry names every net with a root-sheet local `(label ...)`
+    local = _nets(exporters.to_kicad_netlist(_read_kicad()))
+    assert set(local) == {"/GND", "/VBAT", "/VBAT_F", "/VBUS", "/VBUS_ADC",
+                          "/VBUS_SENSE", "/VSYS"}
+    # board_v8 names its two rails with power symbols -> bare, no sheet path.
+    # (Its third net carries BOTH a local `MID` and a global `VOUT`; akcli's
+    # canonical pick is `MID`, eeschema's is `VOUT` — a net-engine naming gap
+    # that predates this emitter and is tracked in test_e2e_netlist.py's
+    # docstring. The qualification rule itself is applied consistently: `MID`
+    # is local-scoped, so it is qualified.)
+    v8 = _nets(exporters.to_kicad_netlist(
+        kreader.read_sch(str(FIXTURES / "kicad" / "board_v8.kicad_sch"))))
+    assert set(v8) == {"+3V3", "GND", "/MID"}
+
+
+def test_kicad_netlist_qualifies_child_sheets_with_the_sheet_NAME_path():
+    """Hierarchy: the prefix is the human sheet path, per sheet INSTANCE."""
+    root = FIXTURES / "kicad" / "hier" / "root.kicad_sch"
+    names = set(_nets(exporters.to_kicad_netlist(kreader.read_sch(str(root)))))
+    assert names == {
+        "/ROOT_LOCAL", "/Amp/AMP_LOCAL", "/Amp Two/AMP_LOCAL",
+        "/Amp/Deep/DEEP_LOCAL", "/Amp Two/Deep/DEEP_LOCAL",
+        "/Amp/Deep/DEEP_OUT", "/Amp Two/Deep/DEEP_OUT",
+        "AMP_GLOBAL", "GND",
+    }
+
+
+def test_kicad_netlist_every_net_carries_a_class():
+    """KiCad writes `(class ..)` on every net; a class-free board is "Default"."""
+    for board in sorted(CORPUS.glob("*.kicad_sch")):
+        text = exporters.to_kicad_netlist(kreader.read_sch(str(board)))
+        nets = sexpr.parse(text).find("nets").find_all("net")
+        assert nets, f"{board.name}: no nets"
+        for net in nets:
+            klass = net.find("class")
+            assert klass is not None, f"{board.name}: net without (class ..)"
+            assert klass[1].value == "Default"
+
+
+def test_protel_and_csv_keep_the_bare_akcli_names():
+    """Sheet qualification is a KiCad-netlist rule — it must not leak sideways."""
+    sch = _read_kicad()
+    assert "\nGND\n" in exporters.to_protel(sch)
+    assert "\n/GND\n" not in exporters.to_protel(sch)
+    rows = exporters.to_csv(sch).splitlines()
+    assert "GND,C1,2" in rows
+    assert not any(r.startswith("/") for r in rows)
+
+
 def test_kicad_netlist_byte_stable_across_runs():
     """Same input bytes -> same output bytes (two independent reads)."""
     first = exporters.to_kicad_netlist(_read_kicad())

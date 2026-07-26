@@ -8,10 +8,11 @@ measured.
 
 from __future__ import annotations
 
+from ....classify import is_connector, is_tvs
 from ....report import Finding, Severity, anchor
 from ... import Detector, Rule, register
 from ... import geometry
-from ...tables import CONNECTOR_PREFIXES, EMC_TVS_CONN_MAX_MM, TVS_KEYWORDS
+from ...tables import EMC_TVS_CONN_MAX_MM
 
 RULES = (
     Rule(
@@ -28,25 +29,13 @@ RULES = (
 )
 
 
-def _prefix(ref: str) -> str:
-    out = []
-    for ch in ref or "":
-        if ch.isalpha():
-            out.append(ch.upper())
-        else:
-            break
-    return "".join(out)
-
-
 def _is_tvs_fp(fp) -> bool:
-    hay = f"{(fp.value or '').lower()} {(fp.footprint_name or '').lower()}"
-    return any(k in hay for k in TVS_KEYWORDS)
+    return is_tvs(fp.designator, value=fp.value, footprint=fp.footprint_name)
 
 
 def _is_conn_fp(fp) -> bool:
-    hay = (fp.footprint_name or "").lower()
-    return (_prefix(fp.designator) in CONNECTOR_PREFIXES
-            or "conn" in hay or "usb" in hay)
+    return is_connector(fp.designator, footprint=fp.footprint_name,
+                        value=fp.value)
 
 
 def run(ctx) -> list[Finding]:

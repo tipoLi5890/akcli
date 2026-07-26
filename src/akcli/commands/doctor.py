@@ -1,19 +1,22 @@
 """``akcli doctor`` — one-shot environment report for humans, agents, and CI.
 
-akcli itself is zero-dependency, but three optional capabilities depend on the
+akcli itself is zero-dependency, but four optional capabilities depend on the
 machine: **kicad-cli** (advisory ERC, SVG export for ``view live``, parity
 tests), **libngspice** (``akcli sim`` execution — ``--deck-only`` needs
-nothing), and **network** (the ``jlc`` family only). ``doctor`` probes each
-one the same way the features themselves do, prints a table with a
-remediation hint per missing item, and — via ``--require`` — turns the report
-into a CI gate (exit 1 when a named capability is absent).
+nothing), the **symbol libraries** (``place_component Device:R`` and
+``akcli pins`` against standard nicknames), and **network** (the ``jlc``
+family only). ``doctor`` probes each one the same way the features themselves
+do, prints a table with a remediation hint per missing item, and — via
+``--require`` — turns the report into a CI gate (exit 1 when a named
+capability is absent).
 
 Discovery mirrors the feature code paths on purpose: kicad-cli follows the
 ``KICAD_CLI`` env → ``PATH`` → known install locations ladder used by
 ``akcli view``; ngspice defers to :func:`akcli.sim.engine.available`
-(``AKCLI_NGSPICE`` honored); network is probed against the same base URL the
-``jlc`` client uses (opt-in with ``--network`` — doctor stays offline by
-default like the rest of the CLI).
+(``AKCLI_NGSPICE`` honored); symbols go through the very lib-table walk
+``akcli pins`` uses; network is probed against the same base URL the ``jlc``
+client uses (opt-in with ``--network`` — doctor stays offline by default like
+the rest of the CLI).
 """
 
 from __future__ import annotations
@@ -24,7 +27,11 @@ import sys
 from ._shared import _dumps, _emit, _stamp
 
 # Capabilities a CI gate may demand via --require.
-_REQUIRABLE = ("python", "kicad-cli", "ngspice", "config", "network")
+_REQUIRABLE = ("python", "kicad-cli", "ngspice", "config", "symbols", "network")
+
+# The nickname:name probed by _check_symbols — the most universally present
+# entry in KiCad's default symbol libraries.
+_SYMBOL_PROBE = "Device:R"
 
 def _find_kicad_cli() -> str | None:
     """Thin seam over the single shared ladder in :mod:`..drivers.kicad_cli`
@@ -142,6 +149,43 @@ def _check_workspace() -> tuple[bool, str, str]:
     return False, "; ".join(issues), "; ".join(hints)
 
 
+_SYMBOL_HINT = (
+    "install the KiCad symbol libraries, or point akcli at them with "
+    "`export KICAD10_SYMBOL_DIR=/path/to/symbols` (match the "
+    "KICAD*_SYMBOL_DIR your sym-lib-table uses) — optional: only "
+    "`akcli pins`/`place_component` against standard libraries need it"
+)
+
+
+def _check_symbols() -> tuple[bool, str, str]:
+    """End-to-end symbol resolution through the library tables.
+
+    Walks exactly the path ``akcli pins Device:R`` / ``place_component`` take:
+    project + per-user global ``sym-lib-table`` -> ``${KICAD*_SYMBOL_DIR}``
+    expansion (env, else KiCad's compiled-in default derived from the install)
+    -> ``.kicad_sym`` load -> symbol lookup. A clean KiCad install exports none
+    of those variables, which used to make every standard nickname a flat
+    ``SYMBOL_NOT_FOUND``; this probe is how that failure becomes visible.
+    """
+    from pathlib import Path
+    try:
+        from ._shared import _table_symbol_sources
+        sources = _table_symbol_sources([_SYMBOL_PROBE], [], Path.cwd())
+    except Exception as exc:
+        return (False, f"{_SYMBOL_PROBE}: lib-table lookup failed ({exc})",
+                _SYMBOL_HINT)
+    if not sources:
+        return (False, f"{_SYMBOL_PROBE}: no sym-lib-table entry resolves to an "
+                "existing .kicad_sym", _SYMBOL_HINT)
+    where = Path(sources[0]).as_posix()
+    try:
+        from ..readers import kicad_lib
+        kicad_lib.resolve(_SYMBOL_PROBE, [kicad_lib.read(s) for s in sources])
+    except Exception as exc:
+        return False, f"{_SYMBOL_PROBE}: {where} unusable ({exc})", _SYMBOL_HINT
+    return True, f"{_SYMBOL_PROBE} via {where}", ""
+
+
 def _check_network() -> tuple[bool, str, str]:
     import urllib.error
     import urllib.request
@@ -168,6 +212,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         "schemas": _check_schemas(),
         "kicad-cli": _check_kicad_cli(),
         "ngspice": _check_ngspice(),
+        "symbols": _check_symbols(),
         "config": _check_config(),
         "workspace": _check_workspace(),
     }
@@ -214,8 +259,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 def register(sub, common) -> None:
     p = sub.add_parser(
         "doctor", parents=[common],
-        help="environment report: python/kicad-cli/ngspice/config/network "
-             "with remediation hints (--require gates CI)")
+        help="environment report: python/kicad-cli/ngspice/symbols/config/"
+             "network with remediation hints (--require gates CI)")
     p.add_argument("--network", action="store_true",
                    help="also probe the jlc endpoint (doctor is offline "
                         "by default)")

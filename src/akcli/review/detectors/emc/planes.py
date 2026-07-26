@@ -8,7 +8,7 @@ loops — the primary radiated-emission mechanism.
 
 from __future__ import annotations
 
-from ....checks.power import _is_ground
+from ....classify import is_ground as _is_ground
 from ....report import Finding, Severity
 from ... import Detector, Rule, register
 from ... import geometry

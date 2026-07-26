@@ -1524,6 +1524,21 @@ const DIAGRAMS = {
     ${label(256,140,"C bulk","middle",C.wire,11)}
     ${wire("262,100 330,100")} ${rbox(330,84,44,32,"load")}
     ${label(210,200,"R_cold ≥ Vpk/I_max · E = ½CV² — EPCOS guide",'middle',C.dim,11)}`),
+  "envelope-detector": svg(`
+    ${label(48,105,"RF in","middle")} ${wire("70,100 120,100")}
+    <polygon points="120,86 120,114 146,100" fill="none" stroke="${C.wire}" stroke-width="1.8"/>
+    <line x1="146" y1="86" x2="146" y2="114" stroke="${C.wire}" stroke-width="1.8"/>
+    ${wire("146,100 330,100")} ${label(340,105,"envelope","start")}
+    <circle cx="200" cy="100" r="3.5" fill="${C.wire}"/>
+    ${wire("200,100 200,134")}
+    <line x1="182" y1="134" x2="218" y2="134" stroke="${C.wire}" stroke-width="2.5"/>
+    <line x1="182" y1="146" x2="218" y2="146" stroke="${C.wire}" stroke-width="2.5"/>
+    ${label(174,146,"C","end")}
+    ${wire("200,146 200,176")} ${gnd(200,176)}
+    <circle cx="285" cy="100" r="3.5" fill="${C.wire}"/>
+    ${wire("285,100 285,124")} ${rbox(265,124,40,44,"Rb")}
+    ${wire("285,168 285,176")} ${gnd(285,176)}
+    ${alabel(210,225,"1/(2π·f_carrier) ≪ Rb·C ≪ 1/(2π·f_signal)")}`),
   rcombo: svg(`
     ${wire("30,110 90,110")} ${rbox(90,94,60,32,"R1")} ${wire("150,110 190,110")}
     <circle cx="190" cy="110" r="3.5" fill="${C.wire}"/>
@@ -1532,10 +1547,15 @@ const DIAGRAMS = {
     ${wire("330,110 390,110")}
     ${label(210,215,"R1 + (R2 ∥ R3) … up to 4 parts, IEC 60063 pool",'middle',C.dim,12)}`),
 };
+/* aliases: a calculator that analyses the SAME topology reuses its drawing.
+   test_calc_diagrams_cover_registry keeps this list exhaustive. */
 DIAGRAMS["hysteresis-design"] = DIAGRAMS.hysteresis;
+DIAGRAMS["comparator-hysteresis"] = DIAGRAMS.hysteresis;
 DIAGRAMS["vdivider-design"] = DIAGRAMS.vdivider;
 DIAGRAMS["regulator-design"] = DIAGRAMS.regulator;
 DIAGRAMS["rc-charge"] = DIAGRAMS.rc;
+DIAGRAMS["ldo-headroom"] = DIAGRAMS.ldo;
+DIAGRAMS["battery-life"] = DIAGRAMS.battery;
 DIAGRAMS.eseries = DIAGRAMS.rescolor;
 const FALLBACK = svg(`
   <rect x="140" y="55" width="140" height="150" rx="10" fill="${C.body}" stroke="${C.wire}"/>

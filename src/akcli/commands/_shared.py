@@ -220,9 +220,16 @@ def _load_schematic(path: Path):
 
 
 def _load_cfg(args: argparse.Namespace, near: Path | None):
-    """Load config from ``-C/--config`` or walk-up discovery; default empty Config."""
+    """Load config from ``-C/--config`` or walk-up discovery; default empty Config.
+
+    An explicit ``-C`` goes through :func:`config.load_explicit_config` (a
+    missing/unparseable file is ``BAD_CONFIG``, never a silent fallback);
+    walk-up discovery finding nothing stays silent, which is the ordinary
+    no-config case. ``cli.main`` applies the same check to every invocation,
+    so this is the library-caller path.
+    """
     if getattr(args, "config", None):
-        return _config.load_config(Path(args.config))
+        return _config.load_explicit_config(Path(args.config))
     start = near.parent if near is not None else None
     found = _config.find_config(start)
     if found is None:
@@ -297,7 +304,19 @@ def _add_exit_policy_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _dumps(obj) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=False)
+    """The single JSON exit for every ``--json`` payload in the CLI.
+
+    ``allow_nan=False`` is load-bearing, not paranoia: Python's default emits
+    bare ``NaN``/``Infinity``/``-Infinity`` literals, which RFC 8259 has no
+    production for — ``JSON.parse`` and Go's ``encoding/json`` both reject
+    them, so an agent consuming us would fail on the *parse*, not on a value
+    it could inspect. Producers must clamp/guard upstream (see
+    ``calc.si.parse_value`` and ``calc.registry.compute``); if one ever slips
+    through, the ``ValueError`` raised here is caught by ``cli.main`` and
+    reported as a normal error envelope rather than shipping invalid JSON.
+    """
+    return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=False,
+                      allow_nan=False)
 
 
 def _stamp(payload: dict, version: str = "1") -> dict:

@@ -42,7 +42,9 @@
           "source_names": { "type": "array", "items": { "type": "string" } },
           "is_named": { "type": "boolean" },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-          "merge_reasons": { "type": "array", "items": { "type": "string" } }
+          "merge_reasons": { "type": "array", "items": { "type": "string" } },
+          "sheet_path": { "type": "string",
+                          "description": "KiCad sheet-path PREFIX for the exported net name (\"/\", \"/Amp/\"); \"\" when the name is global-scoped (global label / power port) or the net is unnamed" }
         }
       }
     }

@@ -280,6 +280,36 @@ def test_apply_refuses_connectivity_change(proj):
     assert not list(sch.parent.glob("*.tmp"))              # no temp leftovers
 
 
+def test_apply_runs_the_write_gate_as_a_delta(proj, tmp_path: Path):
+    """The document gate is applied like the writer's, but only to NEW damage.
+
+    Audit: relink compared net MEMBERSHIP alone, so document-level breakage
+    (dangling ends, duplicate uuids, an unresolvable body) rode through. It now
+    runs ``connectivity.verify`` too — as a delta, because relink is not the
+    tool that repairs a file that was already broken (this fixture has no
+    ``(instances)`` blocks at all, and must stay relinkable).
+    """
+    from akcli.writers import connectivity
+
+    sch, libdir, _ = proj
+    pre = connectivity.verify(sexpr.parse(sch.read_text(encoding="utf-8")))
+    assert "INVALID_INSTANCES_PATH" in {f.code for f in pre}    # dirty before
+    assert relink.apply(sch, relink.plan(sch, [libdir]))["written"] is True
+    assert relink._new_connectivity_errors(
+        doc_before=sch.read_text(encoding="utf-8"), tmp=str(sch)) == []
+
+    # ...while a finding the splice INTRODUCES is reported (and refuses above)
+    broken = tmp_path / "broken.kicad_sch"
+    text = sch.read_text(encoding="utf-8")
+    broken.write_text(
+        text[:text.rindex(")")]
+        + '\t(wire (pts (xy 10 10) (xy 20 10))\n'
+        '\t\t(uuid "00000000-0000-4000-8000-0000000009ff"))\n)\n',
+        encoding="utf-8")
+    introduced = relink._new_connectivity_errors(doc_before=text, tmp=str(broken))
+    assert [f.code for f in introduced] == ["DANGLING_ENDPOINT"] * 2
+
+
 def test_apply_unknown_cache_entry_fails(proj):
     sch, _, _ = proj
     action = {"lib_id": "Nope:Z", "status": "replace",

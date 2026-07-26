@@ -115,6 +115,12 @@ class Net:
     is_named: bool = True
     confidence: float = 1.0     # 0..1; lowered on ambiguous merges
     merge_reasons: list[str] = field(default_factory=list)  # explainability per merge
+    # KiCad sheet-path PREFIX for the exported net name ("/" on the root sheet,
+    # "/Amp/" one level down). Empty when nothing should be prefixed: an unnamed
+    # net, or a name whose scope is global (global label / power port) — KiCad
+    # prefixes neither (kicad-cli 10.0.4-verified, see exporters._kicad_net_name).
+    # `name` itself always stays the BARE name; this is emission metadata only.
+    sheet_path: str = ""
 
     @property
     def stable_id(self) -> str:
@@ -133,6 +139,11 @@ class Schematic:
     no_erc_points: list[tuple[float, float]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)  # passive_pin_ratio, frac_present, ...
+    # Document-level parameters that populate the sheet's title block
+    # (Title / Revision / DocumentNumber / Date / Organization ...), verbatim
+    # from the source document. Empty when the file carries none. Additive in
+    # schema 1.3 — consumers that ignore unknown keys are unaffected.
+    title_block: dict[str, str] = field(default_factory=dict)
     schema_version: str = SCHEMA_VERSION
 
     def export(self) -> dict:

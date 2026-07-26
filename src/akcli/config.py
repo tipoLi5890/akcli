@@ -105,6 +105,28 @@ def _parse_grid(value: object) -> int:
     return nm
 
 
+def load_explicit_config(path: Path | str) -> Config:
+    """Load a config the caller named EXPLICITLY (``-C/--config``).
+
+    The one rule, in one place (``cli.main`` applies it to every invocation;
+    ``commands._shared._load_cfg`` re-uses it for library callers), because
+    ``-C`` is a promise, not a hint: a path that does not exist, or is a
+    directory, or fails to parse is ``BAD_CONFIG`` — never a silent fallback
+    to defaults. Silently ignoring a typo'd ``-C`` left every rail/waiver/path
+    setting the run depended on absent while the command still exited 0, which
+    is why ``BAD_CONFIG`` existed but was unreachable.
+
+    Walk-up discovery (:func:`find_config`) keeps the opposite policy on
+    purpose: finding no ``akcli.toml`` is the ordinary no-config case.
+    """
+    p = Path(path)
+    if not p.exists():
+        fail("BAD_CONFIG", f"-C/--config {p}: no such file")
+    if not p.is_file():
+        fail("BAD_CONFIG", f"-C/--config {p}: is a directory, not a file")
+    return load_config(p)
+
+
 def find_config(start: Path | str | None = None) -> Path | None:
     """Walk up from ``start`` (default cwd) returning the first config file found."""
     here = Path(start) if start is not None else Path.cwd()

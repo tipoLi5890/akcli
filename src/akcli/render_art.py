@@ -34,19 +34,34 @@ from .errors import AkcliError
 from .kicad_escape import unescape_string
 from .model import Component, Library, SymbolDef
 from .readers import kicad_lib
-from .readers.kicad_lib import _atom_value, _mm_to_mil, _sub_unit_style
+from .readers.kicad_lib import _atom_value, _fnum_atom, _mm_to_mil, _sub_unit_style
 from .readers.sexpr import SNode
 from .writers import geometry
 
 _PIN_NUM_NUDGE_MIL = 25.0    # pin number: offset from the stub midpoint
 _PIN_NAME_GAP_MIL = 30.0     # pin name: past the stub's inner (body) end
+_PIN_NAME_OFFSET_MM = 0.508  # KiCad default when (pin_names) carries no (offset)
 
 _Fmt = Callable[[float], str]
 
 
+def _atom(node: SNode | None, idx: int) -> str | None:
+    """None-safe :func:`_atom_value` — ``SNode.find`` returns ``None`` freely.
+
+    Optional sub-nodes are the norm, not the exception, in real symbol
+    libraries: ``(pin_names hide)`` carries no ``(offset)``, a pin may have no
+    ``(name)``/``(number)``/``(length)``, ``(fill)`` no ``(type)``. Handing a
+    raw ``find`` result to ``_atom_value`` (which dereferences
+    ``node.children``) is therefore an ``AttributeError`` waiting to happen —
+    it crashed ``akcli render`` on 59% of the standard KiCad libraries. Numbers
+    go through :func:`_fnum_atom`, which is None-safe the same way.
+    """
+    return _atom_value(node, idx) if node is not None else None
+
+
 def _fill_class(g: SNode) -> str:
     fill = g.find("fill")
-    kind = _atom_value(fill.find("type"), 1) if fill is not None else None
+    kind = _atom(fill.find("type"), 1) if fill is not None else None
     return "sym sym-fill" if kind == "background" else "sym"
 
 
@@ -56,7 +71,7 @@ def _hide_flag(node: SNode | None) -> bool:
         return False
     for c in node.children or []:
         if c.is_list and c.tag == "hide":
-            return (_atom_value(c, 1) or "yes") == "yes"
+            return (_atom(c, 1) or "yes") == "yes"
         if c.is_atom and c.text == "hide":
             return True
     return False
@@ -83,15 +98,17 @@ class SymbolArt:
 
     def _bodies(self, symdef: SymbolDef) -> list[SNode]:
         """Body roots to draw: the base symbol first for an (extends) part."""
+        # `SymbolDef.body_sexpr` is typed `object | None` (model.py cannot
+        # import the reader) — narrow it here instead of trusting it.
         out: list[SNode] = []
         if symdef.extends:
             try:
                 base = kicad_lib.resolve(symdef.extends, [self._lib])
-                if base.body_sexpr is not None:
+                if isinstance(base.body_sexpr, SNode):
                     out.append(base.body_sexpr)
             except AkcliError:
                 pass
-        if symdef.body_sexpr is not None:
+        if isinstance(symdef.body_sexpr, SNode):
             out.append(symdef.body_sexpr)
         return out
 
@@ -162,9 +179,12 @@ class SymbolArt:
             hide_numbers = _hide_flag(body.find("pin_numbers"))
             names_node = body.find("pin_names")
             hide_names = _hide_flag(names_node)
-            name_offset_mil = _mm_to_mil(float(
-                _atom_value(names_node.find("offset") if names_node is not None
-                            else None, 1) or 0.508))
+            # `(pin_names hide)` — the majority form in the standard libraries
+            # — has no `(offset)` child at all: `find` returns None.
+            offset_node = (names_node.find("offset")
+                           if names_node is not None else None)
+            name_offset_mil = _mm_to_mil(
+                _fnum_atom(offset_node, 1, _PIN_NAME_OFFSET_MM))
             for holder in self._holders(body):
                 for g in holder.children or []:
                     if not g.is_list:
@@ -180,7 +200,7 @@ class SymbolArt:
         """Body + the unit-1/common sub-symbols, style ≤ 1 (no DeMorgan)."""
         holders = [body]
         for sub in body.find_all("symbol"):
-            u, style = _sub_unit_style(_atom_value(sub, 1))
+            u, style = _sub_unit_style(_atom(sub, 1))
             if style is not None and style >= 2:
                 continue
             if u is None or u in (0, 1):
@@ -195,8 +215,8 @@ class SymbolArt:
         def take(node: SNode | None) -> tuple[float, float] | None:
             if node is None:
                 return None
-            return pt(comp, _mm_to_mil(float(_atom_value(node, 1) or 0.0)),
-                      _mm_to_mil(float(_atom_value(node, 2) or 0.0)))
+            return pt(comp, _mm_to_mil(_fnum_atom(node, 1)),
+                      _mm_to_mil(_fnum_atom(node, 2)))
 
         if g.tag == "rectangle":
             a, b = take(g.find("start")), take(g.find("end"))
@@ -209,7 +229,7 @@ class SymbolArt:
         elif g.tag == "circle":
             c = take(g.find("center"))
             if c is not None:
-                r = _mm_to_mil(float(_atom_value(g.find("radius"), 1) or 0.0))
+                r = _mm_to_mil(_fnum_atom(g.find("radius"), 1))
                 out.append(f'<circle class="{_fill_class(g)}" cx="{x(c[0])}" '
                            f'cy="{y(c[1])}" r="{fmt(r)}"/>')
         elif g.tag == "arc":
@@ -237,7 +257,7 @@ class SymbolArt:
                            f'points="{coords}"/>')
         elif g.tag == "text":
             at = take(g.find("at"))
-            value = unescape_string(_atom_value(g, 1)) or ""
+            value = unescape_string(_atom(g, 1)) or ""
             if at is not None and value:
                 out.append(f'<text class="symtext" x="{x(at[0])}" '
                            f'y="{y(at[1])}">{escape(value)}</text>')
@@ -252,10 +272,10 @@ class SymbolArt:
         at = g.find("at")
         if at is None or _hide_flag(g):
             return
-        tipx = _mm_to_mil(float(_atom_value(at, 1) or 0.0))
-        tipy = _mm_to_mil(float(_atom_value(at, 2) or 0.0))
-        orient = float(_atom_value(at, 3) or 0.0)
-        length = _mm_to_mil(float(_atom_value(g.find("length"), 1) or 0.0))
+        tipx = _mm_to_mil(_fnum_atom(at, 1))
+        tipy = _mm_to_mil(_fnum_atom(at, 2))
+        orient = _fnum_atom(at, 3)
+        length = _mm_to_mil(_fnum_atom(g.find("length"), 1))
         dx = {0.0: 1.0, 180.0: -1.0}.get(orient % 360, 0.0)
         dy = {90.0: 1.0, 270.0: -1.0}.get(orient % 360, 0.0)
         innx, inny = tipx + length * dx, tipy + length * dy
@@ -265,7 +285,7 @@ class SymbolArt:
             out.append(f'<line class="pinstub" x1="{x(a[0])}" y1="{y(a[1])}" '
                        f'x2="{x(b[0])}" y2="{y(b[1])}"/>')
         if not hide_numbers:
-            number = _atom_value(g.find("number"), 1) or ""
+            number = _atom(g.find("number"), 1) or ""
             if number:
                 mid = self._pt(comp, (tipx + innx) / 2,
                                (tipy + inny) / 2 + _PIN_NUM_NUDGE_MIL)
@@ -273,7 +293,7 @@ class SymbolArt:
                            f'x="{x(mid[0])}" y="{y(mid[1])}">'
                            f'{escape(number)}</text>')
         if not hide_names:
-            name = unescape_string(_atom_value(g.find("name"), 1)) or ""
+            name = unescape_string(_atom(g.find("name"), 1)) or ""
             if name and name != "~":
                 gap = length + name_offset_mil + _PIN_NAME_GAP_MIL
                 anchor = self._pt(comp, tipx + gap * dx, tipy + gap * dy)

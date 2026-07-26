@@ -51,6 +51,26 @@ def test_parse_value_engineering_notation():
         assert topo.parse_value(bad) is None, bad
 
 
+def test_parse_value_accepts_altium_upper_case_multipliers():
+    # Altium exports "10U"/"100N"/"4P7"; the old review-local parser returned
+    # None for all of them, so every detector reading such a value silently
+    # skipped the part.
+    for text, want in {"10U": 10e-6, "100N": 100e-9, "4P7": 4.7e-12,
+                       "10UF": 10e-6, "2N2": 2.2e-9}.items():
+        got = topo.parse_value(text)
+        assert got is not None and abs(got - want) <= 1e-9 * want, text
+    # m/M is the one place case carries meaning — never folded
+    assert topo.parse_value("1M") == 1e6
+    assert topo.parse_value("1m") == 1e-3
+
+
+def test_detector_sees_an_altium_upper_case_value():
+    # end-to-end: a crystal whose load caps are written "22P" is reviewed,
+    # not silently skipped.
+    fs = _run(crystal, _xtal_sch("22P", "22P"))
+    assert [f.code for f in fs] == ["REVIEW_XTAL_LOAD"]
+
+
 # --------------------------------------------------------------------------- #
 # divider
 # --------------------------------------------------------------------------- #
@@ -191,6 +211,27 @@ def test_crystal_asymmetric_values():
 
 def test_crystal_unparseable_cap_is_silent():
     assert _run(crystal, _xtal_sch("22p", "TBD")) == []
+
+
+def _x_prefixed_xtal_sch():
+    """X1 = a JLC-style crystal part (no "crystal" anywhere in the lib name)."""
+    return _sch(
+        [_comp("X1", "corpus_jlc:SC-32S32_768kHz20PPM7pF", "32.768kHz 7pF"),
+         _comp("U1", "MCU:MCU", "MCU", pins=(("1", "XL1"), ("2", "XL2")))],
+        [("XTAL1", [("X1", "1"), ("U1", "1")]),
+         ("XTAL2", [("X1", "2"), ("U1", "2")])],
+    )
+
+
+def test_x_prefixed_crystal_is_reviewed_as_a_crystal():
+    # "X" was a CONNECTOR prefix, so the board's only crystal skipped the
+    # whole crystal family — and drew a connector-ESD warning instead.
+    fs = _run(crystal, _x_prefixed_xtal_sch())
+    assert [f.code for f in fs] == ["REVIEW_XTAL_NO_LOADCAPS"]
+
+
+def test_x_prefixed_crystal_is_not_an_unprotected_connector():
+    assert _run(protection, _x_prefixed_xtal_sch()) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -340,6 +381,66 @@ def test_i2c_pullup_too_strong():
     assert any("C_b" in a for a in strong.evidence["assumptions"])
 
 
+def _bus_sch(sda_name, scl_name, extra_net=None):
+    """Two IC-to-IC bus lines with no pull-ups, named as given."""
+    comps = [_comp("U1", "MCU:MCU", "MCU", pins=(("1", "D"), ("2", "C"))),
+             _comp("U2", "SENSOR:S", "S", pins=(("1", "D"), ("2", "C")))]
+    nets = [(sda_name, [("U1", "1"), ("U2", "1")]),
+            (scl_name, [("U1", "2"), ("U2", "2")])]
+    if extra_net:
+        nets.append((extra_net, [("U1", "1"), ("U2", "1")]))
+    return _sch(comps, nets)
+
+
+def test_i2c_matches_the_token_not_a_suffix():
+    # SDA/SCL anywhere in the name as a delimited token — the old rule only
+    # saw "*_SDA*"-shaped names.
+    fs = _run(i2c_pullup, _bus_sch("SDA0_3V3", "SCL0_3V3"))
+    assert sorted(f.code for f in fs) == ["REVIEW_I2C_NO_PULLUP"] * 2
+
+
+def test_i2c_sdata_sclk_pair_is_recognized():
+    # SDATA/SCLK name the same lines on plenty of parts; they count when BOTH
+    # halves of one bus are present.
+    fs = _run(i2c_pullup, _bus_sch("SENSOR_SDATA", "SENSOR_SCLK"))
+    assert sorted(f.code for f in fs) == ["REVIEW_I2C_NO_PULLUP"] * 2
+
+
+def test_i2c_lone_spi_clock_is_not_a_bus():
+    # SPI_SCLK with no SDATA partner is an SPI clock — flagging it for a
+    # missing I2C pull-up is exactly the noise this rule must not make.
+    assert _run(i2c_pullup, _bus_sch("SPI_SCLK", "SPI_MOSI")) == []
+
+
+def test_i2c_generic_dat_clk_names_are_not_a_bus():
+    # DAT/CLK name everything from an SD card to a shift register: too broad
+    # to claim an open-drain bus. (Deliberate trade-off — rename the net or
+    # waive if it really is I2C.)
+    assert _run(i2c_pullup, _bus_sch("SENSOR_DAT", "SENSOR_CLK")) == []
+
+
+def test_i2c_mismatch_is_judged_per_bus():
+    # Two buses, each internally consistent: no mismatch, whatever the other
+    # bus uses. (The old rule kept ONE SDA and ONE SCL record board-wide.)
+    comps = [_comp("U1", "MCU:MCU", "MCU",
+                   pins=(("1", "SDA"), ("2", "SCL"), ("3", "VDD"))),
+             _comp("U2", "SENSOR:S", "S", pins=(("1", "SDA"), ("2", "SCL"))),
+             _comp("U3", "DISP:D", "D", pins=(("1", "SDA"), ("2", "SCL"))),
+             _comp("R1", "Device:R", "2.2k"), _comp("R2", "Device:R", "2.2k"),
+             _comp("R3", "Device:R", "4.7k"), _comp("R4", "Device:R", "4.7k")]
+    # net order deliberately interleaves the buses: the first SDA (4.7k, the
+    # display bus) and the first SCL (2.2k, the sensor bus) belong to
+    # DIFFERENT buses, which is what the old board-wide pair reported as a
+    # mismatch.
+    nets = [("+3V3", [("U1", "3"), ("R1", "2"), ("R2", "2"),
+                      ("R3", "2"), ("R4", "2")]),
+            ("DISP_SDA", [("U3", "1"), ("R3", "1")]),
+            ("SENS_SCL", [("U1", "2"), ("U2", "2"), ("R2", "1")]),
+            ("SENS_SDA", [("U1", "1"), ("U2", "1"), ("R1", "1")]),
+            ("DISP_SCL", [("U3", "2"), ("R4", "1")])]
+    assert _run(i2c_pullup, _sch(comps, nets)) == []
+
+
 def test_i2c_pullup_weak_is_note_with_assumption():
     fs = _run(i2c_pullup, _i2c_sch("100k", "100k"))
     assert sorted(f.code for f in fs) == ["REVIEW_I2C_PULLUP_WEAK"] * 2
@@ -457,6 +558,23 @@ def _entry_sch(*, fuse=True, series_diode=True, shunt_diode=False,
         nets[clamp].append(("D9", "1"))
         nets["GND"].append(("D9", "2"))
     return _sch(comps, list(nets.items()))
+
+
+def test_power_entry_stage_name_is_not_a_second_entry():
+    # VBUS_FUSED is the SAME rail, downstream of the fuse. Seeding there
+    # (now that derived rail names classify as power) would report the fuse
+    # sitting right in front of it as missing whenever the walk cannot cross
+    # the part between the two segments — here a 3-pin load switch.
+    comps = [_comp("J1", "Conn:USB_C", "USB", pins=(("1", "VBUS"), ("2", "GND"))),
+             _comp("F1", "Device:Polyfuse", "500mA"),
+             _comp("U3", "Power:LoadSwitch", "NCP360",
+                   pins=(("1", "IN"), ("2", "EN"), ("3", "OUT")))]
+    nets = [("VBUS_CONN", [("J1", "1"), ("F1", "1")]),
+            ("VBUS_FUSED", [("F1", "2"), ("U3", "1")]),
+            ("VBUS_PROT", [("U3", "3")]),
+            ("GND", [("J1", "2")])]
+    codes = [f.code for f in _run(power_protect, _sch(comps, nets))]
+    assert "REVIEW_FUSE_MISSING" not in codes
 
 
 def test_power_entry_unprotected_positive():

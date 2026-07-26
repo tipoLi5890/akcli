@@ -8,7 +8,7 @@
   (`JLC2KiCadLib.py`) is NOT vendored — akcli drives `create_footprint` /
   `create_symbol` directly from `drivers/jlc2kicad.py`.
 
-## Local modifications (kept minimal, all import-level)
+## Local modifications (kept minimal; 1–2 are import-level)
 
 1. `import requests` → `from .. import _http as requests` (stdlib urllib shim;
    keeps akcli zero-dependency).
@@ -41,8 +41,25 @@
    `default_electrical_type()` classifies two-pin R/C/L-class parts (reference
    prefix or EasyEDA tags) and hands `passive` to the pin handler.
 
+5. **Windows text I/O** — every text-mode `open(..., "w")` that writes a KiCad
+   artifact pins `encoding="utf-8", newline="\n"`. Upstream opens with the
+   process defaults, which on Windows means the cp1252 locale codec (symbol
+   names and value strings carry `Ω`/`µ`) plus `\n` → `\r\n` translation, so a
+   library written on Windows differs byte-for-byte from the same conversion on
+   Linux. Patched call sites:
+   - `footprint/model3d.py:203` (`.step`/`.wrl` model wrapper)
+   - `symbol/symbol.py:253` (`.kicad_sym` library)
+   - `_kmt.py:338` (`.kicad_mod` footprint — akcli-original file, but the same
+     rule and the same sentinel)
+
+   `tests/test_text_io_portability.py` excludes `_vendor/` from its AST gate
+   (vendored code is not ours to restyle), so these three are pinned instead by
+   the `test_vendor_*` sentinels in that file. **Re-vendoring drops this patch
+   silently** — re-apply it and keep the sentinel green.
+
 Deviations 3 and 4 are additive helper functions plus the two f-string lines
-that consume them — they rebase cleanly onto upstream.
+that consume them — they rebase cleanly onto upstream. Deviation 5 is three
+one-line keyword additions.
 
 `_http.py` and `_kmt.py` are original akcli code (project MIT license), not
 upstream files.

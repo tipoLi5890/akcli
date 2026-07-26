@@ -31,12 +31,11 @@ Y flip + instance transform when placing.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from .. import model, units
 from ..errors import AkcliError, fail
 from ..kicad_escape import unescape_string
-from ..safety import MAX_FILE_BYTES
+from ..safety import read_text_guarded
 from . import sexpr
 
 __all__ = [
@@ -54,11 +53,12 @@ _MAX_EXTENDS = 64
 
 
 def _read_text(path: os.PathLike | str) -> str:
-    """Read a UTF-8 text file, bounded by ``MAX_FILE_BYTES``."""
-    data = Path(path).read_bytes()
-    if len(data) > MAX_FILE_BYTES:
-        fail("KICAD_SEXPR_TOOBIG", f"file exceeds {MAX_FILE_BYTES} bytes")
-    return data.decode("utf-8")
+    """Read a UTF-8 text file, bounded by ``MAX_FILE_BYTES``.
+
+    Thin alias for :func:`safety.read_text_guarded` — kept because it is the
+    seam ``readers.kicad``/``relink``/``checks.libsync`` import by name.
+    """
+    return read_text_guarded(path)
 
 
 def _mm_to_mil(mm: float) -> float:

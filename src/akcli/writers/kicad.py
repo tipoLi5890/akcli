@@ -323,15 +323,45 @@ def _inline_library(doc: SNode) -> model.Library:
 # --------------------------------------------------------------------------- #
 # per-apply symbol-resolution context (perf: SPEC §3.5)
 # --------------------------------------------------------------------------- #
-def _ctx_new() -> dict:
+def _ctx_new(doc_path: Path | None = None) -> dict:
     """Per-``apply`` memo: ``lib_id -> SymbolDef`` resolved from ONE cache body.
 
     Re-parsing the whole (growing) inline ``lib_symbols`` per placed op made a
     large op-list quadratic (a 478-placement sheet took minutes); resolving each
     ``lib_id`` once, from just its own cached body, is O(1) per op. Safe because
     a cache entry never changes within a run (``ensure_cached`` dedups by id).
+
+    Also carries the per-apply *claim registries* (``uids``: which op created
+    which deterministic uuid — see :func:`_claim_uid`) and ``doc_path``, the
+    file being edited (``add_sheet`` resolves its child against that directory).
     """
-    return {"symdefs": {}, "text_anchors": []}
+    return {"symdefs": {}, "text_anchors": [], "uids": {}, "doc_path": doc_path}
+
+
+def _claim_uid(ctx: dict | None, uid: str, idx: int, what: str, hint: str) -> str:
+    """Record that op ``idx`` created ``uid``; refuse a second, different claim.
+
+    Node uuids are seeded from CONTENT alone (coordinates, net name, designator
+    — never the op index), which is what makes an edited op-list replay onto the
+    same nodes instead of duplicating the design downstream of the edit. The
+    flip side is that two ops in ONE op-list can now seed the same uuid, and
+    ``_append_top_idempotent`` would let the later one silently replace the
+    earlier one's node (both reported ``ok``). Two identical wires / two texts at
+    one point / two power ports on one coordinate are never a real intent, so
+    the collision is a hard error naming both ops — the same contract as the
+    annotation ``key`` guard.
+    """
+    if ctx is None:
+        return uid
+    claimed = ctx.setdefault("uids", {})
+    prev = claimed.setdefault(uid, (idx, what))
+    if prev != (idx, what):
+        raise AkcliError(
+            "OP_UNSUPPORTED",
+            f"op [{idx}] {what} collides with op [{prev[0]}] {prev[1]} "
+            f"(both seed the same uuid; the later op would replace the "
+            f"earlier node) — {hint}")
+    return uid
 
 
 def _symdef_from_body(body: SNode, lib_id: str) -> model.SymbolDef:
@@ -899,28 +929,38 @@ def _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="wire") -> list[str]:
     verts = op["vertices"]
     pts = [_resolve_endpoint(doc, ctx, v) for v in verts]
     root = _root_uuid(doc)
-    return _emit_wire_segments(doc, root, idx, pts, tag)
+    return _emit_wire_segments(doc, root, idx, pts, tag, ctx)
 
 
 def _emit_wire_segments(
     doc: SNode, root: str | None, idx: int,
-    pts: list[tuple[int, int]], tag: str,
+    pts: list[tuple[int, int]], tag: str, ctx: dict | None = None,
 ) -> list[str]:
     """One ``(wire ...)``/``(bus ...)`` node per consecutive point pair.
 
-    Shared by ``add_wire``/``add_bus`` and ``route_net`` — the uuid seed is
-    the segment's coordinates, so identical geometry replays byte-identically
-    regardless of which op produced it.
+    Shared by ``add_wire``/``add_bus`` and ``route_net``. The uuid seed is the
+    segment's coordinates ALONE (no op index), so identical geometry replays
+    byte-identically regardless of which op produced it *and* survives an edit
+    that renumbers the op-list — inserting one op at the front used to re-seed
+    every downstream wire and duplicate it on the next apply.
     """
     created: list[str] = []
     for a, b in zip(pts, pts[1:]):
         if a == b:
             continue
-        uid = instances.deterministic_uuid(root, f"{tag}:{a[0]}:{a[1]}:{b[0]}:{b[1]}", idx)
+        seed = f"{tag}:{a[0]}:{a[1]}:{b[0]}:{b[1]}"
+        uid = instances.deterministic_uuid(root, seed, 0)
+        _claim_uid(ctx, uid, idx, f"{tag} {_mil_pair(a)}-{_mil_pair(b)}",
+                   "drop the duplicate segment (one wire per span is enough)")
         node = _list(_atom(tag), _pts([a, b]), _stroke(), _uuid_node(uid))
         _append_top_idempotent(doc, node, uid)
         created.append(uid)
     return created
+
+
+def _mil_pair(p: tuple[int, int]) -> str:
+    """A point rendered as ``(x,y)`` mil — for collision/refusal messages."""
+    return f"({units.nm_to_mil(p[0]):g},{units.nm_to_mil(p[1]):g})"
 
 
 def _op_add_bus(doc, op, idx, src_libs, path, ctx) -> list[str]:
@@ -1006,7 +1046,7 @@ def _op_route_net(doc, op, idx, src_libs, path, ctx) -> list[str]:
         fail("VERIFY_FAILED", "route_net: from and to resolve to the same point")
     pts = _route_points(a, b, op.get("style", "auto"), _pin_tip_set(doc, ctx))
     root = _root_uuid(doc)
-    created = _emit_wire_segments(doc, root, idx, pts, "wire")
+    created = _emit_wire_segments(doc, root, idx, pts, "wire", ctx)
     if op.get("label"):
         (ax, ay), (bx, by) = max(
             zip(pts, pts[1:]),
@@ -1019,14 +1059,16 @@ def _op_route_net(doc, op, idx, src_libs, path, ctx) -> list[str]:
             orientation = 90
         created.append(_emit_net_label(
             doc, root, idx, str(op["label"]), p, orientation,
-            op.get("scope", "local")))
+            op.get("scope", "local"), ctx))
     return created
 
 
 def _op_add_junction(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     root = _root_uuid(doc)
-    uid = instances.deterministic_uuid(root, f"junction:{p[0]}:{p[1]}", idx)
+    uid = instances.deterministic_uuid(root, f"junction:{p[0]}:{p[1]}", 0)
+    _claim_uid(ctx, uid, idx, f"junction at {_mil_pair(p)}",
+               "one junction per point; drop the duplicate op")
     node = _list(
         _atom("junction"),
         _list(_atom("at"), _mm(p[0]), _mm(p[1])),
@@ -1046,7 +1088,10 @@ def _op_add_no_connect(doc, op, idx, src_libs, path, ctx) -> list[str]:
     else:
         p = _point_nm(ep)
     root = _root_uuid(doc)
-    uid = instances.deterministic_uuid(root, f"no_connect:{p[0]}:{p[1]}", idx)
+    seed = _anchor_seed(ep, p)
+    uid = instances.deterministic_uuid(root, f"no_connect:{seed}", 0)
+    _claim_uid(ctx, uid, idx, f"no_connect at {seed}",
+               "one no_connect per pin; drop the duplicate op")
     node = _list(
         _atom("no_connect"),
         _list(_atom("at"), _mm(p[0]), _mm(p[1])),
@@ -1085,17 +1130,42 @@ def _op_add_net_label(doc, op, idx, src_libs, path, ctx) -> list[str]:
     else:
         orientation = 0
     root = _root_uuid(doc)
-    return [_emit_net_label(doc, root, idx, str(op["name"]), p, orientation, scope)]
+    return [_emit_net_label(doc, root, idx, str(op["name"]), p, orientation,
+                            scope, ctx, _anchor_seed(at, p))]
+
+
+def _anchor_seed(at: object, p: tuple[int, int]) -> str:
+    """Seed fragment identifying WHERE an op anchored a node.
+
+    A written anchor (``"R1.2"``, ``"mid(A.1,B.1)"``) seeds as itself, a raw
+    point as its coordinates. Anchors, not resolved coordinates, because two
+    pins can share one tip: the label-on-pin discipline puts one label on EACH
+    of a coincident pair (that is how ``move_component --carry_labels`` knows
+    which name travels with which part), and coordinate seeding collapsed those
+    two nodes into one — the mover then carried the only label away and the
+    staying pin silently lost its net. It also makes the node follow its part:
+    re-applying after a move rewrites the SAME label at the pin's new place.
+    """
+    return str(at) if isinstance(at, str) else f"{p[0]}:{p[1]}"
 
 
 def _emit_net_label(
     doc: SNode, root: str | None, idx: int, name: str,
-    p: tuple[int, int], orientation: int, scope: str,
+    p: tuple[int, int], orientation: int, scope: str, ctx: dict | None = None,
+    anchor_seed: str | None = None,
 ) -> str:
-    """Emit one net-label node (shared by ``add_net_label`` and ``route_net``)."""
+    """Emit one net-label node (shared by ``add_net_label`` and ``route_net``).
+
+    Seeded by kind + net name + anchor, never the op index (see
+    :func:`_claim_uid`): the same label re-emitted from an edited op-list must
+    land on the SAME node instead of stacking a second copy on the first.
+    """
     tag = {"local": "label", "global": "global_label",
            "hierarchical": "hierarchical_label"}[scope]
-    uid = instances.deterministic_uuid(root, f"{tag}:{name}:{p[0]}:{p[1]}", idx)
+    seed = anchor_seed if anchor_seed is not None else f"{p[0]}:{p[1]}"
+    uid = instances.deterministic_uuid(root, f"{tag}:{name}:{seed}", 0)
+    _claim_uid(ctx, uid, idx, f"{tag} {name!r} at {seed}",
+               "one label of a given name per anchor; drop the duplicate op")
     children = [_atom(tag), _atom(_q(name))]
     if tag != "label":
         children.append(_list(_atom("shape"), _atom("input")))
@@ -1108,16 +1178,40 @@ def _emit_net_label(
     return uid
 
 
+def _is_pwr_flag(lib_id: str, net_name: str) -> bool:
+    """``power:PWR_FLAG`` (any nick), the power symbol that names NO net.
+
+    netbuild applies exactly this carve-out (``readers/kicad.py``): a flag only
+    marks a rail as driven for ERC, so — unlike a real power port — it may sit
+    on the same coordinate as one without shorting anything. Identity and the
+    stacking gates below are therefore per SPECIES.
+    """
+    return (lib_id.split(":")[-1].upper() == "PWR_FLAG"
+            or net_name.upper() == "PWR_FLAG")
+
+
 def _existing_pwr_ref_for_op(doc: SNode, pos_nm: tuple[int, int],
-                             net_name: str) -> str | None:
+                             want_flag: bool) -> str | None:
     """Reference of a power symbol a prior replay placed HERE, else ``None``.
 
     A power port's ``#PWR0<n>`` reference is *auto-allocated* (it isn't carried
     in the op), so on replay :func:`instances.alloc_pwr_ref` would hand out the
     *next* free number — a different designator and therefore a different
     deterministic uuid, breaking idempotency.  Recover the original by the op's
-    own identity — position + net name — which survives op-list edits (uuids
-    are designator-seeded, so they cannot disambiguate power ports).
+    own identity: its **position** plus its species (port vs ``PWR_FLAG``, which
+    legitimately coincides with a port), and nothing else (uuids are
+    designator-seeded, so they cannot disambiguate power ports).
+
+    The net name is deliberately NOT part of that identity. Including it (0.17)
+    meant re-applying an op-list that renamed a port's net — ``GND`` -> ``+3V3``
+    at the same coordinate — matched nothing, allocated a fresh ``#PWR0<n>``,
+    and appended a SECOND symbol exactly on top of the first: the stale ``GND``
+    stayed, invisible under the new port, shorting the two nets through their
+    coincident pins. Position-only identity makes that op a replace-in-place.
+    A power port MOVED to a new coordinate still leaves its old node behind
+    (several ``GND`` ports on one sheet is legal, so nothing can tell a move
+    from an addition) — delete the old one explicitly; see
+    ``docs/op-list-authoring.md``.
     """
     for sym in _placed_symbols(doc):
         ref = _symbol_reference(sym)
@@ -1133,12 +1227,12 @@ def _existing_pwr_ref_for_op(doc: SNode, pos_nm: tuple[int, int],
             continue
         if (sx, sy) != pos_nm:
             continue
-        value = None
+        value = ""
         for prop in sym.find_all("property"):
             kids = prop.children or []
             if len(kids) >= 3 and _unescape_atom(kids[1].value) == "Value":
                 value = _unescape_atom(kids[2].value)
-        if value == net_name:
+        if _is_pwr_flag(_inst_lib_id(sym), value) is want_flag:
             return ref
     return None
 
@@ -1163,9 +1257,24 @@ def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
     else:
         pos = _point_nm(at)
     rotation = int(op.get("rotation", 0))
+    is_flag = _is_pwr_flag(str(lib_id), str(net_name))
+    # One port (and one flag) per coordinate, per apply: a second op on the same
+    # point would otherwise recover the first op's #PWR ref below and silently
+    # REPLACE it — both ops reporting ok, one net vanishing. Identity is the
+    # position, so the collision is position-based too: the net names are
+    # irrelevant, two ports on one point short their nets whatever they name.
+    claimed = ctx.setdefault("power_ports", {})
+    prev = claimed.setdefault((pos, is_flag), (idx, str(net_name)))
+    if prev != (idx, str(net_name)):
+        raise AkcliError(
+            "POWER_PORT_STACKED",
+            f"op [{idx}] power port {net_name!r} at {_mil_pair(pos)} collides "
+            f"with op [{prev[0]}] ({prev[1]!r} on the same coordinate; the "
+            f"later op would replace the earlier port) — move one of them or "
+            f"drop it")
     # Reuse the ref from a prior replay of this op so the auto-allocated #PWR
     # designator (and thus the deterministic uuid) stays stable -> idempotent.
-    ref = (_existing_pwr_ref_for_op(doc, pos, str(net_name))
+    ref = (_existing_pwr_ref_for_op(doc, pos, is_flag)
            or instances.alloc_pwr_ref(doc))
     uid = _place_symbol(
         doc, ctx, list(src_libs), lib_id, ref,
@@ -1187,7 +1296,9 @@ def _op_add_bus_entry(doc, op, idx, src_libs, path, ctx) -> list[str]:
     else:
         size = (_BUS_ENTRY_NM, _BUS_ENTRY_NM)
     root = _root_uuid(doc)
-    uid = instances.deterministic_uuid(root, f"bus_entry:{p[0]}:{p[1]}", idx)
+    uid = instances.deterministic_uuid(root, f"bus_entry:{p[0]}:{p[1]}", 0)
+    _claim_uid(ctx, uid, idx, f"bus_entry at {_mil_pair(p)}",
+               "one bus entry per rip point; drop the duplicate op")
     node = _list(
         _atom("bus_entry"),
         _list(_atom("at"), _mm(p[0]), _mm(p[1])),
@@ -1219,11 +1330,15 @@ def _annotation_uuid(root: str | None, tag: str, op: dict,
                      coord_seed: str, idx: int, ctx: dict | None = None) -> str:
     """Deterministic uuid for a graphic/annotation node.
 
-    Default seed follows the wire convention (coordinates + op index). An
-    optional ``key`` gives the node a STABLE handle independent of both its
-    coordinates and its position in the op-list: re-emitting the same key
-    replaces the node in place (``_append_top_idempotent``), which is what
-    lets a group frame refresh itself after parts move instead of piling up.
+    Default seed follows the wire convention: the node's COORDINATES, never the
+    op index (an op-list edit that renumbers ops must not re-identify — and so
+    duplicate — every annotation downstream of it). Editing the text of an
+    annotation therefore rewrites the node that is already there; two keyless
+    annotations of one kind on one point collide and are refused
+    (:func:`_claim_uid`). An optional ``key`` gives the node a STABLE handle
+    independent of its coordinates too: re-emitting the same key replaces the
+    node in place (``_append_top_idempotent``), which is what lets a group frame
+    refresh itself after parts move instead of piling up.
     """
     key = op.get("key")
     if isinstance(key, str) and key:
@@ -1237,7 +1352,10 @@ def _annotation_uuid(root: str | None, tag: str, op: dict,
                 f"(same key seeds the same uuid; the later op would replace "
                 "the earlier node) — use distinct keys")
         return uid
-    return instances.deterministic_uuid(root, f"{tag}:{coord_seed}", idx)
+    uid = instances.deterministic_uuid(root, f"{tag}:{coord_seed}", 0)
+    return _claim_uid(ctx, uid, idx, f"{tag} at {coord_seed}",
+                      'give one of them a distinct "at", or a "key" to '
+                      "address them separately")
 
 
 def _op_add_rectangle(doc, op, idx, src_libs, path, ctx) -> list[str]:
@@ -1426,11 +1544,22 @@ def _op_add_sheet(doc, op, idx, src_libs, path, ctx) -> list[str]:
     uuid, one sheet pin per ``pins`` entry at its computed edge coordinate, and
     the ``(instances (project ... (path "/<root>" (page N))))`` block KiCad needs
     to page the sub-sheet. The referenced child ``.kicad_sch`` is NOT created
-    here — author it separately (e.g. ``akcli new``). Wires attach to a sheet pin
+    here — author it FIRST (``akcli new <file>``): a sheet pointing at a file
+    that does not exist is refused with ``SHEET_FILE_MISSING``, because it used
+    to "succeed" and then brick every later ``nets``/``check``/``render`` on the
+    design (none of them can read the missing child).
+    Wires attach to a sheet pin
     by its coordinate: ``at`` + ``offset_mil`` along the pin's side, grid-snapped
     (the connectivity gate already treats sheet pins as label anchors, so a wire
     ending there does not dangle).
     """
+    file_name = str(op["file"])
+    doc_path = (ctx or {}).get("doc_path")
+    if doc_path is not None and not (Path(doc_path).parent / file_name).exists():
+        fail("SHEET_FILE_MISSING",
+             f"add_sheet {str(op['name'])!r}: child file {file_name!r} does not "
+             f"exist next to {Path(doc_path).name} — create it first "
+             f"(`akcli new {file_name}`), then re-run this op-list")
     origin = geometry.grid_snap_nm(
         (geometry.mil_to_nm(float(op["at"][0])), geometry.mil_to_nm(float(op["at"][1]))),
         _GRID_NM,
@@ -1439,7 +1568,12 @@ def _op_add_sheet(doc, op, idx, src_libs, path, ctx) -> list[str]:
             geometry.mil_to_nm(float(op["size"][1])))
     root = instances.root_uuid(doc)
     name = str(op["name"])
-    sheet_uuid = instances.deterministic_uuid(root, f"sheet:{name}", idx)
+    # Seeded by child FILE + sheet name, never the op index: two sheets naming
+    # the same child stay one node, two same-named sheets on different files
+    # stay distinct, and an op-list edit replays onto the SAME sub-sheet node.
+    sheet_uuid = instances.deterministic_uuid(root, f"sheet:{file_name}:{name}", 0)
+    _claim_uid(ctx, sheet_uuid, idx, f"sheet {name!r} -> {file_name!r}",
+               "two sheets cannot share both a name and a child file; rename one")
 
     x0, y0 = origin
     w, h = size
@@ -1465,7 +1599,8 @@ def _op_add_sheet(doc, op, idx, src_libs, path, ctx) -> list[str]:
         pos = geometry.grid_snap_nm(
             _sheet_pin_pos(origin, size, side, off_nm), _GRID_NM)
         pname = str(pin["name"])
-        puid = instances.deterministic_uuid(root, f"sheet:{name}.pin.{pname}", idx)
+        puid = instances.deterministic_uuid(
+            root, f"sheet:{file_name}:{name}.pin.{pname}", 0)
         children.append(_list(
             _atom("pin"), _atom(_q(pname)), _atom(str(pin["type"])),
             _at(pos, _SHEET_PIN_ANGLE.get(side, 0)),
@@ -1985,7 +2120,7 @@ def apply(
     # --- apply ops --------------------------------------------------------- #
     results: list[OpResult] = []
     any_error = False
-    ctx = _ctx_new()
+    ctx = _ctx_new(p)
     for idx, op in enumerate(oplist.get("ops", [])):
         name = op.get("op")
         handler = _HANDLERS.get(name)
@@ -2022,7 +2157,8 @@ def apply(
         connectivity.auto_junctions(doc, tol_nm=tol_nm)
     text_out = sexpr.dumps(doc)
     redoc = sexpr.parse(text_out)
-    findings = [] if any_error else connectivity.verify(redoc, tol_nm=tol_nm)
+    findings = ([] if any_error
+                else connectivity.verify(redoc, tol_nm=tol_nm, path=p))
     if verify_out is not None:
         verify_out.clear()
         verify_out.extend(findings)
@@ -2096,7 +2232,9 @@ def _atomic_write(
         # re-parse + verify the TEMP file itself (SPEC §3.5)
         verify_doc = sexpr.parse(Path(tmp).read_text(encoding="utf-8"))
         bad = [
-            f for f in connectivity.verify(verify_doc)
+            # the temp lives in the target's own directory, so relative sheet
+            # files resolve exactly as they will after the replace
+            f for f in connectivity.verify(verify_doc, path=tmp)
             if f.severity in (Severity.ERROR, Severity.CRITICAL)
         ]
         if bad:

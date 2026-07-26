@@ -14,7 +14,7 @@ read-only on-ramp into the KiCad flow, not a symmetric conversion peer. That rep
 release-critical now live in a demand-driven optional track, and the experimental Windows live
 bridge was **deleted outright** (0.17).
 
-## Where we are (v0.16.0)
+## Where we are (v0.18.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 
@@ -29,7 +29,11 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   `relink-symbols` refreshes stale embedded libraries behind a net-equivalence gate (and, like
   `library repair`, refuses to write under an open KiCad GUI). Ops apply to a **child sheet of an
   existing hierarchy**, not just to a root file, and symbol resolution falls back to the project and
-  per-user global `sym-lib-table` when neither `--symbols` nor the config provides a nickname (0.17).
+  per-user global `sym-lib-table` when neither `--symbols` nor the config provides a nickname (0.17);
+  the `${KICAD*_SYMBOL_DIR}` variables those bundled tables are written against are compiled into
+  KiCad rather than exported, so akcli derives them from the located `kicad-cli` — standard
+  nicknames resolve **on a stock KiCad install**, an environment value still wins, and `doctor`'s
+  `symbols` probe reports whether the resolution works on this machine (0.18).
   **Modular authoring (v0.10)**: functional-group envelope with group-local coordinates and a
   persisted `Group` property, `akcli groups`/`--frame` self-refreshing module borders,
   bare `arrange --groups --frames`, relative placement (`anchor`+`offset_mil`), `place_array`,
@@ -116,12 +120,14 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   under `--json`, an `INTERNAL` last-resort handler keeps the envelope contract even for an
   unexpected exception, a corrupt numeric field parses into `KICAD_SEXPR_BAD_NUMBER` instead of a
   raw traceback, and pin-level `net --at`/`--same`/`--why` answer connectivity questions directly.
-- **Quality gates:** ~2 800 tests (parser fuzzing, round-trip netlist properties, live ngspice in
-  CI, Windows/macOS/Linux × Python 3.11–3.14), ruff + a 38-file mypy beachhead (parts/, calc/, the
-  typed core, and the net/parse spine), a **docs-conformance gate** (every documented command line
-  and count claim is executed/asserted in CI), an AST text-I/O portability gate over `src/akcli`,
-  wheel-install smoke, and tag-driven GitHub Releases that refuse to publish unless CI is green on
-  the tagged commit.
+- **Quality gates:** ~3 100 tests (parser fuzzing, round-trip netlist properties, live ngspice in
+  CI, Windows/macOS/Linux × Python 3.11–3.14), ruff over `src`/`tests`/`tools`/`hooks` + a 40-file
+  mypy beachhead (parts/, calc/, the typed core, the net/parse spine, and the renderer), a
+  **docs-conformance gate** (every documented command line and count claim is executed/asserted in
+  CI), an AST text-I/O portability gate over `src/akcli`, `tools/` and `hooks/`, wheel-install
+  smoke, and tag-driven GitHub Releases that refuse to publish unless CI is green on the tagged
+  commit — 0.18 made "CI never ran this commit" a distinct failure from "CI ran and failed" and
+  pinned the `windows-latest` matrix jobs by name, so a shrinking matrix fails the gate.
 
 Honest limitations:
 
@@ -145,8 +151,10 @@ Honest limitations:
 - **PDN impedance / anti-resonance is not built** — the EMC review is a pre-compliance risk
   analyzer (never a compliance verdict). Stdlib SVG rendering shipped in 0.9.0 as
   `akcli render` and draws faithful symbol artwork from the embedded `lib_symbols` on KiCad
-  sources (0.14.0); Altium sources and multi-unit parts fall back to synthesized bodies,
-  and `view live`'s canvas still renders through the optional `kicad-cli`.
+  sources (0.14.0; 0.18 made every optional node in a symbol body None-safe, so the standard
+  KiCad symbol library renders instead of crashing); Altium sources and multi-unit parts fall
+  back to synthesized bodies, and `view live`'s canvas still renders through the optional
+  `kicad-cli`.
 - **PyPI:** distributed as `akcli-kicad`; `pip install akcli-kicad`.
   GitHub Releases still attach the sdist + wheel on every tag.
 - **MCP server: deferred by decision** — agents drive the plain CLI today.
@@ -321,7 +329,10 @@ Goal: the public surface is stable enough to promise.
 - [ ] Contract freeze audit: `schema_version`/`protocol_version` review, deprecation policy
       documented; extend the docs-conformance gate to the frozen contracts (S). Started in 0.17:
       every op schema branch now rejects unknown keys (`additionalProperties: false`) and
-      `tools/sync_schemas.py --check` gates the packaged mirrors against `schemas/`
+      `tools/sync_schemas.py --check` gates the packaged mirrors against `schemas/`. 0.18 added
+      field-kind and enum-table assertions against `ops.schema.json` (only field *names* were
+      compared), two-way mirror pruning so an orphan in `src/akcli/schemas/` cannot hide, and a
+      gate asserting the shipped `pyproject` version has a non-empty CHANGELOG section
 - [x] First PyPI release (`pip install akcli-kicad`) — **shipped in 0.15.0**; dist name is `akcli-kicad`; PyPI publishing opted in 2026-07-22 via the
       `publish-pypi` job in `release.yml`, gated on the **repository** variable
       `PYPI_TRUSTED_PUBLISHING` (must be repo-scoped, not environment-scoped — a job-level `if:`

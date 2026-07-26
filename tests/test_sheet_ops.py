@@ -51,6 +51,12 @@ def _seed(d: Path, name: str = "root.kicad_sch") -> Path:
 
 
 def _apply(tgt: Path, lib: Path, *op, apply: bool = True):
+    # add_sheet refuses a child file that does not exist yet (a dangling sheet
+    # bricks every later nets/check/render on the design), so stub each child
+    # first; the tests that exercise the reader overwrite it with real content.
+    for o in op:
+        if o.get("op") == "add_sheet" and not (tgt.parent / str(o["file"])).exists():
+            _seed(tgt.parent, str(o["file"]))
     verify_out: list = []
     res = kw.apply(_oplist(*op), str(tgt), apply=apply,
                    sources=[str(lib)], verify_out=verify_out)
@@ -99,6 +105,33 @@ def test_add_sheet_emits_sheet_node(tmp_path):
     assert sh.find("instances") is not None
     # box geometry: origin at (2000,1000) mil = (50.8, 25.4) mm
     assert _at_mm(sh) == (50.8, 25.4)
+
+
+def test_add_sheet_refuses_a_missing_child_file(tmp_path):
+    """A sheet pointing at a file that does not exist is a self-inflicted brick:
+    the op used to succeed and every later nets/check/render on the design then
+    failed (exit 4) because the child cannot be read."""
+    lib = tmp_path / "lib.kicad_sym"
+    lib.write_text(_LIB)
+    tgt = _seed(tmp_path)
+    before = tgt.read_bytes()
+    res = kw.apply(
+        _oplist({"op": "add_sheet", "name": "ghost", "file": "ghost.kicad_sch",
+                 "at": [2000, 1000], "size": [1000, 800]}),
+        str(tgt), apply=True, sources=[str(lib)])
+    assert [r.status for r in res] == ["error"]
+    assert res[0].error_code == "SHEET_FILE_MISSING"
+    assert "akcli new ghost.kicad_sch" in (res[0].remediation or "") \
+        or "akcli new" in res[0].message
+    assert tgt.read_bytes() == before                  # nothing written
+
+    # authoring the child first makes the SAME op succeed
+    _seed(tmp_path, "ghost.kicad_sch")
+    res = kw.apply(
+        _oplist({"op": "add_sheet", "name": "ghost", "file": "ghost.kicad_sch",
+                 "at": [2000, 1000], "size": [1000, 800]}),
+        str(tgt), apply=True, sources=[str(lib)])
+    assert [r.status for r in res] == ["ok"]
 
 
 def test_sheet_instances_path_references_root_uuid(tmp_path):

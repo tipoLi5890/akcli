@@ -247,6 +247,98 @@ MACRO_OPTIONAL: dict[str, dict] = {
 }
 
 
+# --------------------------------------------------------------------------- #
+# Macro designator ROLES (BOM-corruption guard)
+#
+# Every macro assigns its designators POSITIONALLY: place_led_indicator's
+# ``designators`` is [R, D] — pass ["D1", "R3"] (the intuitive reading order)
+# and the file gets a ``Device:R`` named D1 and a ``Device:LED`` named R3. The
+# schematic is electrically identical, every akcli check stays silent, and the
+# BOM/pick-and-place is quietly wrong. So each slot declares the part class it
+# becomes and the refdes prefixes that class conventionally uses (IEEE 315 /
+# KiCad defaults). Slots whose part is caller-chosen (terminate_unused_unit's
+# op-amp, place_array's arbitrary lib_id) are role-NEUTRAL and unconstrained.
+# --------------------------------------------------------------------------- #
+_ROLE_PREFIXES: dict[str, frozenset[str]] = {
+    "resistor": frozenset({"R"}),
+    "capacitor": frozenset({"C"}),
+    "LED": frozenset({"D", "LED"}),
+    "crystal": frozenset({"X", "Y"}),
+}
+# macro -> (field name, [role per slot]). A scalar ``designator`` field is a
+# one-slot list. Only macros whose expansion PICKS the part appear here.
+_MACRO_DESIGNATOR_ROLES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "place_divider": ("designators", ("resistor", "resistor")),
+    "place_decoupling": ("designator", ("capacitor",)),
+    "place_pullup": ("designator", ("resistor",)),
+    "place_led_indicator": ("designators", ("resistor", "LED")),
+    "place_rc_filter": ("designators", ("resistor", "capacitor")),
+    "place_crystal": ("designators", ("crystal", "capacitor", "capacitor")),
+}
+
+_ALPHA_PREFIX_RE = re.compile(r"^[A-Za-z]+")
+
+
+def _refdes_prefix(text: str) -> str:
+    """Leading alphabetic run of a refdes/symbol name, upper-cased (``R3`` -> ``R``)."""
+    m = _ALPHA_PREFIX_RE.match(text)
+    return m.group(0).upper() if m else ""
+
+
+def _macro_role_slots(name: str, op: dict) -> tuple[str, tuple[str, ...]] | None:
+    """``(field, roles)`` for a macro's designator slots, or ``None`` if unknown.
+
+    ``place_divider``/``place_decoupling``/``place_pullup`` expose ``lib_id``:
+    an override that is still the same part class (``Device:R_Small``) keeps
+    the check, an override to a different class hands the role question back
+    to the caller and disables it.
+    """
+    entry = _MACRO_DESIGNATOR_ROLES.get(name)
+    if entry is None:
+        return None
+    field, roles = entry
+    lib = op.get("lib_id")
+    if isinstance(lib, str) and lib:
+        part = lib.split(":")[-1]
+        if _refdes_prefix(part) not in _ROLE_PREFIXES[roles[0]]:
+            return None
+    return field, roles
+
+
+def _check_macro_designator_roles(idx: int, name: str, op: dict,
+                                  out: list[OpError]) -> None:
+    """Reject a designator whose prefix contradicts its positional slot's part."""
+    entry = _macro_role_slots(name, op)
+    if entry is None:
+        return
+    field, roles = entry
+    raw = op.get(field)
+    if raw is None:
+        return
+    values = [raw] if field == "designator" else raw
+    if not isinstance(values, list):
+        return                      # shape errors belong to the expander
+    # the slot order the user should see is the template's own default
+    # designators (["Y1", "C1", "C2"] -> "Y, C, C") — one canonical spelling
+    default = MACRO_OPTIONAL.get(name, {}).get(field)
+    defaults = [default] if field == "designator" else default
+    order = ", ".join(_refdes_prefix(d) for d in defaults
+                      if isinstance(d, str)) if isinstance(defaults, list) else ""
+    for slot, (value, role) in enumerate(zip(values, roles)):
+        if not isinstance(value, str) or not value:
+            continue
+        want = _ROLE_PREFIXES[role]
+        got = _refdes_prefix(value)
+        if got in want:
+            continue
+        where = field if field == "designator" else f"{field}[{slot}]"
+        out.append(OpError(
+            idx, name, "OP_UNSUPPORTED",
+            f"{name}.{where} {value!r}: slot {slot} is the {role} — expected a "
+            f"designator prefixed {'/'.join(sorted(want))}, got {got or value!r}"
+            f" (slot order is [{order}]; see `akcli ops template {name}`)"))
+
+
 def _macro_fail(idx: int, name: str, msg: str) -> None:
     raise AkcliError("OP_UNSUPPORTED", f"[{idx}] {name}: {msg}")
 
@@ -631,6 +723,59 @@ _ANNOTATION_KEY_TAGS: dict[str, str] = {
 }
 
 
+# Ops that drop a power symbol on a point/anchor. Two of them at the SAME spot
+# is never intent: the bodies overlap pixel-for-pixel in eeschema (nothing to
+# see, nothing to click apart) and the writer seeds both node uuids from the
+# same coordinate, so which rail survives a re-apply is an implementation
+# detail. Caught here, before any of that reaches the file.
+_POWER_PORT_OPS: frozenset[str] = frozenset(
+    {"place_power_port", "place_gnd", "place_vcc"})
+
+
+def _anchor_key(at: object) -> object | None:
+    """A hashable identity for an ``at`` anchor: point tuple, or the ref string."""
+    if isinstance(at, str) and at:
+        return at
+    if _is_point(at):
+        return ("pt", float(at[0]), float(at[1]))
+    return None
+
+
+def _is_pwr_flag_op(op: dict) -> bool:
+    """``PWR_FLAG`` names no net, so it is a different species from a rail port.
+
+    Mirrors ``writers.connectivity``'s carve-out (and netbuild's): a flag
+    sharing a port's coordinate is the *prescribed* pattern — ``place_pwr_flag``
+    expands to a ``place_power_port`` on ``power:PWR_FLAG``, so without this the
+    stacking lint would refuse the very authoring shape the docs teach.
+    """
+    lib_id = str(op.get("lib_id") or "")
+    return (lib_id.split(":")[-1].upper() == "PWR_FLAG"
+            or str(op.get("net_name") or "").upper() == "PWR_FLAG")
+
+
+def _duplicate_power_ports(ops_list: list) -> list[tuple[int, str, object, int]]:
+    """``(op_index, op_name, anchor, first_index)`` per power port stacked on another.
+
+    Keyed on ``(anchor, species)``: two rail ports on one point overlap and only
+    one survives, and so do two flags — but a port and a flag together do not.
+    """
+    seen: dict[object, int] = {}
+    dups: list[tuple[int, str, object, int]] = []
+    for i, op in enumerate(ops_list):
+        if not isinstance(op, dict) or not _in(op.get("op"), _POWER_PORT_OPS):
+            continue
+        anchor = _anchor_key(op.get("at"))
+        if anchor is None:
+            continue
+        key = (anchor, _is_pwr_flag_op(op))
+        if key in seen:
+            dups.append((i, str(op.get("op")), op.get("at"), seen[key]))
+        else:
+            seen[key] = i
+    return dups
+
+
 def _duplicate_placements(ops_list: list) -> list[tuple[int, str, object, int]]:
     """``(op_index, designator, unit, first_index)`` per repeated placement.
 
@@ -657,7 +802,7 @@ def _duplicate_placements(ops_list: list) -> list[tuple[int, str, object, int]]:
     return dups
 
 
-def expand_macros(doc: dict) -> dict:
+def expand_macros(doc: dict, *, origins: list[int] | None = None) -> dict:
     """Expand macro ops into core ops; non-macro ops pass through untouched.
 
     Returns a new document (the input is never mutated). Bad macro arguments
@@ -665,12 +810,19 @@ def expand_macros(doc: dict) -> dict:
     validator's contract. The expanded ops are also linted for duplicate
     ``(designator, unit)`` placements — two macros left on their default
     designators would silently place two ``R1``s.
+
+    ``origins``, when a list is passed, is filled with the AUTHOR'S op index
+    for every emitted op (one entry per output op). :func:`prepare_oplist`
+    uses it to report post-expansion errors against the op the user wrote.
     """
     ops = doc.get("ops")
     if not isinstance(ops, list) or not any(
             isinstance(o, dict) and _in(o.get("op"), MACRO_OPS) for o in ops):
+        if origins is not None and isinstance(ops, list):
+            origins[:] = list(range(len(ops)))
         return doc
     out: list = []
+    src: list[int] = []
     for idx, op in enumerate(ops):
         if isinstance(op, dict) and _in(op.get("op"), MACRO_OPS):
             for f in MACRO_REQUIRED[op["op"]]:
@@ -684,8 +836,12 @@ def expand_macros(doc: dict) -> dict:
                 for child in expanded:
                     child.setdefault("group", op["group"])
             out.extend(expanded)
+            src.extend([idx] * len(expanded))
         else:
             out.append(op)
+            src.append(idx)
+    if origins is not None:
+        origins[:] = src
     for i, d, u, first in _duplicate_placements(out):
         raise AkcliError(
             "OP_UNSUPPORTED",
@@ -1118,6 +1274,7 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
             if field in ("op", "group") or field in known or field.startswith("_"):
                 continue
             _unknown_field(idx, name, field, known, out)
+        _check_macro_designator_roles(idx, str(name), op, out)
         return out
     if not _in(name, OP_NAMES):
         hint = difflib.get_close_matches(
@@ -1271,6 +1428,17 @@ def validate_oplist(doc: dict) -> list[OpError]:
                             f"duplicate placement of designator {d!r} unit {u} "
                             f"(first placed at op [{first}])"))
 
+    # document-level lint: two power ports dropped on the same anchor. Their
+    # symbol bodies coincide and the writer derives both node uuids from that
+    # one coordinate, so the second silently owns the spot — always an authoring
+    # slip (a rail needs its own anchor), never a valid intent.
+    for i, opname, at, first in _duplicate_power_ports(ops):
+        errs.append(OpError(i, opname, "POWER_PORT_STACKED",
+                            f"duplicate power port at {at!r} (first placed at "
+                            f"op [{first}]) — two power symbols stacked on one "
+                            "anchor overlap and only one survives; give each "
+                            "its own point/pin"))
+
     # document-level lint: two annotation ops sharing a stable key — the
     # writer derives the node uuid from (tag, key) alone, so the second op
     # would silently REPLACE the first's node while both report ok.
@@ -1292,13 +1460,56 @@ def validate_oplist(doc: dict) -> list[OpError]:
     return errs
 
 
+def prepare_oplist(doc: dict) -> tuple[dict, list[OpError]]:
+    """Validate, expand macros + resolve groups, validate again.
+
+    THE order matters. Expanding first (what plan/draw/``ops validate`` used to
+    do) means the macro branch of :func:`_validate_op` never sees a macro op —
+    macros leave the document before anything looks at their fields, so a typo
+    (``valu``) or a hallucinated field sailed straight through into a
+    silently-different circuit. Validating the AUTHOR'S ops first closes that;
+    the expansion is validated too, because a well-formed macro can still emit
+    core ops that clash with hand-written ones (duplicate designators, stacked
+    power ports).
+
+    Every returned :class:`OpError` carries the author's op index — errors
+    found on expanded ops are mapped back through the expansion trace, so
+    ``[3]`` always means "the fourth op in YOUR file".
+
+    Returns ``(expanded_doc, errors)``. Bad macro arguments / bad group
+    references still raise :class:`AkcliError` from the expansion step, exactly
+    as before.
+    """
+    errs = validate_oplist(doc)
+    if errs:
+        # a macro with a bogus field must not be expanded: the expander would
+        # ignore the field and manufacture a plausible-looking circuit.
+        return doc, errs
+    origins: list[int] = []
+    expanded = resolve_groups(expand_macros(doc, origins=origins))
+    mapped: list[OpError] = []
+    for e in validate_oplist(expanded):
+        if 0 <= e.op_index < len(origins):
+            mapped.append(OpError(origins[e.op_index], e.op, e.code, e.message))
+        else:
+            mapped.append(e)
+    return expanded, mapped
+
+
 def load_oplist(path: str | Path) -> dict:
     """Load and JSON-parse an op-list file. Malformed JSON -> ``OP_UNSUPPORTED``."""
     p = Path(path)
     try:
-        text = p.read_text(encoding="utf-8")
+        text = p.read_bytes().decode("utf-8")
     except FileNotFoundError:
         raise
+    except OSError as exc:  # a directory, mode 000, ... -> exit 4, not INTERNAL
+        raise AkcliError("FILE_UNREADABLE", f"{p}: {exc.strerror or exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise AkcliError(
+            "OP_UNSUPPORTED",
+            f"op-list {p} is not UTF-8 text (byte at offset {exc.start}); "
+            "an op-list is a JSON document") from exc
     try:
         doc = json.loads(text)
     except json.JSONDecodeError as exc:

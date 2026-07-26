@@ -187,10 +187,20 @@ def main(argv: list[str] | None = None) -> int:
 
     handler = getattr(args, "handler", None)
     if not getattr(args, "command", None) or handler is None:
+        # ``akcli`` / ``akcli --json`` with no subcommand: argparse never
+        # errors here (the subcommand is optional), so this was the ONE
+        # non-zero exit that bypassed _emit_json_error and left stdout empty.
+        if getattr(args, "json", False):
+            _emit_json_error(
+                "USAGE",
+                "no command given; `akcli capabilities --json` lists every "
+                "command and flag",
+                EXIT["USAGE"])
         parser.print_help(sys.stderr)
         return EXIT["USAGE"]
 
     try:
+        _validate_config_override(getattr(args, "config", None))
         return handler(args)
     except _ExitWith as exc:
         if getattr(args, "json", False) and exc.code != EXIT["OK"]:
@@ -213,20 +223,50 @@ def main(argv: list[str] | None = None) -> int:
             _emit_json_error(exc.code, exc.message, to_exit(exc))
         sys.stderr.write(as_error(exc) + "\n")
         return to_exit(exc)
+    except BrokenPipeError:
+        # NOTE: must precede the OSError arm below — BrokenPipeError IS an
+        # OSError, and a closed downstream pipe (``| head``) is a success.
+        return EXIT["OK"]
     except FileNotFoundError as exc:
         if getattr(args, "debug", False):
             raise
         if getattr(args, "json", False):
             _emit_json_error("FILE_NOT_FOUND", str(exc.filename or exc),
-                             EXIT["NOT_FOUND"])
+                             to_exit(exc))
         sys.stderr.write(f"ERROR: file not found: {exc.filename or exc}\n")
-        return EXIT["NOT_FOUND"]
-    except BrokenPipeError:
-        return EXIT["OK"]
+        return to_exit(exc)
+    except OSError as exc:
+        # The rest of the OSError family a bad input path produces:
+        # IsADirectoryError (POSIX "you passed a directory"), PermissionError
+        # (mode 000; also how Windows reports a directory read),
+        # NotADirectoryError, and plain IO errors. These are NOT bugs, so they
+        # must never surface as INTERNAL + a traceback — they classify as
+        # "that path is not a usable file" (exit 4), same as a missing file.
+        if getattr(args, "debug", False):
+            raise
+        where = getattr(exc, "filename", None)
+        message = f"{where}: {exc.strerror or exc}" if where else str(exc)
+        if getattr(args, "json", False):
+            _emit_json_error("FILE_UNREADABLE", message, to_exit(exc))
+        sys.stderr.write(f"ERROR: FILE_UNREADABLE: {message}\n")
+        return to_exit(exc)
+    except UnicodeDecodeError as exc:
+        # Undecodable bytes reached a text consumer no reader guard covers.
+        # That is a corrupt/wrong-format INPUT (exit 3), not an akcli bug.
+        if getattr(args, "debug", False):
+            raise
+        message = (f"input is not valid {exc.encoding.upper()} text "
+                   f"(byte 0x{exc.object[exc.start]:02x} at offset {exc.start})")
+        if getattr(args, "json", False):
+            _emit_json_error("PARSE", message, to_exit(exc))
+        sys.stderr.write(f"ERROR: PARSE: {message}\n")
+        return to_exit(exc)
     except Exception as exc:  # noqa: BLE001 — last-resort envelope guard
         # An unexpected exception (a bug, or input mangled in a way no reader
         # guard anticipated) must still honour the CLI contract: stdout parses
         # as JSON under --json, stderr carries the traceback for the report.
+        # Everything classifiable was classified above; INTERNAL now means
+        # exactly "unknown", which is what its remediation promises.
         if getattr(args, "debug", False):
             raise
         import traceback
@@ -239,6 +279,21 @@ def main(argv: list[str] | None = None) -> int:
             f"ERROR: INTERNAL: unexpected {type(exc).__name__}: {exc} "
             "(re-run with --debug to raise; please report this)\n")
         return EXIT["PARSE"]
+
+
+def _validate_config_override(path: str | None) -> None:
+    """Reject a bad ``-C/--config`` for EVERY command, before the handler runs.
+
+    Checked here rather than in ``commands._shared._load_cfg`` because only
+    some commands consult the config at all — ``read`` never does — and ``-C``
+    must not be enforced by some subcommands and ignored by others. The rule
+    itself lives in :func:`config.load_explicit_config`.
+    """
+    if not path:
+        return
+    from . import config as _config
+
+    _config.load_explicit_config(path)
 
 
 def _exit_name(code: int) -> str:

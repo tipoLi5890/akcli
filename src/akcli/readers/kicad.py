@@ -478,9 +478,18 @@ def _walk_sheets(
     inst_path: str,
     ancestors: tuple[str, ...],
     warnings: list[str],
+    sheet_paths: dict[str, str],
+    name_path: str,
 ) -> None:
-    """Recursively read ``(sheet ...)`` children (cycle- and depth-guarded)."""
+    """Recursively read ``(sheet ...)`` children (cycle- and depth-guarded).
+
+    ``name_path`` is the human-readable path of the sheet being read (``"/"`` at
+    the root, ``"/Amp/"`` one level down); ``sheet_paths`` accumulates
+    ``instance-uuid-path -> name_path`` so netbuild can qualify sheet-scoped net
+    names exactly as eeschema's netlist does.
+    """
     geom_sheet = inst_path  # "" for the root file
+    sheet_paths[geom_sheet] = name_path
     _build_file(root, components, by_designator, prims, geom_sheet,
                 want_path=f"/{root_uuid}{inst_path}" if root_uuid else None,
                 warnings=warnings)
@@ -523,7 +532,8 @@ def _walk_sheets(
         child_root = _parse_root(child_path, "kicad_sch")
         _walk_sheets(child_root, str(child_path), root_uuid, components,
                      by_designator, prims, sheet_names, child_inst,
-                     ancestors + (str(child_path),), warnings)
+                     ancestors + (str(child_path),), warnings,
+                     sheet_paths, f"{name_path}{sname}/")
 
 
 def read_sch(path: os.PathLike | str) -> Schematic:
@@ -542,13 +552,15 @@ def read_sch(path: os.PathLike | str) -> Schematic:
     prims = NetPrimitives()
     sheet_names: list[str] = []
     warnings: list[str] = []
+    sheet_paths: dict[str, str] = {}
     _walk_sheets(root, os.fspath(path), root_uuid, components, {}, prims,
                  sheet_names, inst_path="",
                  ancestors=(str(Path(os.fspath(path)).resolve()),),
-                 warnings=warnings)
+                 warnings=warnings, sheet_paths=sheet_paths, name_path="/")
     # eeschema dialect: a wire end on another wire's mid-span joins only
     # through an explicit junction node (kicad-cli-verified; see netbuild).
-    nets = netbuild.build_nets(prims, t_midspan_connects=False)
+    nets = netbuild.build_nets(prims, t_midspan_connects=False,
+                               sheet_paths=sheet_paths)
     return Schematic(
         source_path=str(path),
         source_format="kicad",

@@ -11,8 +11,14 @@ This module turns those records into the normalized, format-agnostic model:
   Location is the body/inner end; the wire connects at the far tip);
 * **RECORD 34** -> component designator (synthesize ``$U<idx>`` when missing -- a
   component is NEVER dropped, so verify-by-re-export keeps ground truth);
-* **RECORD 41** -> parameters (and ``value`` / ``Comment``);
-* **RECORD 45 / 46** -> footprint (model name);
+* **RECORD 41** -> component parameters (and ``value`` / ``Comment``, where a
+  ``=<ParamName>`` Comment is an *indirection* to that component's own
+  parameter, not a literal string); an **ownerless** RECORD 41 is a *document*
+  parameter (Title / Revision / DocumentNumber / Date …) and lands in
+  :attr:`model.Schematic.title_block`;
+* **RECORD 45 / 46** -> footprint: only ``ModelType`` PCBLIB (or absent) is a
+  footprint link — a ``SIM`` / ``SI`` / ``PCB3DLib`` model is NOT — and an
+  ``IsCurrent=T`` model wins over record order;
 * **RECORD 27** wires, **29** junctions, **22** No-ERC, **25 / 17 / 18 / 16**
   net-labels / power-ports / ports / sheet-entries -> :class:`model.NetPrimitives`
   -> :func:`netbuild.build_nets`.
@@ -52,6 +58,7 @@ from .altium_records import (
     RECORD_IMPL_48,
     RECORD_IMPL_FOOTPRINT,
     RECORD_IMPL_MODEL,
+    RECORD_IMPL_PIN_ASSOC,
     RECORD_JUNCTION,
     RECORD_NET_LABEL,
     RECORD_NO_ERC,
@@ -84,6 +91,11 @@ _LABEL_SCOPE = {
 
 _TRUE = {"T", "TRUE", "1"}
 
+# ``ModelType`` values that denote a PCB FOOTPRINT link. ``""`` covers legacy /
+# converter-written records that omit the field. Deliberately an ALLOW-list:
+# SIM / SI / PCB3DLIB (and any future kind) must never reach the footprint field.
+_FOOTPRINT_MODEL_TYPES = {"", "PCBLIB"}
+
 # Every RECORD id this module actually consumes (directly, or structurally via an
 # OwnerIndex chain: 44/48 are the implementation links walked by `_footprints`).
 # Anything else is DROPPED — and must be counted, not silently vanish: buses
@@ -92,23 +104,48 @@ _HANDLED_RECORDS = frozenset({
     RECORD_COMPONENT, RECORD_PIN, RECORD_SHEET_SYMBOL, RECORD_SHEET_ENTRY,
     RECORD_POWER_PORT, RECORD_PORT, RECORD_NO_ERC, RECORD_NET_LABEL,
     RECORD_WIRE, RECORD_JUNCTION, 32, 33, RECORD_DESIGNATOR, RECORD_PARAMETER,
-    RECORD_IMPL_44, RECORD_IMPL_MODEL, RECORD_IMPL_FOOTPRINT, RECORD_IMPL_48,
+    RECORD_IMPL_44, RECORD_IMPL_MODEL, RECORD_IMPL_FOOTPRINT,
+    RECORD_IMPL_PIN_ASSOC, RECORD_IMPL_48,
 })
 
 # Distinct ids named in one warning before it collapses into "+N more id(s)".
 _HISTOGRAM_LIMIT = 12
 
 
+def _parameter_is_dropped(rec: dict, rids: list[int | None]) -> bool:
+    """True when this RECORD-41 lands nowhere in the model.
+
+    A parameter is *consumed* when it is document-level (no/negative owner ->
+    the title block, see :func:`_document_parameters`) or owned by a RECORD-1
+    component (-> ``Component.parameters``). Anything else — the classic case
+    is a parameter hanging off a RECORD-43 parameter set / blanket directive —
+    is dropped, and has to show up in the skipped histogram: 41 being in
+    :data:`_HANDLED_RECORDS` used to make the whole instance invisible, so the
+    warning under-reported the real loss.
+    """
+    oi = gi(rec, "OwnerIndex")
+    if oi is None or oi < 0:
+        return False        # document-level: kept as title-block metadata
+    if not (0 <= oi < len(rids)):
+        return True         # dangling owner: nothing can consume it
+    return rids[oi] != RECORD_COMPONENT
+
+
 def _skipped_records(recs: list[dict]) -> Counter[int]:
     """Histogram of RECORD ids present in ``recs`` that this reader drops.
 
     Records with no ``RECORD`` id (the NUL padding tail of a stream) are not
-    counted — they carry nothing.
+    counted — they carry nothing. A *handled* id can still contribute when a
+    specific instance is dropped (see :func:`_parameter_is_dropped`).
     """
     hist: Counter[int] = Counter()
-    for r in recs:
-        rid = _rid(r)
-        if rid is not None and rid not in _HANDLED_RECORDS:
+    rids = [_rid(r) for r in recs]
+    for rid, r in zip(rids, recs):
+        if rid is None:
+            continue
+        if rid not in _HANDLED_RECORDS:
+            hist[rid] += 1
+        elif rid == RECORD_PARAMETER and _parameter_is_dropped(r, rids):
             hist[rid] += 1
     return hist
 
@@ -163,8 +200,27 @@ def _designators(recs: list[dict]) -> dict[int, str]:
     return out
 
 
+def _is_footprint_model(rec: dict) -> bool:
+    """True when a RECORD-45/46 model link names a PCB **footprint**.
+
+    A component links several kinds of model, all through the same record: a
+    ``PCBLIB`` footprint, a ``SIM`` SPICE model, an ``SI`` signal-integrity
+    model, a ``PCB3DLib`` 3D body. Taking the first one in record order put a
+    *SPICE model name* into ``Component.footprint`` whenever the sim model was
+    written first — and because the field was non-empty, ``BOM_MISSING_FOOTPRINT``
+    stayed quiet and the wrong string flowed into the BOM/PCB. Worse than
+    reading nothing.
+
+    A missing/empty ``ModelType`` counts as a footprint (legacy exports and
+    converter output omit it, and the field's only historical use was the
+    footprint link); every other value is excluded, so an unknown future model
+    kind fails *closed*.
+    """
+    return (rec.get("ModelType", "") or "").strip().upper() in _FOOTPRINT_MODEL_TYPES
+
+
 def _footprints(recs: list[dict]) -> dict[int, str]:
-    """Map a component's record index -> its first model/footprint name.
+    """Map a component's record index -> its **current footprint** model name.
 
     The model link is a chain, not a direct child of the component: the model record
     (RECORD-45/46, carrying ``ModelName``) is owned by a RECORD-44 *Implementation*,
@@ -172,6 +228,15 @@ def _footprints(recs: list[dict]) -> dict[int, str]:
     resolved back to the **component** index by walking the ``OwnerIndex`` chain up to
     the first component — keying directly on the model's owner would land on the
     RECORD-44 and never match a component (the bug that hid every model-link footprint).
+
+    Selection among a component's models (Altium allows many):
+
+    1. non-footprint model types are excluded outright (:func:`_is_footprint_model`);
+    2. a footprint model marked ``IsCurrent=T`` wins — that is the one Altium
+       actually pushes to the PCB, and it is frequently *not* the first;
+    3. otherwise the first footprint model in record order;
+    4. no footprint model at all -> the component keeps an empty footprint, so
+       ``BOM_MISSING_FOOTPRINT`` fires instead of being masked by a SPICE name.
     """
     components = {i for i, r in enumerate(recs) if _rid(r) == RECORD_COMPONENT}
     n = len(recs)
@@ -191,16 +256,22 @@ def _footprints(recs: list[dict]) -> dict[int, str]:
             cur = oi
         return None
 
-    out: dict[int, str] = {}
+    # component index -> (rank, name); rank 0 = IsCurrent, 1 = plain footprint.
+    picked: dict[int, tuple[int, str]] = {}
     for i, r in enumerate(recs):
-        if _rid(r) in (RECORD_IMPL_MODEL, RECORD_IMPL_FOOTPRINT):
-            name = r.get("ModelName") or r.get("Name")
-            if not name:
-                continue
-            comp_idx = owning_component(i)
-            if comp_idx is not None and comp_idx not in out:
-                out[comp_idx] = name
-    return out
+        if _rid(r) not in (RECORD_IMPL_MODEL, RECORD_IMPL_FOOTPRINT):
+            continue
+        name = r.get("ModelName") or r.get("Name")
+        if not name or not _is_footprint_model(r):
+            continue
+        comp_idx = owning_component(i)
+        if comp_idx is None:
+            continue
+        rank = 0 if (r.get("IsCurrent", "") or "").upper() in _TRUE else 1
+        prev = picked.get(comp_idx)
+        if prev is None or rank < prev[0]:   # strict: ties keep record order
+            picked[comp_idx] = (rank, name)
+    return {idx: name for idx, (_rank, name) in picked.items()}
 
 
 def _parameters(recs: list[dict]) -> dict[int, dict[str, str]]:
@@ -216,6 +287,72 @@ def _parameters(recs: list[dict]) -> dict[int, dict[str, str]]:
     return out
 
 
+def _document_parameters(recs: list[dict]) -> dict[str, str]:
+    """Document-level RECORD-41 parameters (no owner) -> ``{Name: Text}``.
+
+    These are Altium's *document parameters* — ``Title``, ``Revision``,
+    ``DocumentNumber``, ``Date``, ``Organization``, ``SheetNumber``… — which
+    populate the sheet's title block. They are owned by nothing, so the
+    component-parameter mapping (which requires an ``OwnerIndex``) dropped
+    them: the whole title block evaporated without even a histogram entry.
+    Order-preserving (``dict`` insertion order = record order) so the export
+    stays byte-stable.
+    """
+    out: dict[str, str] = {}
+    for r in recs:
+        if _rid(r) != RECORD_PARAMETER:
+            continue
+        oi = gi(r, "OwnerIndex")
+        if oi is not None and oi >= 0:
+            continue
+        name = r.get("Name")
+        if name:
+            out[name] = r.get("Text", "")
+    return out
+
+
+# Distinct components named in the unresolved-Comment warning before it collapses.
+_COMMENT_REF_LIMIT = 12
+
+
+def _resolve_comment(comment: str | None,
+                     params: dict[str, str]) -> tuple[str | None, str | None]:
+    """Resolve Altium's indirect ``Comment="=<ParamName>"`` reference.
+
+    ``=Value`` on a component does not mean the literal text ``"=Value"``: it is
+    an indirection to that component's own ``Value`` parameter (Altium's
+    ``=<ParamName>`` special string syntax, resolved case-insensitively).
+    Importing it literally overwrote the real value with a formula, and the
+    corruption looked like data.
+
+    Returns ``(value, unresolved_ref)`` — ``unresolved_ref`` is non-``None``
+    only when the reference names a parameter the component does not have, in
+    which case the literal string is preserved and the caller warns.
+    """
+    if not comment or not comment.startswith("="):
+        return comment, None
+    ref = comment[1:].strip()
+    if not ref:
+        return comment, None            # a bare "=" is not a reference
+    lowered = {k.lower(): v for k, v in params.items()}
+    hit = lowered.get(ref.lower())
+    if hit is None:
+        return comment, ref
+    return hit, None
+
+
+def _comment_ref_warning(refs: list[tuple[str, str]]) -> str | None:
+    """One collapsed warning for every ``=<Param>`` Comment that did not resolve."""
+    if not refs:
+        return None
+    shown = refs[:_COMMENT_REF_LIMIT]
+    parts = [f"{des} {comment!r}" for des, comment in shown]
+    if len(refs) > len(shown):
+        parts.append(f"+{len(refs) - len(shown)} more")
+    return (f"altium: {len(refs)} unresolved Comment parameter reference(s) "
+            f"(imported literally): " + ", ".join(parts))
+
+
 def _pin_tip(d: dict) -> tuple[float, float]:
     """Canonical electrical-tip (mils) of a RECORD-2 pin = Location + PinLength*dir."""
     loc_x = coord(d, "Location.X")
@@ -228,8 +365,14 @@ def _pin_tip(d: dict) -> tuple[float, float]:
 
 def _build_components(
     recs: list[dict],
+    comment_refs: list[tuple[str, str]] | None = None,
 ) -> tuple[list[Component], dict[int, Component]]:
-    """Build the component list (with pins), keyed by record index."""
+    """Build the component list (with pins), keyed by record index.
+
+    ``comment_refs`` (when given) collects ``(designator, comment)`` pairs for
+    every ``=<ParamName>`` Comment that could not be resolved, so the caller can
+    surface one collapsed reader warning.
+    """
     desig = _designators(recs)
     fps = _footprints(recs)
     params = _parameters(recs)
@@ -245,6 +388,9 @@ def _build_components(
             name = f"$U{idx}"  # synthesize -- a component is NEVER dropped
         rot = (gi(r, "Orientation", 0) & 3) * 90
         mirror = "x" if (r.get("IsMirrored", "") or "").upper() in _TRUE else "none"
+        comment, unresolved = _resolve_comment(r.get("Comment"), params.get(idx, {}))
+        if unresolved is not None and comment is not None and comment_refs is not None:
+            comment_refs.append((name, comment))
         comp = Component(
             designator=name,
             library_ref=r.get("LibReference") or r.get("DesignItemId"),
@@ -252,7 +398,8 @@ def _build_components(
             y_mil=_canon(coord(r, "Location.X"), coord(r, "Location.Y"))[1],
             rotation=rot,
             mirror=mirror,
-            value=r.get("Comment") or (params.get(idx, {}).get("Value")),
+            # Comment may be an indirect "=<ParamName>" reference (resolved above).
+            value=comment or (params.get(idx, {}).get("Value")),
             # RECORD 45/46 model-link first; fall back to the RECORD-41 `Footprint` /
             # `Supplier Footprint` parameter (converter-generated parts leave the model-link
             # empty but write the footprint as a parameter).
@@ -479,9 +626,13 @@ def _read_hier(
     sheet_names: list[str] = []
     frac_present = False
     skipped: Counter[int] = Counter()
+    comment_refs: list[tuple[str, str]] = []
+    # `loaded[0]` is the root sheet (depth-first walk starts there); its document
+    # parameters are the design's title block. Child sheets carry their own.
+    title_block = _document_parameters(loaded[0][2]) if loaded else {}
     for ns, _p, recs, children in loaded:
         skipped += _skipped_records(recs)
-        comps, by_index = _build_components(recs)
+        comps, by_index = _build_components(recs, comment_refs)
         for c in comps:
             c.sheet = ns
         components.extend(comps)
@@ -502,7 +653,8 @@ def _read_hier(
                                                  scope="hier", sheet=ns))
 
     nets = netbuild.build_nets(prims)
-    warn = _skipped_warning(skipped)
+    warnings = [w for w in (_skipped_warning(skipped),
+                            _comment_ref_warning(comment_refs)) if w]
     return Schematic(
         source_path=str(path),
         source_format="altium",
@@ -510,8 +662,9 @@ def _read_hier(
         nets=nets,
         sheets=sheet_names,
         no_erc_points=list(prims.no_erc),
-        warnings=[warn] if warn else [],
+        warnings=warnings,
         metadata=_metadata(components, nets, frac_present),
+        title_block=title_block,
     )
 
 
@@ -532,12 +685,14 @@ def read(
     if isinstance(path, (str, os.PathLike)):
         return _read_hier(path, power_priority=power_priority)
     recs = _read_fileheader(path)
-    components, by_index = _build_components(recs)
+    comment_refs: list[tuple[str, str]] = []
+    components, by_index = _build_components(recs, comment_refs)
     prims = _build_primitives(recs, by_index)
     prims.power_priority = power_priority
     nets = netbuild.build_nets(prims)
     frac_present = any(k.endswith("_Frac") for r in recs for k in r)
-    warn = _skipped_warning(_skipped_records(recs))
+    warnings = [w for w in (_skipped_warning(_skipped_records(recs)),
+                            _comment_ref_warning(comment_refs)) if w]
     return Schematic(
         source_path="<bytes>",
         source_format="altium",
@@ -545,8 +700,9 @@ def read(
         nets=nets,
         sheets=[],
         no_erc_points=list(prims.no_erc),
-        warnings=[warn] if warn else [],
+        warnings=warnings,
         metadata=_metadata(components, nets, frac_present),
+        title_block=_document_parameters(recs),
     )
 
 

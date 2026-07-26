@@ -11,8 +11,7 @@ milestone.
 
 from __future__ import annotations
 
-from ....checks._rails import implied_voltage
-from ....checks.power import _is_ground, _is_power
+from ....classify import implied_voltage, is_ground as _is_ground, is_power as _is_power
 from ....report import Finding, Severity, anchor
 from ... import Detector, Rule, register
 from ... import geometry

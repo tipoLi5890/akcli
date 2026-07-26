@@ -30,10 +30,16 @@ from __future__ import annotations
 
 import re
 
+from ..classify import (
+    implied_voltage as _implied_voltage,
+    is_ground as _is_ground,
+    is_power as _is_power,
+    norm as _norm,
+    refdes_prefix as _prefix,
+)
 from ..config import Config
 from ..model import Component, Net, PinType, Schematic
 from ..report import Finding, Severity
-from ._rails import implied_voltage as _implied_voltage, norm as _norm
 
 # --- Finding codes (stable, machine-readable) -------------------------------
 POWER_RAIL = "POWER_RAIL"                       # INFO: a rail + its consumers
@@ -45,19 +51,9 @@ POWER_VOLTAGE_MISMATCH = "POWER_VOLTAGE_MISMATCH"  # WARNING: name volts != conf
 POWER_CURRENT_BUDGET = "POWER_CURRENT_BUDGET"   # NOTE: summed annotated current
 POWER_RAIL_NO_SOURCE = "POWER_RAIL_NO_SOURCE"   # WARNING: rail consumed, never fed
 
-# Common rail names that carry no parseable voltage but are unambiguously power.
-_POWER_NAMES: frozenset[str] = frozenset(
-    {
-        "VCC", "VDD", "VBAT", "VBUS", "VIN", "VOUT", "VREF", "VDDA", "VDDIO",
-        "AVDD", "DVDD", "VPP", "VEE", "VCCIO", "VSYS", "VDDH", "VDD33", "VDD18",
-        "PVDD", "IOVDD", "VCORE", "VANA", "VDIG",
-    }
-)
-
-# Ground net names.
-_GROUND_NAMES: frozenset[str] = frozenset(
-    {"GND", "GROUND", "VSS", "VSSA", "AGND", "DGND", "PGND", "GNDA", "GNDD", "EGND", "SGND"}
-)
+# Rail/ground NAME vocabulary and the ``_is_power``/``_is_ground`` heuristics
+# live in ``akcli.classify`` — erc.py, this module and the whole review layer
+# share ONE implementation (they used to carry verbatim copies).
 
 # IC-like designator prefixes (decoupling + budget consumers of interest).
 _IC_PREFIXES: frozenset[str] = frozenset({"U", "IC"})
@@ -95,34 +91,8 @@ _CURRENT_KEYS: frozenset[str] = frozenset(
 
 
 # --- small helpers ----------------------------------------------------------
-def _prefix(designator: str) -> str:
-    """Leading alpha(/underscore) prefix of a refdes (``$U3`` -> ``U``, ``C1`` -> ``C``)."""
-    s = designator.lstrip("$")
-    m = re.match(r"[A-Za-z_]+", s)
-    return m.group(0).upper() if m else ""
-
-
-# _norm / _implied_voltage are shared with erc.py — see ._rails.
-
-
-def _is_ground(name: str | None) -> bool:
-    if not name:
-        return False
-    n = _norm(name)
-    if n in _GROUND_NAMES:
-        return True
-    # GND-suffixed/prefixed buses (e.g. "GND_USB", "USB_GND")
-    return n.startswith("GND") or n.endswith("GND")
-
-
-def _is_power(name: str | None) -> bool:
-    """True for a (non-ground) power rail by name heuristics."""
-    if not name or _is_ground(name):
-        return False
-    n = _norm(name)
-    if n in _POWER_NAMES:
-        return True
-    return _implied_voltage(name) is not None
+# _prefix / _norm / _implied_voltage / _is_power / _is_ground come from
+# ``akcli.classify`` (imported above) — the single source of truth.
 
 
 def _to_ma(value: object) -> float | None:

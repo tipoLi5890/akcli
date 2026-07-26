@@ -41,12 +41,20 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    repeated parts, `route_net` for non-coaxial pin-to-pin connections, and `akcli bbox <lib_id>`
    to reserve space before placing. An `add_text`/`add_text_box`/`add_rectangle` `key` must be
    unique within the op-list — the validator refuses duplicates (both ops would seed one uuid).
+   `add_sheet`'s child `.kicad_sch` must already exist — `akcli new <child>.kicad_sch` first, or
+   the op is refused with `SHEET_FILE_MISSING`. Macro ops are validated too, before expansion:
+   an unknown field is an error with a did-you-mean, and `designators` is **positional** with a
+   fixed part role per slot (`place_led_indicator` is `[R, D]`, not reading order), so check
+   `akcli ops template <macro>` before filling it in.
 
-   **Editing a list you already applied is safe for parts:** symbol/pin uuids key on the
-   designator alone, so inserting or reordering ops does not re-identify untouched parts.
-   Wires/graphics still key on coords, so a moved one leaves its old node behind — clean up with
-   `delete_object`. A file written by a pre-0.17 akcli needs ONE unedited re-apply (or
-   `akcli undo`) before the list is edited.
+   **Editing a list you already applied is safe:** every created node's uuid keys on its own
+   content (designator, wire endpoints, label name + written anchor, sheet file+name, graphic
+   coords) and never on the op index, so inserting or reordering ops does not re-identify —
+   and therefore does not duplicate — anything untouched. Nodes still key on *position*, so a
+   wire/port/graphic you MOVE leaves its old node behind — clean up with `delete_object`. Two
+   ops seeding one uuid (identical wires, two texts on a point, two power ports on a
+   coordinate) are refused, naming both op indices. A file written by a pre-0.18 akcli needs
+   ONE unedited re-apply (or `akcli undo`) before the list is edited.
 
 2. **Plan (never writes):** `akcli plan <board.kicad_sch> --ops ops.json [--symbols <path>]
    [--render preview.svg]`.
@@ -73,7 +81,8 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    confirm the result matches intent; `akcli check` covers the group layout lints
    (`LAYOUT_GROUP_OVERLAP` / `LAYOUT_FRAME_STALE`) and re-runs the write gate's document
    checks read-only (`--integrity`: dangling endpoints, duplicate uuids/designators,
-   unresolved `lib_id`s, instance paths, no-connect conflicts). Never assume the write was correct without
+   unresolved `lib_id`s, instance paths, stacked power ports, a `(sheet …)` whose child file is
+   missing, no-connect conflicts). Never assume the write was correct without
    re-checking. For grouped sheets, `akcli groups <sch>` lists modules and
    `akcli groups <sch> --frame --apply` draws/refreshes their borders.
 

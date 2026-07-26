@@ -153,14 +153,18 @@ by the core loop:
 
 ## Roadmap
 
-**Shipped (v0.16.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`,
-net-diff safety rails, `new` / multi-level `undo`), net-preserving `arrange --groups` re-layout, the
-advisory `akcli review` engine (six detector families, now including power-entry protection, plus a
-datasheet facts store, `propose` / `tree` / `validate`), ERC / power / BOM / diff / pinmap / intent /
-contract checks with waivers and SARIF, schematic ↔ PCB `verify`, a project `library` workspace,
-versioned `fab` profiles, a `release preflight` gate, `akcli sim` on KiCad's bundled ngspice,
-JLCPCB/LCSC sourcing with datasheet fetch, 60 standards-cited calculators, pure-stdlib SVG rendering,
-and version-tolerant Altium/KiCad readers.
+**Shipped (v0.18.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`
+and writes into a child sheet of an existing hierarchy, net-diff safety rails, `new` / multi-level
+`undo`), net-preserving `arrange --groups` re-layout, the advisory `akcli review` engine (six
+detector families, now including power-entry protection, plus a datasheet facts store, `propose` /
+`tree` / `validate`), ERC / power / BOM / diff / pinmap / intent / contract checks with waivers and
+SARIF, read-only document `check --integrity`, schematic ↔ PCB `verify`, a project `library`
+workspace, versioned `fab` profiles, a `release preflight` gate, `akcli sim` on KiCad's bundled
+ngspice, JLCPCB/LCSC sourcing with datasheet fetch, 60 standards-cited calculators, pure-stdlib SVG
+rendering that draws the real symbol artwork from KiCad `lib_symbols`, and version-tolerant
+Altium/KiCad readers. Standard symbol nicknames resolve on a stock KiCad install: the compiled-in
+`${KICAD*_SYMBOL_DIR}` paths are derived from the located `kicad-cli`, and `akcli doctor` reports
+whether that resolution works here.
 
 **Ahead (→ v1.0):** the contract-freeze audit. The first PyPI release (`pip install akcli-kicad`) shipped in 0.15.0.
 *Deferred by decision:* a GitHub Action gating schematic PRs, the `view` waveform panel, and a native

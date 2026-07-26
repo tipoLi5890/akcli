@@ -49,6 +49,58 @@ def safe_path(base: os.PathLike | str, cand: os.PathLike | str) -> Path:
     return cand_r
 
 
+def read_bytes_guarded(path: os.PathLike | str,
+                       max_bytes: int = MAX_FILE_BYTES) -> bytes:
+    """Read a whole file, mapping OS-level failures onto structured codes.
+
+    ``Path.read_bytes`` raises the raw OSError family, which used to escape
+    all the way to ``cli.main``'s last-resort handler and surface as
+    ``INTERNAL`` + a traceback. Every failure mode an *input path* can have is
+    classified here instead:
+
+    * missing path -> ``FileNotFoundError`` is re-raised unchanged (``cli``
+      renders it as the ``FILE_NOT_FOUND`` envelope / exit 4, and callers that
+      want a nicer message catch it themselves);
+    * a directory (or mode-000 file, or any other IO error) ->
+      ``FILE_UNREADABLE`` / exit 4. Note the platform split this hides: on
+      POSIX a directory read is ``IsADirectoryError``, on Windows it is
+      ``PermissionError`` — both are ``OSError``, so both land here.
+    * oversized -> ``KICAD_SEXPR_TOOBIG`` (the existing allocation guard).
+    """
+    p = Path(path)
+    try:
+        data = p.read_bytes()
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        fail("FILE_UNREADABLE", f"{p}: {exc.strerror or exc}")
+    if len(data) > max_bytes:
+        fail("KICAD_SEXPR_TOOBIG", f"file exceeds {max_bytes} bytes")
+    return data
+
+
+def read_text_guarded(path: os.PathLike | str,
+                      max_bytes: int = MAX_FILE_BYTES) -> str:
+    """:func:`read_bytes_guarded` + a STRICT UTF-8 decode.
+
+    The one reader every ``.kicad_sch`` / ``.kicad_sym`` text read goes
+    through. Strictness is the point: decoding with ``errors="replace"`` let
+    2 KB of random bytes parse into an empty-looking document, so ``arrange``
+    reported ``clean: true`` on a file ``read`` called corrupt — one file, two
+    answers. Undecodable bytes are ``KICAD_BAD_ENCODING`` (exit 3), the
+    KiCad-side counterpart of ``ALTIUM_BAD_MAGIC``: these bytes are not this
+    format.
+    """
+    data = read_bytes_guarded(path, max_bytes)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        fail("KICAD_BAD_ENCODING",
+             f"{Path(path)} is not valid UTF-8 text "
+             f"(byte 0x{data[exc.start]:02x} at offset {exc.start}); "
+             "KiCad documents are UTF-8")
+
+
 def run_subprocess(
     argv: list[str],
     timeout: float,

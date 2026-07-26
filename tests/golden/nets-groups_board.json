@@ -1,0 +1,854 @@
+{
+  "schema_version": "1",
+  "source": "tests/fixtures/corpus/groups_board.kicad_sch",
+  "total": 89,
+  "matched": 89,
+  "returned": 89,
+  "truncated": false,
+  "nets": [
+    {
+      "name": "BAT_NTC",
+      "stable_id": "net_71ea5f909fa9",
+      "members": [
+        "J2.2",
+        "U2.18"
+      ]
+    },
+    {
+      "name": "BUCK2_SW",
+      "stable_id": "net_af279aec8044",
+      "members": [
+        "L1.1",
+        "U2.5"
+      ]
+    },
+    {
+      "name": "CC1",
+      "stable_id": "net_d88d25943d22",
+      "members": [
+        "D3.3",
+        "J1.A5",
+        "R21.1",
+        "R23.2",
+        "R25.1",
+        "U7.4"
+      ]
+    },
+    {
+      "name": "CC1_SENSE",
+      "stable_id": "net_0149ac1fdf7d",
+      "members": [
+        "R25.2",
+        "U1.3"
+      ]
+    },
+    {
+      "name": "CC2",
+      "stable_id": "net_8948b101545a",
+      "members": [
+        "D4.3",
+        "J1.B5",
+        "R22.1",
+        "R24.2",
+        "R26.1",
+        "U7.5"
+      ]
+    },
+    {
+      "name": "CC2_SENSE",
+      "stable_id": "net_af0f0b96a25e",
+      "members": [
+        "R26.2",
+        "U1.18"
+      ]
+    },
+    {
+      "name": "CC_PULL_EN",
+      "stable_id": "net_da78c76adb9a",
+      "members": [
+        "R23.1",
+        "R24.1",
+        "U1.41"
+      ]
+    },
+    {
+      "name": "FLASH_CS",
+      "stable_id": "net_69e837828d39",
+      "members": [
+        "U1.17",
+        "U4.1"
+      ]
+    },
+    {
+      "name": "FSR0_LN",
+      "stable_id": "net_defb4d3245c2",
+      "members": [
+        "J1.A6",
+        "J1.B6",
+        "R15.1",
+        "R9.1",
+        "U6.1"
+      ]
+    },
+    {
+      "name": "FSR1_LN",
+      "stable_id": "net_1011a63d6d87",
+      "members": [
+        "J1.A7",
+        "J1.B7",
+        "R10.1",
+        "R16.1",
+        "U6.2"
+      ]
+    },
+    {
+      "name": "FSR2_LN",
+      "stable_id": "net_a4a08f39a51c",
+      "members": [
+        "J1.A2",
+        "J1.B2",
+        "R11.1",
+        "R17.1",
+        "U6.4"
+      ]
+    },
+    {
+      "name": "FSR3_LN",
+      "stable_id": "net_064030c03523",
+      "members": [
+        "J1.A3",
+        "J1.B3",
+        "R12.1",
+        "R18.1",
+        "U6.5"
+      ]
+    },
+    {
+      "name": "FSR4_LN",
+      "stable_id": "net_259883c70576",
+      "members": [
+        "J1.A11",
+        "J1.B11",
+        "R13.1",
+        "R19.1",
+        "U7.1"
+      ]
+    },
+    {
+      "name": "FSR_LSW_CTRL",
+      "stable_id": "net_1a2ecddd4bbb",
+      "members": [
+        "U1.36",
+        "U2.8"
+      ]
+    },
+    {
+      "name": "GND",
+      "stable_id": "net_7a7f3960eff9",
+      "members": [
+        "#PWR01.1",
+        "#PWR02.1",
+        "C1.2",
+        "C10.2",
+        "C11.2",
+        "C12.2",
+        "C13.2",
+        "C14.2",
+        "C15.2",
+        "C16.2",
+        "C17.2",
+        "C18.2",
+        "C19.2",
+        "C2.2",
+        "C20.2",
+        "C21.2",
+        "C3.2",
+        "C4.2",
+        "C5.2",
+        "C6.2",
+        "C7.1",
+        "C8.2",
+        "C9.2",
+        "D1.2",
+        "D3.1",
+        "D4.1",
+        "J1.1",
+        "J1.2",
+        "J1.3",
+        "J1.4",
+        "J1.5",
+        "J1.6",
+        "J1.A1",
+        "J1.A12",
+        "J1.B1",
+        "J1.B12",
+        "J2.3",
+        "J3.3",
+        "J4.5",
+        "R1.2",
+        "R21.2",
+        "R22.2",
+        "SW1.2",
+        "TP14.1",
+        "TP15.1",
+        "U1.21",
+        "U1.24",
+        "U1.27",
+        "U1.5",
+        "U2.17",
+        "U2.2",
+        "U2.23",
+        "U2.24",
+        "U2.30",
+        "U2.31",
+        "U2.33",
+        "U2.6",
+        "U3.2",
+        "U3.3",
+        "U4.4",
+        "U5.2",
+        "U6.3",
+        "U6.8",
+        "U7.3",
+        "U7.8",
+        "U8.2",
+        "U8.4",
+        "U8.7",
+        "U8.8"
+      ]
+    },
+    {
+      "name": "I2C_SCL",
+      "stable_id": "net_191f807e48ea",
+      "members": [
+        "R3.2",
+        "TP7.1",
+        "U1.14",
+        "U2.14"
+      ]
+    },
+    {
+      "name": "I2C_SDA",
+      "stable_id": "net_c3c4b105fac4",
+      "members": [
+        "R2.2",
+        "TP6.1",
+        "U1.12",
+        "U2.13"
+      ]
+    },
+    {
+      "name": "INV_A_OUT",
+      "stable_id": "net_b9471767a30e",
+      "members": [
+        "R7.1",
+        "U5.6"
+      ]
+    },
+    {
+      "name": "INV_B_OUT",
+      "stable_id": "net_be416245f9d5",
+      "members": [
+        "R8.1",
+        "U5.4"
+      ]
+    },
+    {
+      "name": "LED_G",
+      "stable_id": "net_a8db71973a63",
+      "members": [
+        "R6.1",
+        "U1.30"
+      ]
+    },
+    {
+      "name": "LED_GK",
+      "stable_id": "net_89d4932ff069",
+      "members": [
+        "D2.2",
+        "R6.2"
+      ]
+    },
+    {
+      "name": "LED_R",
+      "stable_id": "net_05de520a9ee4",
+      "members": [
+        "R5.1",
+        "U1.6"
+      ]
+    },
+    {
+      "name": "LED_RK",
+      "stable_id": "net_b2b910bfc29b",
+      "members": [
+        "D2.4",
+        "R5.2"
+      ]
+    },
+    {
+      "name": "MUX_COM",
+      "stable_id": "net_f4c2dee5bb97",
+      "members": [
+        "TP9.1",
+        "U1.7",
+        "U8.3"
+      ]
+    },
+    {
+      "name": "MUX_EN_N",
+      "stable_id": "net_4a6fea566d08",
+      "members": [
+        "R27.1",
+        "U1.10",
+        "U8.6"
+      ]
+    },
+    {
+      "name": "MUX_S0",
+      "stable_id": "net_fd98ec1f58e8",
+      "members": [
+        "U1.35",
+        "U8.9"
+      ]
+    },
+    {
+      "name": "MUX_S1",
+      "stable_id": "net_0d7e7f47acd3",
+      "members": [
+        "U1.2",
+        "U8.10"
+      ]
+    },
+    {
+      "name": "MUX_S2",
+      "stable_id": "net_a7fe8da1d336",
+      "members": [
+        "U1.40",
+        "U8.11"
+      ]
+    },
+    {
+      "name": "MUX_Y0",
+      "stable_id": "net_25e620097b2b",
+      "members": [
+        "R15.2",
+        "U8.13"
+      ]
+    },
+    {
+      "name": "MUX_Y1",
+      "stable_id": "net_0e2240653681",
+      "members": [
+        "R16.2",
+        "U8.14"
+      ]
+    },
+    {
+      "name": "MUX_Y2",
+      "stable_id": "net_21dbe5e463bc",
+      "members": [
+        "R17.2",
+        "U8.15"
+      ]
+    },
+    {
+      "name": "MUX_Y3",
+      "stable_id": "net_d5215c31913a",
+      "members": [
+        "R18.2",
+        "U8.12"
+      ]
+    },
+    {
+      "name": "MUX_Y4",
+      "stable_id": "net_8bfccd802e56",
+      "members": [
+        "R19.2",
+        "U8.1"
+      ]
+    },
+    {
+      "name": "MUX_Y5",
+      "stable_id": "net_8982bc8d97c9",
+      "members": [
+        "R20.2",
+        "U8.5"
+      ]
+    },
+    {
+      "name": "NRST",
+      "stable_id": "net_1619dc884b3c",
+      "members": [
+        "C21.1",
+        "J4.3",
+        "R28.2",
+        "U1.26"
+      ]
+    },
+    {
+      "name": "PIEZO_N",
+      "stable_id": "net_11f8b1ba29a5",
+      "members": [
+        "BZ1.2",
+        "J3.2",
+        "R8.2"
+      ]
+    },
+    {
+      "name": "PIEZO_P",
+      "stable_id": "net_d8a39db4a438",
+      "members": [
+        "BZ1.1",
+        "J3.1",
+        "R7.2"
+      ]
+    },
+    {
+      "name": "PMIC_GPIO2",
+      "stable_id": "net_68f9ee522f24",
+      "members": [
+        "U1.42",
+        "U2.9"
+      ]
+    },
+    {
+      "name": "PMIC_INT",
+      "stable_id": "net_1c115403660f",
+      "members": [
+        "U1.38",
+        "U2.7"
+      ]
+    },
+    {
+      "name": "SHPHLD",
+      "stable_id": "net_146e7c8877c3",
+      "members": [
+        "SW1.1",
+        "U2.15"
+      ]
+    },
+    {
+      "name": "SPARE_LN",
+      "stable_id": "net_5e4015ea51d9",
+      "members": [
+        "J1.A10",
+        "J1.B10",
+        "R14.1",
+        "R20.1",
+        "U7.2"
+      ]
+    },
+    {
+      "name": "SPI_MISO",
+      "stable_id": "net_a61545fe1461",
+      "members": [
+        "U1.22",
+        "U4.2"
+      ]
+    },
+    {
+      "name": "SPI_MOSI",
+      "stable_id": "net_33a633c97f0d",
+      "members": [
+        "U1.16",
+        "U4.5"
+      ]
+    },
+    {
+      "name": "SPI_SCK",
+      "stable_id": "net_5a22d6cf37b2",
+      "members": [
+        "U1.20",
+        "U4.6"
+      ]
+    },
+    {
+      "name": "SWDCLK",
+      "stable_id": "net_d301ed4b9a5a",
+      "members": [
+        "J4.4",
+        "U1.39"
+      ]
+    },
+    {
+      "name": "SWDIO",
+      "stable_id": "net_e9d855b5b7eb",
+      "members": [
+        "J4.2",
+        "U1.37"
+      ]
+    },
+    {
+      "name": "TONE_N",
+      "stable_id": "net_972ebb156824",
+      "members": [
+        "U1.34",
+        "U5.3"
+      ]
+    },
+    {
+      "name": "TONE_P",
+      "stable_id": "net_34213f5c2417",
+      "members": [
+        "U1.33",
+        "U5.1"
+      ]
+    },
+    {
+      "name": "TP_P0_28",
+      "stable_id": "net_3113986947e6",
+      "members": [
+        "TP18.1",
+        "U1.4"
+      ]
+    },
+    {
+      "name": "V3V3",
+      "stable_id": "net_1ebe67abb85e",
+      "members": [
+        "#PWR06.1",
+        "C10.1",
+        "C12.1",
+        "C13.1",
+        "C14.1",
+        "C15.1",
+        "C8.1",
+        "C9.1",
+        "D2.3",
+        "D3.2",
+        "D4.2",
+        "J4.1",
+        "L1.2",
+        "R2.1",
+        "R28.1",
+        "R3.1",
+        "TP3.1",
+        "U1.19",
+        "U1.23",
+        "U2.12",
+        "U2.28",
+        "U2.32",
+        "U4.3",
+        "U4.7",
+        "U4.8",
+        "U5.5"
+      ]
+    },
+    {
+      "name": "V3V3_FSR",
+      "stable_id": "net_a239db0ba361",
+      "members": [
+        "#PWR07.1",
+        "C11.1",
+        "C18.1",
+        "R10.2",
+        "R11.2",
+        "R12.2",
+        "R13.2",
+        "R14.2",
+        "R27.2",
+        "R9.2",
+        "TP4.1",
+        "U2.29",
+        "U8.16"
+      ]
+    },
+    {
+      "name": "VBAT",
+      "stable_id": "net_cb94a730ea22",
+      "members": [
+        "#PWR04.1",
+        "C7.2",
+        "J2.1",
+        "TP1.1",
+        "U2.19"
+      ]
+    },
+    {
+      "name": "VBUSOUT",
+      "stable_id": "net_a21e2adc946d",
+      "members": [
+        "C19.1",
+        "U2.22"
+      ]
+    },
+    {
+      "name": "VBUS_CONN",
+      "stable_id": "net_af566caf5b6c",
+      "members": [
+        "#PWR08.1",
+        "F1.1",
+        "J1.A4",
+        "J1.A9",
+        "J1.B4",
+        "J1.B9"
+      ]
+    },
+    {
+      "name": "VBUS_FUSED",
+      "stable_id": "net_7954f1e55e89",
+      "members": [
+        "C1.1",
+        "F1.2",
+        "U3.1"
+      ]
+    },
+    {
+      "name": "VBUS_PROT",
+      "stable_id": "net_dde63640fd85",
+      "members": [
+        "#PWR03.1",
+        "C2.1",
+        "C3.1",
+        "D1.1",
+        "TP5.1",
+        "U2.21",
+        "U3.5"
+      ]
+    },
+    {
+      "name": "VSET2",
+      "stable_id": "net_f5e2339b7ce9",
+      "members": [
+        "R1.1",
+        "U2.16"
+      ]
+    },
+    {
+      "name": "VSYS",
+      "stable_id": "net_6f9cccae04f9",
+      "members": [
+        "#PWR05.1",
+        "C20.1",
+        "C4.1",
+        "C5.1",
+        "C6.1",
+        "TP2.1",
+        "U2.1",
+        "U2.20",
+        "U2.4"
+      ]
+    },
+    {
+      "name": "XTAL1",
+      "stable_id": "net_9353b0acb80b",
+      "members": [
+        "C16.1",
+        "U1.11",
+        "X1.1"
+      ]
+    },
+    {
+      "name": "XTAL2",
+      "stable_id": "net_8ae7acf71e39",
+      "members": [
+        "C17.1",
+        "U1.13",
+        "X1.2"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_04da6642658f",
+      "members": [
+        "U1.8"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_0dbea45a3137",
+      "members": [
+        "U1.29"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_0fbd6eeba137",
+      "members": [
+        "J4.6"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_12a2f2dc6e7b",
+      "members": [
+        "U2.27"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_18a2558e91c1",
+      "members": [
+        "U2.25"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_1ee995853fff",
+      "members": [
+        "U1.31"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_245c06e80421",
+      "members": [
+        "U2.3"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_283ca359a874",
+      "members": [
+        "U2.26"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_2db75337e88e",
+      "members": [
+        "U7.6"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_2e6ec63f8eca",
+      "members": [
+        "U6.7"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_34671a6817a2",
+      "members": [
+        "U1.28"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_397dd28e9f28",
+      "members": [
+        "U6.6"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_3b9b0b90954a",
+      "members": [
+        "U1.43"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_3c81c76b31e3",
+      "members": [
+        "U6.9"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_4a4aafd1ea86",
+      "members": [
+        "J1.A8"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_51a6e9f36996",
+      "members": [
+        "U1.32"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_5a8d8285a924",
+      "members": [
+        "U2.11"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_5ae203c1bc0d",
+      "members": [
+        "U7.10"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_5b99f5e25d56",
+      "members": [
+        "U7.7"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_5c01ca48273f",
+      "members": [
+        "D2.1"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_5cbeec508da1",
+      "members": [
+        "U3.4"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_7470ef5afe10",
+      "members": [
+        "J1.B8"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_97919ed88c8c",
+      "members": [
+        "U2.10"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_9cffc2042878",
+      "members": [
+        "U1.25"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_c6ccdedb6cae",
+      "members": [
+        "U1.1"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_d3fbfa2f70c3",
+      "members": [
+        "U1.15"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_d50084e8d512",
+      "members": [
+        "U7.9"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_e1e1d78a1a14",
+      "members": [
+        "U6.10"
+      ]
+    },
+    {
+      "name": null,
+      "stable_id": "net_f20c194d1972",
+      "members": [
+        "U1.9"
+      ]
+    }
+  ]
+}

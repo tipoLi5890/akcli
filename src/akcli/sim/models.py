@@ -17,7 +17,10 @@ The engineering-notation -> SPICE-value conversion lives in :func:`spice_value`,
 where the notorious ``M`` collision is resolved: in the KiCad values this tool
 consumes ``M`` means *mega* (a "1M" resistor is 1 MΩ), but in SPICE ``M`` means
 *milli* and mega must be written ``MEG``. We parse with the mega meaning and
-render the SPICE ``MEG`` so the two never get crossed.
+render the SPICE ``MEG`` so the two never get crossed. ``m``/``M`` is the *only*
+case-significant prefix: every other one is read either way (``10U``, ``100N``,
+``1T``, ``10K``), because SPICE is case-insensitive and the Altium libraries this
+tool imports from are full of upper-cased values.
 
 :func:`spice_value` is lenient (unparseable text passes through) because it also
 serves display paths; every value that is actually *emitted* as an R/C/L element
@@ -39,7 +42,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..calc.si import parse_value
+from ..calc.si import parse_plain, parse_value
+from ..classify import refdes_prefix as _prefix
 from ..errors import fail
 
 __all__ = ["DeviceCard", "spice_value", "passive_value", "resolve", "fit_diode",
@@ -100,9 +104,13 @@ _UNIT_WORD_RX = re.compile(
     r"|watts?|hertz|seconds?)$"
 )
 # Single-letter farad/henry — stripped only when a digit or SI prefix precedes,
-# so femto ``f`` (lowercase) survives and ``MEG`` is never mangled.
-_UNIT_F_RX = re.compile(r"(?<=[-0-9.pnuµmkKMG])F$")
-_UNIT_H_RX = re.compile(r"(?i)(?<=[-0-9.pnuµmkg])H$")
+# so femto ``f`` (lowercase) survives and ``MEG`` is never mangled. The F rule
+# stays case-sensitive on the *unit* letter for exactly that reason, but its
+# preceding-prefix class covers both cases (``10UF`` is as common as ``10uF``
+# in Altium-sourced libraries) plus both micro signs.
+_PREFIX_CHARS = "-0-9.pPnNuUµμmMkKgGtT"
+_UNIT_F_RX = re.compile(r"(?<=[" + _PREFIX_CHARS + r"])F$")
+_UNIT_H_RX = re.compile(r"(?i)(?<=[" + _PREFIX_CHARS + r"])H$")
 
 
 def _strip_units(text: str) -> str:
@@ -143,11 +151,11 @@ def spice_value(text: str) -> str:
     if not s:
         return raw
     # Already a plain number -> pass the (unit-stripped) text through verbatim.
-    try:
-        float(s)
+    # ``parse_plain`` (not ``float()``) is the test on purpose: ``float()``
+    # also accepts ``1_000``/``inf``/``nan``, which would then be handed to
+    # ngspice verbatim — ngspice reads ``1_000`` as *1*.
+    if parse_plain(s) is not None:
         return s
-    except ValueError:
-        pass
     # SPICE-native / KiCad "meg" spelling -> mega, explicitly (parse_value
     # only understands single-letter suffixes and would choke on "MEG").
     m = re.match(r"(?i)^([0-9]*\.?[0-9]+)\s*meg$", s)
@@ -177,7 +185,7 @@ _VALUE_SPLIT_RX = re.compile(r"[\s,;/|]+")
 # is re-joined onto the head instead of being dropped (dropping it would silently
 # turn 4.7 kΩ into 4.7 Ω).
 _PREFIX_TAIL_RX = re.compile(
-    r"(?i)^(?:meg|[pnuµmkgt])?(?:ohms?|Ω|f|h|r|farads?|henr(?:ies|y))?$"
+    r"(?i)^(?:meg|[pnuµμmkgt])?(?:ohms?|Ω|f|h|r|farads?|henr(?:ies|y))?$"
 )
 # Explicit unit markers, mapped to the passive they can legally belong to.
 _OHM_WORD_RX = re.compile(r"(?i)(?:ohms?|Ω)$")
@@ -203,10 +211,9 @@ def _parse_strict(text: str) -> float | None:
     s = _strip_units(str(text).strip())
     if not s:
         return None
-    try:
-        return float(s)
-    except ValueError:
-        pass
+    plain = parse_plain(s)
+    if plain is not None:
+        return plain
     m = re.match(r"(?i)^([0-9]*\.?[0-9]+)\s*meg$", s)
     if m:
         return float(m.group(1)) * 1e6
@@ -265,7 +272,14 @@ def passive_value(raw: object, letter: str, designator: str = "") -> tuple[str, 
         fail("SIM_VALUE_INVALID",
              f"{designator or 'component'}: value {text!r} is not a value SPICE "
              f"can take (its leading token {head!r} does not parse as a number "
-             f"in engineering notation)")
+             f"in engineering notation). Accepted: a plain number ('4700', "
+             f"'1e-7'); an SI prefix p/n/u/µ/m/k/M/G/T, case-insensitive except "
+             f"m=milli vs M=mega ('4.7k', '100N', '10U', '2.2uF'); an embedded "
+             f"decimal ('4k7', '2M2', '4R7'); optionally a trailing unit "
+             f"('4.7kohm', '100nF', '10uH'). Rejected on purpose: 'inf'/'nan', "
+             f"digit separators ('1_000' is 1000 to Python but 1 to ngspice) "
+             f"and anything else this tool cannot read the same way ngspice "
+             f"would")
 
     unit_class = _value_unit_class(head)
     if unit_class and letter in _UNIT_NAME and unit_class != letter:
@@ -325,12 +339,6 @@ _MODEL_TYPE_LETTER: dict[str, str] = {
     "SW": "S", "CSW": "W",
 }
 _MODEL_TYPE_RX = re.compile(r"(?i)^\s*\.model\s+\S+\s+([A-Za-z]+)")
-
-
-def _prefix(designator: str) -> str:
-    """Leading alphabetic run of a designator, upper-cased (``"R12" -> "R"``)."""
-    m = re.match(r"[A-Za-z]+", designator or "")
-    return m.group(0).upper() if m else ""
 
 
 def _get_ci(params: dict, key: str) -> str | None:
@@ -509,9 +517,17 @@ def _from_spec_models(comp, entry: dict) -> DeviceCard:
 def _from_heuristic(comp) -> DeviceCard:
     """Ladder rung (c): prefix + value heuristic; honest ``unmodeled``/``skip``."""
     prefix = _prefix(comp.designator)
-    if prefix in _SKIP_PREFIXES or comp.designator.startswith(("#", "$")):
+    # A power port / undesignated part is never a simulated device. Named
+    # first (and by its full designator) because the shared prefix helper
+    # strips the ``$`` of a synthesized refdes, so ``$U7`` would otherwise
+    # report as class "U".
+    if comp.designator.startswith(("#", "$")):
         return DeviceCard(status="skip",
-                          note=f"{prefix or comp.designator} is not a simulated "
+                          note=f"{comp.designator} is not a simulated "
+                               "device (connector/mechanical/test-point)")
+    if prefix in _SKIP_PREFIXES:
+        return DeviceCard(status="skip",
+                          note=f"{prefix} is not a simulated "
                                "device (connector/mechanical/test-point)")
     if prefix in _PASSIVE:
         if not comp.value:

@@ -31,15 +31,10 @@ XTAL_CSTRAY_PF: float = 4.0
 # is flagged.
 XTAL_LOAD_TOL: float = 0.05
 
-# Component-classification keywords for TVS / ESD protection parts, matched
-# case-insensitively against lib_id and value (common vendor family names).
-TVS_KEYWORDS: tuple[str, ...] = (
-    "tvs", "esd", "pesd", "usblc", "srv05", "sp05", "tpd2", "tpd4", "tpd6",
-    "pusb", "ip4220", "d_tvs", "esda",
-)
-
-# Connector designator prefixes (industry convention).
-CONNECTOR_PREFIXES: frozenset[str] = frozenset({"J", "P", "CN", "X", "USB"})
+# Part-ROLE classification (TVS/ESD keywords, connector and crystal prefixes)
+# is NOT here: it lives in :mod:`akcli.classify`, shared with the check layer
+# so `check` and `review` cannot disagree about what a part is. Only
+# review-specific thresholds and keyword sets stay in this module.
 
 # Fuse / resettable-PTC classification: designator prefix + lib/value keywords
 # (IEC 60617 reference designator "F"; "polyfuse"/"ptc" per resettable-fuse
@@ -65,10 +60,10 @@ POWER_ENTRY_RX_TOKENS: str = (
 # cannot wander into dividers or decoupling. Chain length is bounded.
 POWER_CHAIN_MAX_NETS: int = 6
 
-# Resistor/capacitor/crystal classification: designator prefixes.
+# Resistor/capacitor classification: designator prefixes. (Crystal prefixes
+# live in :mod:`akcli.classify` — see the note above.)
 RESISTOR_PREFIXES: frozenset[str] = frozenset({"R"})
 CAPACITOR_PREFIXES: frozenset[str] = frozenset({"C"})
-CRYSTAL_PREFIXES: frozenset[str] = frozenset({"Y"})
 
 # --------------------------------------------------------------------------- #
 # PCB review thresholds (M5)

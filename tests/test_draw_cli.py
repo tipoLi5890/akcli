@@ -292,3 +292,161 @@ def test_duplicate_designator_gate_flags_literal_dup(tmp_path, capsys):
     dup = text[:text.rindex(")")] + "\n" + clone + "\n)"
     findings = connectivity.verify(sx.parse(dup))
     assert [f for f in findings if f.code == "DUPLICATE_DESIGNATOR"]
+
+
+# --------------------------------------------------------------------------- #
+# keyless nodes are op-index-free too (audit): editing an op-list must not
+# duplicate the wires / labels / annotations downstream of the edit
+# --------------------------------------------------------------------------- #
+_KEYLESS_OPS = [
+    {"op": "place_component", "lib_id": "Device:R", "designator": "R41",
+     "x_mil": 7000, "y_mil": 4000, "value": "1k"},
+    {"op": "add_text", "text": "reviewed", "at": [7500, 3000]},
+    {"op": "add_wire", "vertices": ["R41.1", "R41.2"]},
+    {"op": "add_net_label", "name": "SENSE", "at": "R41.1"},
+]
+
+
+def _count_tags(tgt: Path) -> dict[str, int]:
+    doc = sexpr.parse(tgt.read_text(encoding="utf-8"))
+    out: dict[str, int] = {}
+    for c in doc.children or []:
+        if c.is_list and (c.children or []):
+            tag = c.children[0].value or ""
+            out[tag] = out.get(tag, 0) + 1
+    return out
+
+
+def test_keyless_nodes_survive_an_op_list_edit(tmp_path, capsys):
+    """Insert an op at the FRONT, re-apply: text/wire/label must not double.
+
+    Regression (0.17 fixed only symbols/pins): wire, junction, no_connect,
+    label, bus_entry, annotation and sheet uuids were still seeded with the op
+    INDEX, so one inserted op re-identified every node after it and the next
+    apply stacked a second copy of each (two `add_text` notes on one point).
+    """
+    tgt = _copy(tmp_path)
+    ops1 = _ops_file(tmp_path, _KEYLESS_OPS, name="ops1.json")
+    assert main(["draw", str(tgt), "--ops", str(ops1), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+    before = _count_tags(tgt)
+
+    edited = [{"op": "place_component", "lib_id": "Device:R",
+               "designator": "R40", "x_mil": 7000, "y_mil": 3400,
+               "value": "3k"}, *_KEYLESS_OPS]
+    ops2 = _ops_file(tmp_path, edited, name="ops2.json")
+    assert main(["draw", str(tgt), "--ops", str(ops2), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+    after = _count_tags(tgt)
+
+    for tag in ("text", "wire", "label"):
+        assert after[tag] == before[tag], (tag, before, after)
+    assert tgt.read_text(encoding="utf-8").count('"reviewed"') == 1
+
+
+def test_keyless_ops_replay_byte_identically(tmp_path, capsys):
+    tgt = _copy(tmp_path)
+    ops = _ops_file(tmp_path, _KEYLESS_OPS)
+    assert main(["draw", str(tgt), "--ops", str(ops), "--apply"]) == EXIT["OK"]
+    once = tgt.read_bytes()
+    assert main(["draw", str(tgt), "--ops", str(ops), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+    assert tgt.read_bytes() == once
+
+
+def test_two_identical_keyless_ops_collide_loudly(tmp_path, capsys):
+    """Content-seeded uuids mean a literal duplicate op would OVERWRITE the
+    first node while both report ok — refuse instead, naming both ops."""
+    tgt = _copy(tmp_path)
+    before = tgt.read_bytes()
+    ops = _ops_file(tmp_path, [
+        {"op": "add_text", "text": "A", "at": [7500, 3000]},
+        {"op": "add_text", "text": "B", "at": [7500, 3000]},
+    ])
+    rc = main(["draw", str(tgt), "--ops", str(ops), "--apply"])
+    out = capsys.readouterr().out
+    assert rc == EXIT["OPLIST"]
+    assert "collides with op [0]" in out
+    assert tgt.read_bytes() == before
+
+
+# --------------------------------------------------------------------------- #
+# power-port identity is the COORDINATE (audit P0)
+# --------------------------------------------------------------------------- #
+def _power_values_at(tgt: Path, x_mil: float, y_mil: float) -> list[str]:
+    """``Value`` of every ``#``-referenced symbol anchored exactly at x/y mil."""
+    want = (round(x_mil * 0.0254, 4), round(y_mil * 0.0254, 4))
+    doc = sexpr.parse(tgt.read_text(encoding="utf-8"))
+    out = []
+    for sym in doc.find_all("symbol"):
+        at = sym.find("at")
+        if sym.find("lib_id") is None or at is None:
+            continue
+        pos = (round(float(at.children[1].value), 4),
+               round(float(at.children[2].value), 4))
+        props = {}
+        for prop in sym.find_all("property"):
+            kids = prop.children or []
+            if len(kids) >= 3:
+                props[kids[1].value] = kids[2].value
+        if pos == want and props.get("Reference", "").startswith("#"):
+            out.append(props.get("Value", ""))
+    return sorted(out)
+
+
+def test_power_port_net_rename_replaces_in_place(tmp_path, capsys):
+    """GND -> +3V3 at the same coordinate must REPLACE the port, not stack one.
+
+    0.17 keyed a port's identity on position AND net name, so the renamed op
+    matched nothing, allocated a fresh #PWR ref and appended a second symbol on
+    top of the first: the stale GND stayed, invisible, shorting GND into +3V3.
+    """
+    tgt = _copy(tmp_path)
+    gnd = _ops_file(tmp_path, [
+        {"op": "place_power_port", "lib_id": "power:GND", "net_name": "GND",
+         "at": [7000, 6000]},
+    ], name="gnd.json")
+    assert main(["draw", str(tgt), "--ops", str(gnd), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+    assert _power_values_at(tgt, 7000, 6000) == ["GND"]
+
+    v33 = _ops_file(tmp_path, [
+        {"op": "place_power_port", "lib_id": "power:+3V3", "net_name": "+3V3",
+         "at": [7000, 6000]},
+    ], name="v33.json")
+    assert main(["draw", str(tgt), "--ops", str(v33), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+    # exactly one power symbol there, now naming +3V3 — no orphaned GND under it
+    assert _power_values_at(tgt, 7000, 6000) == ["+3V3"]
+
+
+def test_two_power_ports_on_one_point_are_refused(tmp_path, capsys):
+    tgt = _copy(tmp_path)
+    before = tgt.read_bytes()
+    ops = _ops_file(tmp_path, [
+        {"op": "place_power_port", "lib_id": "power:GND", "net_name": "GND",
+         "at": [7000, 6000]},
+        {"op": "place_power_port", "lib_id": "power:+3V3", "net_name": "+3V3",
+         "at": [7000, 6000]},
+    ])
+    rc = main(["draw", str(tgt), "--ops", str(ops), "--apply"])
+    cap = capsys.readouterr()
+    assert rc == EXIT["OPLIST"]
+    # the op-list validator catches this before the writer ever runs; the
+    # writer keeps its own guard for library callers that skip validation, and
+    # both report the same code
+    assert "POWER_PORT_STACKED" in cap.out + cap.err
+    assert tgt.read_bytes() == before
+
+
+def test_two_identical_power_ports_are_refused(tmp_path, capsys):
+    """Same coordinate AND same net: 0.17 wrote one over the other, both ok."""
+    tgt = _copy(tmp_path)
+    ops = _ops_file(tmp_path, [
+        {"op": "place_gnd", "at": [7000, 6000]},
+        {"op": "place_gnd", "at": [7000, 6000]},
+    ])
+    rc = main(["draw", str(tgt), "--ops", str(ops), "--apply"])
+    cap = capsys.readouterr()
+    assert rc == EXIT["OPLIST"]
+    assert "POWER_PORT_STACKED" in cap.out + cap.err

@@ -31,6 +31,161 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-26
+
+A post-0.17.0 audit pass. 0.17.0 hardened 23 points but several of those fixes
+were half-applied, and the audit reproduced the resulting regressions along with
+two blockers on the main agent journey. Everything below was reproduced before it
+was fixed.
+
+### Fixed (write correctness — reproduced regressions from 0.17.0)
+- **A power port kept its old symbol when its net changed.** Replay identity was
+  `position + net name`, so re-applying an op-list after renaming a rail left the old
+  symbol stacked under the new one and silently merged the two rails (`GND` folded
+  into `+3V3` with the connectivity gate reporting clean). Identity is now position
+  plus species (net-naming port vs `PWR_FLAG`), so the node is replaced in place.
+- **Two power ports on one anchor silently overwrote each other**, both ops reporting
+  `ok`. Now refused by `POWER_PORT_STACKED` at both the op-list validator and the
+  writer, and `connectivity.verify` reports pre-existing stacked ports in files
+  already damaged by this. All three layers key on the coordinate *and the
+  species*, so `place_pwr_flag` sharing a rail port's point — the prescribed way
+  to mark a rail driven — stays legal, while two flags on one point do not.
+- **Un-annotated schematics were unwritable.** `DUPLICATE_DESIGNATOR` counted KiCad's
+  placeholder `R?` references as collisions, so every op — even `add_text` — was
+  refused on a sheet drawn but not yet annotated. References containing `?` are
+  now exempt.
+- **Only symbols got op-index-free UUIDs in 0.17.** Wires, junctions, no-connects,
+  labels, bus entries, sheets and keyless annotations still seeded on the op index, so
+  inserting one op ahead of them duplicated every one of them on the next apply. All
+  keyless nodes now seed on self-distinguishing content, and a per-apply claim registry
+  refuses two ops that would seed the same UUID.
+- **Writes into a child sheet used the wrong instances path.** 0.17 relaxed the gate but
+  left `instances_path()` emitting this file's own root UUID; a part written into a child
+  of a twice-instantiated sheet made real `kicad-cli` report annotation errors. New
+  symbols now copy the full path set of their siblings.
+- **`add_sheet` accepted a child file that does not exist**, exited 0, and left a root
+  that no subsequent command could read. Now refused with `SHEET_FILE_MISSING`; existing
+  files with the same damage are reported by `connectivity.verify`.
+- **The two connectivity engines disagreed on a mid-span T with no junction** — the write
+  gate treated it as attached, the net engine (correctly, matching eeschema) did not, so
+  `check --integrity` and `nets` could give opposite answers on a hand-drawn file. The
+  write gate now requires the junction, and `test_engine_parity.py` pins the case.
+- `relink-symbols` now runs `connectivity.verify` on its splice (as a delta) instead of
+  only comparing net membership.
+
+### Fixed (blocked journeys)
+- **`render` crashed on 59% of the standard KiCad symbol library** — including this
+  repo's own `groups_board` corpus — because every optional node in a symbol body was
+  dereferenced unconditionally (`(pin_names hide)` with no `(offset)` was the reported
+  case). All six sites are None-safe, and `render_art.py` joined the mypy beachhead so
+  the Optional class of bug cannot return.
+- **Symbols did not resolve on a stock KiCad install.** `${KICAD*_SYMBOL_DIR}` is
+  compiled into KiCad rather than exported, so `pins`/`draw` failed with
+  `SYMBOL_NOT_FOUND` until the user exported it by hand. These variables now fall back to
+  paths derived from the located `kicad-cli` (macOS bundle, POSIX/Windows prefix), and
+  `doctor` gained a `symbols` probe that resolves `Device:R` down the real path.
+
+### Fixed (silently wrong output)
+- **Macro op fields were never validated.** The CLI expanded macros before validating, so
+  the macro branch was dead code: a typo (`valu`) or an invented field passed silently and
+  the expander manufactured a plausible circuit. Validation now runs before expansion,
+  with post-expansion errors mapped back to the author's op index.
+- **Macro `designators` are positional, and swapping them corrupted the BOM silently** —
+  `place_led_indicator` with `["D1","R3"]` produced a resistor called `D1` and an LED
+  called `R3`, with no finding from any check. Each slot now declares its part role.
+- **The sim value gate was wrong in both directions.** A bare `float()` let `1_000`
+  through to the deck, where ngspice reads it as 1 Ω (measured: a 10k/1_000 divider
+  outputs 3.3e-4 V instead of 0.3 V); `inf`/`nan` passed too. Meanwhile `10U`, `100N`,
+  `4U7`, `1T` and Greek `μ` — all valid SPICE — were refused, and those are exactly the
+  spellings Altium imports carry. Prefixes are now case-insensitive (except `m`/`M`,
+  where case is the whole meaning) and non-finite input is refused.
+- **Altium `Implementation` records ignored `ModelType`/`IsCurrent`**, so a part whose
+  first model was a SPICE model got the SPICE model's name as its footprint — worse than
+  no footprint, because it satisfied `BOM_MISSING_FOOTPRINT`. Footprint-class models are
+  now selected by an allow-list with `IsCurrent` winning.
+- Altium `Comment="=Value"` (an indirect parameter reference) was imported literally and
+  overwrote the real value; it now resolves against the component's own parameters, with a
+  collapsed warning when it cannot.
+- Document-level Altium parameters (`Title`/`Revision`/`DocumentNumber`/`Date`) were
+  discarded; they now surface as `title_block` on the schematic export.
+- Netlist net names were emitted bare where real `kicad-cli` qualifies them by sheet
+  (`/GND`, `/Amp/NAME`), and `(class "Default")` was missing — a downstream PCB fed the
+  akcli netlist and then updated from eeschema would rename every net. Arbitrated against
+  real `kicad-cli` across flat, hierarchical and twice-instantiated boards.
+- **A malformed input produced `INTERNAL` and a raw traceback** across ~20 commands
+  (non-UTF-8 bytes, a directory, an unreadable file), breaking the `--json` envelope
+  contract, while `arrange`/`groups` read the same corrupt bytes leniently and answered
+  `clean: true`. There is now one guarded reader, two new codes
+  (`KICAD_BAD_ENCODING` → exit 3, `FILE_UNREADABLE` → exit 4), and `cli.main` classifies
+  by exception type instead of hard-coding exit 3.
+- `--json` output could contain bare `NaN`/`Infinity` (not valid JSON) and `calc` could
+  raise `ZeroDivisionError` as `INTERNAL`; the shared JSON writer sets `allow_nan=False`
+  and the calc registry converts domain errors into `CalcError`.
+- `calc info <name> --json` printed plain text; a bare `akcli --json` exited 2 with an
+  empty stdout; `-C` pointed at a missing or malformed config was ignored silently. All
+  three now emit the proper envelope (`BAD_CONFIG` is finally reachable).
+- `akcli new --title` with a newline wrote a file real `kicad-cli` refuses to open — the
+  fourth of six s-expression quoters was missing control-character escaping. All six are
+  unified and pinned byte-for-byte, with an AST gate against a seventh appearing.
+
+### Changed (check/review signal quality)
+- New `src/akcli/classify.py` is the single home for refdes prefixes, rail
+  classification and part roles, replacing six diverging `_prefix` copies and two verbatim
+  `_is_ground`/`_is_power` pairs. Synthesized designators (`$U3`, from an Altium import
+  with no reference) previously classified as no-prefix in four review detectors, which
+  silently skipped those parts.
+- ERC no longer reports TVS/ESD arrays for having no power pin, and counts a passive tie
+  to a rail (or a connector) as a driver — the corpus's five ERC findings were all false,
+  and a correctly pulled-up enable was being flagged.
+- Rail names derived with a separator (`VBUS_FUSED`, `VCC_3V3_A`) are recognized as power;
+  detection signals (`VBUS_DET`, `VIN_SENSE`) deliberately are not.
+- `X` is classified as a crystal by library evidence rather than as a connector by prefix,
+  which had disabled the entire crystal rule family on the corpus's only crystal while
+  emitting a false connector finding.
+- `LAYOUT_POWER_ON_PIN` no longer fires on the label-on-pin anchoring this project's own
+  authoring guide recommends; unlabelled wires crossing a power pin still do.
+- I²C pull-up detection matches bus tokens rather than exact net-name suffixes.
+- `review/topo.py`'s private value parser delegates to `calc.si`, so Altium-style `10U`
+  values no longer make detectors skip a part silently.
+
+### Changed (agent contract)
+- `capabilities.ops.constraints.hierarchy` reports `hierarchical_write_v1`; it had been
+  hard-coded to `flat_v1_only` since before 0.17 made child sheets writable, and a test
+  was pinning the stale value.
+
+### Added (drift gates — these are the ones that were missing)
+- The release CI-green gate is rewritten: it asks the CI workflow for its conclusion on the
+  tagged SHA, so "CI never ran this commit" and "CI ran and failed" are distinct states.
+  The previous version counted its own check run, which made the "never ran" branch
+  unreachable — a tag on a commit CI had never seen would have passed. It also asserts the
+  four `windows-latest` matrix jobs by name, so a shrinking matrix fails instead of
+  quietly weakening the gate.
+- `_OP_FIELDS` field kinds and all ten enum tables are now asserted against
+  `ops.schema.json` (only field *names* were compared before).
+- Schema mirroring iterates both directories, so an orphan in `src/akcli/schemas/` is
+  pruned or reported — it used to be invisible while being loaded in preference to the
+  canonical file.
+- The three hand-patched `newline="\n"` call sites in `_vendor/jlc2kicadlib` are recorded
+  in `PROVENANCE.md` and pinned by a sentinel test; `_vendor` is excluded from the general
+  text-I/O gate, so re-vendoring would have dropped them silently.
+- CI asserts zero skips for `test_kicad_parity.py` (33 tests against real `kicad-cli` could
+  previously degrade to green) and for the four ngspice test files; `test_kicad_parity.py`
+  uses the product's own `kicad-cli` discovery instead of a second copy.
+- `tests/golden/nets-groups_board.json` is committed, so `test_engine_parity.py` no longer
+  skips permanently.
+- `changelog_extract.py --strict` fails instead of falling back to `[Unreleased]` or a stub
+  line, and a test asserts the `pyproject` version has a matching CHANGELOG section.
+- `golden_regen.py` requires `--bless-all` to rewrite more than five snapshots at once.
+- `hooks.json` command paths are asserted to exist; `calc.html`'s diagram table is
+  asserted against the calculator registry; every `MAPPABLE` calculator's `--ops` output is
+  validated (only two of eight were).
+- `.claude-plugin/marketplace.json` carries the version and is covered by the drift gate
+  (it had been documented as covered but was not); a missing manifest now fails.
+- `pypa/gh-action-pypi-publish` is pinned to a SHA (it was a mutable branch ref on the job
+  holding `id-token: write`), ruff's CI scope extended to
+  `tools` and `hooks`, and pytest gained `filterwarnings = ["error"]` — the only warning
+  gate that will give notice before a stdlib removal in a future Python.
+
 ## [0.17.0] - 2026-07-25
 
 ### Changed (write-identity — re-apply compatibility note)

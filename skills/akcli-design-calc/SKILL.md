@@ -29,7 +29,13 @@ akcli calc <name> k=v ... [--json]
 ```
 
 Inputs accept engineering notation: `4k7`, `100n`, `35u`, `2M2`, `1e-7`.
-`--json` returns `{calc, inputs, results{value,unit,note}, reference}`.
+`--json` returns `{calc, inputs, results{value,unit,note}, reference}`;
+`list --json` and `info <name> --json` describe the registry itself.
+
+Degenerate inputs are **refused**, not fudged: `nan`/`inf` are rejected at the
+parameter (they are not physical quantities), and a value that would make the
+formula divide by zero or leave its domain exits `2` with a `USAGE` envelope.
+No result is ever a bare `NaN`/`Infinity` — that is not valid JSON.
 
 **Input-suffix rule — already-milli units take a bare number.** When a
 parameter's declared unit is itself milli-denominated (`battery-life`'s
@@ -99,9 +105,11 @@ Say so when a user asks, and use the conservative IPC-2221 fit
 - `--md` — paste-ready markdown result table for reports.
 - `--ops out.json` — design-type calculators (`vdivider-design`,
   `regulator-design`, `led`, `i2c-pullup`, `crystal-caps`, `hysteresis-design`,
-  `sallen-key`, `attenuator`) emit a valid `place_component` op-list with the
-  computed standard values filled in: edit coordinates, `akcli plan`, then
-  `draw`.
+  `sallen-key`, `attenuator`) emit a valid op-list with the computed standard
+  values filled in: edit coordinates, `akcli plan`, then `draw`. Four emit a
+  macro op (`vdivider-design` → `place_divider`, `led` →
+  `place_led_indicator`, `i2c-pullup` → `place_pullup`, `crystal-caps` →
+  `place_crystal`); the rest emit `place_component` ops.
 - `akcli view calc` — local web UI (localhost) with SVG illustrations,
   pinned/recent lists and shareable URLs, for humans reviewing your numbers.
 

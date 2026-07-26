@@ -227,7 +227,9 @@ Each assert names exactly **one** measurement source and its bound(s).
   the four inequalities. `approx` additionally accepts `tol` (relative, default
   `0.05` = 5%). When a two-sided assert fails, `evaluate()` names the side that
   was violated. Bound values accept engineering notation (`"25m"`, `"4.7k"`,
-  `"1e-7"`) parsed with the same rules as `akcli calc`.
+  `"1e-7"`, `"100N"`) parsed with the same rules as `akcli calc` — prefixes are
+  case-insensitive except `m` (milli) vs `M` (mega), and `inf`/`nan`/`1_000`
+  are rejected rather than silently accepted by `float()`.
 - **Analysis** — inferred automatically, or pinned with an explicit `analysis`
   key (which must name a configured analysis). Inference order:
   1. explicit `analysis` key;
@@ -327,8 +329,9 @@ SPICE-safe value, and it resolves the notorious **`M` collision**: in the KiCad
 values this tool reads, `M` means **mega** (a "1M" resistor is 1 MΩ), but in
 SPICE `M` means **milli** and mega must be written `MEG`. The tool parses with
 the mega meaning and renders SPICE `MEG`, so a `1M` resistor lands as `1MEG` and
-a `25m` value stays `25m`. It also strips trailing unit words (`4.7kohm`,
-`100nF`, `10uH`).
+a `25m` value stays `25m`. Every other prefix is read case-insensitively (`10U`,
+`100N`, `1T`) and re-rendered in canonical SPICE spelling. It also strips
+trailing unit words (`4.7kohm`, `100nF`, `10uH`, `10UF`).
 
 #### The value gate — what an `R`/`C`/`L` value may say
 
@@ -342,25 +345,41 @@ every value that is actually **emitted** as a passive goes through
 | `1M` | `1MEG` | KiCad mega → SPICE mega |
 | `2M2`, `1k5` | `2.2MEG`, `1.5k` | IEC 60062 embedded decimal |
 | `600R`, `4R7` | `600`, `4.7` | IEC 60062 `R` = decimal **and** ohms marker |
+| `10U`, `100N`, `4U7`, `1T`, `10K` | `10u`, `100n`, `4.7u`, `1T`, `10k` | prefixes are **case-insensitive** — except `m`/`M` (see below) |
+| `1μF`, `1µF` | `1u` | both micro signs: U+03BC greek mu and U+00B5 micro sign |
 | `4.7 k`, `220 ohm`, `100 nF` | `4.7k`, `220`, `100n` | a unit/prefix split off by a space is re-joined, never dropped |
 | `10k 1%`, `100n 50V X7R` | `10k`, `100n` | trailing rating/tolerance tokens dropped → `SIM_VALUE_NORMALIZED` warning |
 | `DNP`, `NP`, `OPEN`, `NO POP` | *(nothing)* | deliberately unpopulated → the part is skipped |
 | `LED red`, `TBD`, `1%` | — | **`SIM_VALUE_INVALID`** (exit 6): not a value |
+| `1_000`, `inf`, `nan`, `1e400` | — | **`SIM_VALUE_INVALID`**: Python's `float()` accepts all four; a circuit can mean none of them (see below) |
 | `600R` on an **`L`** | — | **`SIM_VALUE_INVALID`**: an ohms-marked value is an impedance rating, not an inductance — a ferrite bead's `600R` is 600 Ω at its test frequency, never 600 H (the same rule rejects a farad-marked value on an `R`, etc.) |
+
+**Case.** SPICE is case-insensitive and Altium libraries routinely carry
+upper-cased values, so `10U` = `10u`, `100N` = `100n`, `1T` = `1t`, `10G` =
+`10g`. The single exception is the pair that *only* case distinguishes:
+lowercase `m` is **milli**, uppercase `M` is **mega** (KiCad convention) — `2M2`
+is 2.2 MΩ, `2m2` is 2.2 mΩ. Both are re-rendered into unambiguous SPICE
+(`2.2MEG` / `2.2m`), so ngspice never has to guess either.
 
 > ### ⚠️ Why this is a hard gate
 > `"10k 1%"` used to reach ngspice verbatim, where it parses as **10** — a
 > 10k/10k divider off 3.3 V then measured **3.30 V** instead of 1.65 V, and the
-> run exited `0` with `PASS`. A confident wrong number is worse than an error, so
-> a value the tool cannot parse confidently now refuses to simulate.
+> run exited `0` with `PASS`. `1_000` was the same trap wearing a number's
+> clothes: Python's `float()` reads it as 1000, ngspice reads it as **1**, and a
+> 10k/`1_000` divider measured **3.3e-4 V** with no warning at all. `inf`/`nan`
+> and the silently-overflowing `1e400` went straight into the deck too. A
+> confident wrong number is worse than an error, so a value the tool cannot read
+> *the same way ngspice will* now refuses to simulate — and the refusal lists the
+> formats it does accept.
 
 Two more hard-won gotchas the deck builder handles so you never see them:
 
 - **Line 1 is a TITLE line.** ngspice always treats the first deck line as a
   comment/title, so the builder emits `* akcli sim: <source>` first and your
   real elements start on line 2.
-- **`1M` means milli, mega is `1MEG`** — see above; centralized in
-  `spice_value()` and never re-implemented in the deck builder.
+- **To ngspice itself, `1M` means milli and mega must be written `1MEG`** — the
+  opposite of the KiCad value convention, which is why every emitted value goes
+  through `spice_value()` (see above) and the deck builder never re-implements it.
 
 ### Fitting a diode from a datasheet — `fit_diode`
 

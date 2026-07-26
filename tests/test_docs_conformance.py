@@ -38,7 +38,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 def _doc_files() -> list[Path]:
     files = [_ROOT / "README.md", _ROOT / "INSTALL.md", _ROOT / "ROADMAP.md"]
-    files += sorted((_ROOT / ".github").glob("README.zh-*.md"))
+    files += sorted((_ROOT / ".github").glob("README.*.md"))
     files += sorted((_ROOT / "docs").glob("*.md"))
     files += sorted((_ROOT / "skills").glob("*/SKILL.md"))
     files += sorted((_ROOT / "commands").glob("*.md"))
@@ -191,19 +191,29 @@ _COUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ops", re.compile(r"(\d+)\s*[種种]\s*op(?![\w-])")),
     ("macros", re.compile(r"(\d+)\s*[種种]\s*(?:巨集|宏)")),
     ("calculators", re.compile(r"(\d+)\s*[個个種种][一-鿿]{0,10}(?:計算|计算)")),
+    # ja — the katakana/kana forms the zh patterns cannot reach ("10 マクロ",
+    # "60 個の規格準拠計算機"; the bare "22 op" is already caught in English).
+    ("macros", re.compile(r"(\d+)\s*(?:個\s*の\s*)?マクロ")),
+    ("calculators", re.compile(r"(\d+)\s*個の[ぁ-んァ-ヴ一-鿿]{0,12}計算機")),
 ]
 
 
 def _count_cases() -> list[tuple[str, int, str, int]]:
-    """``(rel, lineno, kind, claimed)`` for every count claim in the file set."""
+    """``(rel, lineno, kind, claimed)`` for every count claim in the file set.
+
+    Emphasis markers are stripped first: the patterns want the noun to follow
+    the digits across whitespace, so a bolded ``**60** calculators`` (which is
+    how every README writes its `calc` table row) was invisible to the gate.
+    """
     cases: list[tuple[str, int, str, int]] = []
     for path in _doc_files():
         rel = path.relative_to(_ROOT).as_posix()
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), 1
         ):
+            plain = line.replace("**", "").replace("__", "")
             for kind, pat in _COUNT_PATTERNS:
-                for m in pat.finditer(line):
+                for m in pat.finditer(plain):
                     cases.append((rel, lineno, kind, int(m.group(1))))
     return cases
 
@@ -274,3 +284,37 @@ def test_schema_files_listed_in_spec() -> None:
     published = sorted(f.name for f in (_ROOT / "schemas").glob("*.json"))
     missing = [name for name in published if f"`{name}`" not in section]
     assert not missing, f"schemas absent from SPEC §3.12 table: {missing}"
+
+
+# --------------------------------------------------------------------------- #
+# release-notes gate: the shipped version has its own CHANGELOG section.
+#
+# The release workflow renders `## [X.Y.Z]` into the GitHub Release body
+# (`tools/changelog_extract.py --strict`). Bumping pyproject without moving
+# `[Unreleased]` used to be invisible until the notes were already published.
+# --------------------------------------------------------------------------- #
+def test_pyproject_version_has_a_changelog_section() -> None:
+    import tomllib
+
+    with (_ROOT / "pyproject.toml").open("rb") as fh:
+        version = tomllib.load(fh)["project"]["version"]
+
+    text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    headings = [ln.strip() for ln in text.splitlines() if ln.startswith("## ")]
+    wanted = f"## [{version}]"
+    assert any(h.startswith(wanted) for h in headings), (
+        f"CHANGELOG.md has no '{wanted}' heading for the pyproject version "
+        f"{version} (headings: {headings[:6]}). Move the [Unreleased] section "
+        f"to [{version}] before tagging — the release workflow extracts that "
+        "exact section as the GitHub Release body.")
+
+    # ...and it must be non-empty, which is what --strict actually enforces.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "changelog_extract", _ROOT / "tools" / "changelog_extract.py")
+    assert spec and spec.loader
+    ce = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ce)
+    body = ce.extract(text, version, strict=True)
+    assert body, f"CHANGELOG.md '{wanted}' section is empty"

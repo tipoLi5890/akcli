@@ -13,7 +13,7 @@ A globally installed `akcli` shadows this checkout — always prefix with
 PYTHONPATH=src python -m pytest tests/ -q            # full suite
 PYTHONPATH=src python -m pytest tests/test_ops.py -q # one file
 PYTHONPATH=src python -m akcli <cmd> ...             # run the CLI
-python -m ruff check src tests                       # lint (CI-exact scope)
+python -m ruff check src tests tools hooks           # lint (CI-exact scope)
 python -m mypy --config-file pyproject.toml          # typed beachhead (see [tool.mypy].files)
 python3 tools/golden_regen.py                        # regenerate golden snapshots (review the diff!)
 ```
@@ -92,10 +92,13 @@ CI enforces all of these together; change them in ONE commit:
 
 ## Invariants (verified by tests — don't regress)
 
-- **Byte-identical re-apply**: deterministic UUIDv5 (root uuid +
-  `designator` (op-index-free, so op-list edits keep part identity) or `tag:coords`; annotation `key`s ignore coords/index)
-  + `_append_top_idempotent` replace-in-place. Every new op needs an
-  apply-twice byte-equality test.
+- **Byte-identical re-apply**: deterministic UUIDv5 seeded from root uuid +
+  the node's own CONTENT — `designator`, `tag:coords`, `label:name:anchor`,
+  `sheet:file:name`; **never the op index**, so an op-list edit keeps every
+  untouched node's identity — plus `_append_top_idempotent` replace-in-place
+  and a per-apply claim registry that refuses two ops seeding one uuid
+  (annotation `key`s ignore coords too). Every new op needs an apply-twice
+  byte-equality test AND an insert-op-then-reapply no-duplicate test.
 - **Connectivity is the only hard write gate**; geometry/layout findings are
   advisory. `arrange`/group moves must stay net-preserving (before/after
   `netdiff.equivalent` asserted).

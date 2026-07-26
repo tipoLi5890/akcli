@@ -34,14 +34,110 @@ from pathlib import Path
 from . import model
 from .readers import footprint_lib, sexpr
 from .report import Finding, Severity, anchor
+# ONE s-expression quoting authority for the whole tree (escapes backslashes,
+# quotes AND control characters) — the hand-rolled repair-site copies escaped
+# only the double-quote.
+from .writers.sexpr_writer import quote as _quote
 
 # `(type "Table")` indirection depth cap (guards a cyclic/deep table chain).
 _MAX_TABLE_DEPTH = 8
 
 __all__ = [
     "LibEntry", "LibTable", "Workspace", "read_table", "discover", "audit",
-    "plan_rename", "plan_model_paths", "RepairEdit",
+    "plan_rename", "plan_model_paths", "RepairEdit", "expand_var",
+    "kicad_data_roots",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# KiCad built-in path variables
+# --------------------------------------------------------------------------- #
+# KiCad's bundled default lib-tables are written entirely in terms of
+# ``${KICAD<N>_SYMBOL_DIR}`` / ``${KICAD<N>_FOOTPRINT_DIR}`` /
+# ``${KICAD<N>_3DMODEL_DIR}``. These are **compiled into KiCad** — they are not
+# exported to the environment, and on a clean install `kicad_common.json` stores
+# them as null — so a purely ``os.environ`` expansion resolves NOTHING and every
+# standard nickname (``Device:R`` …) dies as SYMBOL_NOT_FOUND. We reproduce
+# KiCad's defaults by deriving them from the installed KiCad that
+# :func:`..drivers.kicad_cli.find` already locates. An environment value always
+# wins (that is also how KiCad treats a user override).
+_KICAD_PATH_VAR_RE = re.compile(
+    r"^KICAD\d*_(SYMBOL|FOOTPRINT|3DMODEL|TEMPLATE)_DIR$")
+_KICAD_VAR_SUBDIR = {
+    "SYMBOL": "symbols",
+    "FOOTPRINT": "footprints",
+    "3DMODEL": "3dmodels",
+    "TEMPLATE": "template",
+}
+# keyed by (kicad-cli path, subdir) so a changed KICAD_CLI re-probes
+_builtin_cache: dict[tuple[str, str], str | None] = {}
+
+
+def kicad_data_roots(exe: os.PathLike | str | None) -> list[Path]:
+    """Candidate KiCad shared-data roots for a ``kicad-cli`` executable path.
+
+    Pure and ordered (no filesystem access) so it is unit-testable with a
+    fabricated ``exe``; the caller keeps the first candidate that exists.
+
+    * macOS app bundle — ``<bundle>.app/Contents/MacOS/kicad-cli`` →
+      ``<bundle>.app/Contents/SharedSupport``;
+    * POSIX/Windows install prefix — ``<prefix>/bin/kicad-cli[.exe]`` →
+      ``<prefix>/share/kicad`` (covers ``/usr``, ``/usr/local``, Flatpak
+      ``/app`` and ``C:\\Program Files\\KiCad\\10.0``);
+    * plus the distro defaults on non-Windows, for a ``kicad-cli`` that lives
+      outside its data prefix (e.g. ``/usr/lib/kicad/bin/kicad-cli``).
+    """
+    roots: list[Path] = []
+    if exe:
+        bindir = Path(exe).parent
+        if bindir.name == "MacOS" and bindir.parent.name == "Contents":
+            roots.append(bindir.parent / "SharedSupport")
+        roots.append(bindir.parent / "share" / "kicad")
+    if os.name != "nt":
+        roots += [Path("/usr/share/kicad"), Path("/usr/local/share/kicad")]
+    out: list[Path] = []
+    for r in roots:                              # order-preserving dedupe
+        if r not in out:
+            out.append(r)
+    return out
+
+
+def _kicad_builtin_dir(var: str) -> str | None:
+    """KiCad's compiled-in default for ``var``, or ``None`` if not derivable."""
+    m = _KICAD_PATH_VAR_RE.match(var)
+    if m is None:
+        return None
+    sub = _KICAD_VAR_SUBDIR[m.group(1)]
+    try:
+        from .drivers import kicad_cli
+        exe = kicad_cli.find()
+    except Exception:                            # pragma: no cover - defensive
+        return None
+    key = (str(exe or ""), sub)
+    if key not in _builtin_cache:
+        val: str | None = None
+        for root in kicad_data_roots(exe):
+            cand = root / sub
+            try:
+                if cand.is_dir():
+                    val = str(cand)
+                    break
+            except OSError:                      # pragma: no cover - defensive
+                continue
+        _builtin_cache[key] = val
+    return _builtin_cache[key]
+
+
+def expand_var(var: str) -> str | None:
+    """Value of a lib-table ``${VAR}``: environment first, KiCad built-ins next.
+
+    ``None`` means "leave the reference unexpanded" (a genuinely unknown
+    variable), which callers report as ``LIB_URI_UNRESOLVED``.
+    """
+    val = os.environ.get(var)
+    if val is not None:
+        return val
+    return _kicad_builtin_dir(var)
 
 
 @dataclass
@@ -106,7 +202,7 @@ class Workspace:
             var = m.group(1)
             if var == "KIPRJMOD":
                 return str(self.project_dir)
-            val = os.environ.get(var)
+            val = expand_var(var)
             if val is None:
                 unresolved.append(var)
                 return m.group(0)
@@ -120,9 +216,9 @@ class Workspace:
 
 
 def _expand_env_uri(uri: str) -> Path | None:
-    """Expand ``${VAR}`` env vars in a lib-table uri (no ``${KIPRJMOD}``)."""
+    """Expand ``${VAR}`` vars in a lib-table uri (no ``${KIPRJMOD}``)."""
     expanded = re.sub(r"\$\{([^}]+)\}",
-                      lambda m: os.environ.get(m.group(1), m.group(0)), uri)
+                      lambda m: expand_var(m.group(1)) or m.group(0), uri)
     if "${" in expanded:
         return None
     return Path(expanded)
@@ -140,6 +236,12 @@ def read_table(path: os.PathLike | str, *, _seen: set | None = None,
     (the resolution scope just shrinks) rather than raising.
     """
     p = Path(path)
+    # Lenient decode ON PURPOSE (unlike the .kicad_sch readers, which decode
+    # strictly via safety.read_text_guarded). Lib-tables are ENVIRONMENT, not
+    # the document under edit: they are shipped by KiCad installs and by
+    # third-party library packs, and a mojibake byte in one library's
+    # descr/uri must not take out `library scan` for every OTHER library. A
+    # table we cannot recognise still fails loudly below (root-tag check).
     root = sexpr.parse(p.read_text(encoding="utf-8", errors="replace"))
     kind = {"sym_lib_table": "sym", "fp_lib_table": "fp"}.get(root.tag or "")
     if kind is None:
@@ -308,7 +410,7 @@ def _resolve_model(mpath: str, mod_dir: Path, project_dir: Path) -> tuple[Path |
         expanded = expanded.replace(var, val)
     expanded = re.sub(
         r"\$\{([^}]+)\}",
-        lambda m: os.environ.get(m.group(1), m.group(0)),
+        lambda m: expand_var(m.group(1)) or m.group(0),
         expanded,
     )
     if "${" in expanded:
@@ -502,6 +604,10 @@ def plan_rename(ws: Workspace, old: str, new: str) -> list[RepairEdit]:
 
     prefix = f"{old}:"
     for path in targets:
+        # Lenient decode + swallow: this is a best-effort SCAN across every
+        # registered library, not a read of the document under edit. One
+        # unreadable third-party file must not abort the repair plan for the
+        # rest (see read_table for the same rationale).
         try:
             root = sexpr.parse(path.read_text(encoding="utf-8", errors="replace"))
         except Exception:
@@ -518,7 +624,7 @@ def plan_rename(ws: Workspace, old: str, new: str) -> list[RepairEdit]:
                 val = node.children[2]
                 if val.is_atom and (val.value or "").startswith(prefix):
                     new_val = new + ":" + (val.value or "")[len(prefix):]
-                    val.text = '"' + new_val.replace('"', '\\"') + '"'
+                    val.text = _quote(new_val)
                     count += 1
             for child in node.children:
                 _walk(child)
@@ -551,6 +657,8 @@ def plan_model_paths(ws: Workspace, mode: str) -> list[RepairEdit]:
         if unresolved or not lib_dir.is_dir():
             continue
         for mod in sorted(lib_dir.glob("*.kicad_mod")):
+            # Lenient decode + swallow, same rationale as plan_footprint_lib:
+            # a best-effort sweep of third-party footprint libraries.
             try:
                 root = sexpr.parse(mod.read_text(encoding="utf-8", errors="replace"))
             except Exception:
@@ -566,7 +674,7 @@ def plan_model_paths(ws: Workspace, mode: str) -> list[RepairEdit]:
                     new_val = (lib_dir / val).resolve().as_posix()
                 else:
                     new_val = mode.rstrip("/") + "/" + Path(val).name
-                mnode.children[1].text = '"' + new_val.replace('"', '\\"') + '"'
+                mnode.children[1].text = _quote(new_val)
                 count += 1
             if count:
                 edits.append(RepairEdit(

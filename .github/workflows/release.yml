@@ -13,7 +13,10 @@
 #
 # The `ci-green` job below refuses to build/publish a tag whose commit has not
 # gone fully green on CI (the historical release-breaker: tags pushed before
-# windows-latest had ever run the commit). Escape hatch: run this workflow via
+# windows-latest had ever run the commit). Its logic lives in
+# .github/scripts/ci_green_gate.sh — it asks the CI *workflow-runs* API for the
+# tagged SHA, so "CI never ran this commit" and "CI ran and went red" are two
+# distinct, both-fatal states. Escape hatch: run this workflow via
 # workflow_dispatch with `force: true`.
 name: Release
 
@@ -30,7 +33,7 @@ on:
 
 permissions:
   contents: write # create the GitHub Release + upload assets
-  checks: read # read check-run conclusions for the tagged commit
+  actions: read # read CI workflow-run + job conclusions for the tagged commit
 
 concurrency:
   group: release-${{ github.ref }}
@@ -38,9 +41,11 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Gate: every check run on the tagged commit must have concluded success.
-  # A tag is public the moment it is pushed, so this is the last place the
-  # matrix (notably windows-latest) can still stop a bad release.
+  # Gate: the CI workflow must have RUN on the tagged commit and concluded
+  # success, with the windows-latest matrix legs individually asserted. A tag
+  # is public the moment it is pushed, so this is the last place the matrix can
+  # still stop a bad release. Logic + rationale: .github/scripts/ci_green_gate.sh
+  # (unit-tested by tests/test_release_gate.py).
   # ---------------------------------------------------------------------------
   ci-green:
     name: CI green on tagged commit
@@ -50,52 +55,16 @@ jobs:
         if: ${{ inputs.force }}
         run: echo "::warning::CI-green gate bypassed via workflow_dispatch force=true."
 
-      - name: Verify all check runs succeeded for ${{ github.sha }}
+      - uses: actions/checkout@v7
+        if: ${{ !inputs.force }}
+
+      - name: Verify the CI workflow ran and went green on ${{ github.sha }}
         if: ${{ !inputs.force }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # Poll: CI is usually already finished (the runbook tags after green),
-          # but a tag pushed together with the commit races its own checks.
-          deadline=$(( SECONDS + 1800 ))
-          while :; do
-            gh api --paginate \
-              "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs" \
-              --jq '.check_runs[] | [.name, .status, (.conclusion // "none")] | @tsv' \
-              > runs.tsv
-            total=$(wc -l < runs.tsv | tr -d ' ')
-            if [ "$total" -eq 0 ]; then
-              echo "::error::No check runs found for ${{ github.sha }} — the CI workflow never ran this commit. Push the commit, wait for green, then re-tag."
-              exit 1
-            fi
-            # Own run excluded here too — this job IS a check run on the same
-            # SHA and never completes while it waits (self-deadlock otherwise).
-            pending=$(awk -F'\t' \
-              '$2 != "completed" && $1 !~ /CI green on tagged commit/' \
-              runs.tsv | wc -l | tr -d ' ')
-            if [ "$pending" -eq 0 ]; then
-              break
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for $pending in-progress check run(s) on ${{ github.sha }}:"
-              awk -F'\t' '$2 != "completed" { print "  " $1 " (" $2 ")" }' runs.tsv >&2
-              exit 1
-            fi
-            echo "waiting on $pending/$total check run(s)..."
-            sleep 30
-          done
-          # Own run excluded: this job is itself a check run on the same SHA.
-          failed=$(awk -F'\t' \
-            '$3 != "success" && $3 != "neutral" && $3 != "skipped" && $1 !~ /CI green on tagged commit/' \
-            runs.tsv | wc -l | tr -d ' ')
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::CI is not green on ${{ github.sha }} — refusing to release:"
-            awk -F'\t' '$3 != "success" && $3 != "neutral" && $3 != "skipped" && $1 !~ /CI green on tagged commit/ { print "  " $1 ": " $3 }' runs.tsv >&2
-            echo "Fix the failures on main, then re-tag (or re-run this workflow with force=true to bypass)." >&2
-            exit 1
-          fi
-          echo "all $total check run(s) green on ${{ github.sha }}"
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: bash .github/scripts/ci_green_gate.sh
 
   release:
     name: build + GitHub Release
@@ -145,8 +114,11 @@ jobs:
           python -m build
           twine check dist/*
 
+      # --strict: no silent fallback to [Unreleased]. Forgetting to move the
+      # section would otherwise ship "the next version's notes" as this
+      # release's body, with exit 0 and nothing in the log.
       - name: Extract release notes from CHANGELOG
-        run: python tools/changelog_extract.py "${{ steps.ver.outputs.version }}" > release-notes.md
+        run: python tools/changelog_extract.py --strict "${{ steps.ver.outputs.version }}" > release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -165,6 +137,14 @@ jobs:
           name: dist
           path: dist/
           retention-days: 7
+
+      # `publish-pypi` skipping is a silent no-op in the run summary (a skipped
+      # job looks the same as a job that was never meant to run), so say it out
+      # loud on the job that always runs.
+      - name: Note when PyPI publishing is disabled
+        if: ${{ vars.PYPI_TRUSTED_PUBLISHING != 'true' }}
+        run: |
+          echo "::warning::PyPI publishing disabled (repository variable PYPI_TRUSTED_PUBLISHING is not 'true') — this release ships to GitHub Releases only. See docs/releasing.md."
 
   # ---------------------------------------------------------------------------
   # PyPI publish via trusted publishing (OIDC, no long-lived token). Skipped
@@ -192,8 +172,12 @@ jobs:
           name: dist
           path: dist/
 
+      # Pinned to a commit SHA, not the mutable `release/v1` branch ref: this
+      # job holds `id-token: write`, so a compromised/retargeted branch would
+      # hand an attacker the PyPI trusted-publishing identity. Bump it by hand
+      # (rewrite both the SHA and the trailing version comment together).
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           packages-dir: dist/
           skip-existing: true

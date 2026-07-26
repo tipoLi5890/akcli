@@ -7,9 +7,15 @@ it). Editing the canonical file and forgetting the copy leaves the CLI
 serving a stale schema in a ``PYTHONPATH=src`` checkout — run this instead
 of copying by hand.
 
+The sync is a two-way SET comparison, not a one-way copy: ``ops._schema_text``
+loads the packaged mirror FIRST, so a mirror file whose canonical original was
+deleted or renamed is not dead weight — the wheel would keep serving that
+retired schema forever. Orphaned mirrors are therefore deleted (or reported
+under ``--check``).
+
 Usage:
-    python3 tools/sync_schemas.py          # copy canonical -> mirror
-    python3 tools/sync_schemas.py --check  # exit 1 if any mirror drifted
+    python3 tools/sync_schemas.py          # canonical -> mirror (+ prune)
+    python3 tools/sync_schemas.py --check  # exit 1 on any drift or orphan
 """
 
 from __future__ import annotations
@@ -22,24 +28,36 @@ CANONICAL = ROOT / "schemas"
 MIRROR = ROOT / "src" / "akcli" / "schemas"
 
 
+def schema_names() -> list[str]:
+    """Every schema basename on EITHER side (so orphan mirrors are seen)."""
+    return sorted({p.name for p in CANONICAL.glob("*.json")}
+                  | {p.name for p in MIRROR.glob("*.json")})
+
+
 def main(argv: list[str]) -> int:
     check = "--check" in argv
     drift: list[str] = []
-    for src in sorted(CANONICAL.glob("*.json")):
-        dst = MIRROR / src.name
+    for name in schema_names():
+        src, dst = CANONICAL / name, MIRROR / name
+        if not src.exists():                       # orphaned mirror
+            drift.append(f"{name} (orphan: no schemas/{name})")
+            if not check:
+                dst.unlink()
+                print(f"removed orphan {name}")
+            continue
         want = src.read_bytes()
         have = dst.read_bytes() if dst.exists() else None
         if have == want:
             continue
-        drift.append(src.name)
+        drift.append(name)
         if not check:
             dst.write_bytes(want)
-            print(f"synced {src.name}")
+            print(f"synced {name}")
     if check and drift:
         print("mirror drift: " + ", ".join(drift))
         return 1
     if not drift:
-        print(f"mirrors up to date ({len(list(CANONICAL.glob('*.json')))} file(s))")
+        print(f"mirrors up to date ({len(schema_names())} file(s))")
     return 0
 
 

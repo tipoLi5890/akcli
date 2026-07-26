@@ -36,6 +36,9 @@ LOCKED pipeline (``build_nets``):
    multi-name nets.
 7. Stable membership-hash ids (``model.Net.stable_id``) — NEVER coordinate-derived.
 8. Multi-sheet union by Port/SheetEntry/global name.
+9. Record ``Net.sheet_path`` — the sheet path eeschema qualifies the exported net
+   NAME with (sheet-scoped names only; global labels / power ports get none).
+   Emission metadata for ``exporters.to_kicad_netlist``; ``Net.name`` stays bare.
 
 Coordinates arrive as floats (mils from Altium ``_Frac`` assembly, or mm→mil
 from KiCad). They are quantized to integers (``_QUANT``) so every geometric test
@@ -47,7 +50,7 @@ from __future__ import annotations
 import bisect
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 
 from . import model
 
@@ -64,6 +67,14 @@ _POWER_SCOPES = frozenset({"power"})
 # exactly that pair — and NOTHING else. They never name a net (see below).
 _GLOBAL_SCOPES = frozenset({"global", "power", "port", "sheet_entry", "hier"})
 _LABEL_SCOPES = frozenset({"local", "global", "port", "sheet_entry"})
+# Scopes whose net NAME is sheet-qualified when exported to a KiCad netlist.
+# eeschema prefixes a net name with the sheet path unless its driver is a
+# global label or a power pin (kicad-cli 10.0.4-verified: a root-sheet `(label
+# "GND")` exports as "/GND", a `power:GND` symbol or `(global_label "VOUT")` as
+# "GND"/"VOUT"). akcli maps KiCad's hierarchical labels onto "local" too, and
+# eeschema prefixes those the same way. Altium's cross-sheet Port/SheetEntry
+# names merge globally in this engine, so they are treated as global here.
+_SHEET_SCOPED_SCOPES = frozenset({"local"})
 
 # Confidence assigned to a net that carries more than one distinct explicit name.
 _MULTI_NAME_CONFIDENCE = 0.8
@@ -278,6 +289,20 @@ def _name_priority(scope: str, power_priority: bool) -> int:
     return 0
 
 
+def _sheet_path(sheet: str, sheet_paths: Mapping[str, str] | None) -> str:
+    """Human-readable ``/a/b/`` sheet path for a raw sheet key.
+
+    ``sheet_paths`` is the reader-supplied map from its own sheet key (the
+    KiCad reader's sheet-INSTANCE uuid path) to the human path KiCad writes.
+    Without a map the key is already human (the Altium reader's sheet-name
+    namespace) and only needs the leading/trailing slashes KiCad uses.
+    """
+    if sheet_paths is not None and sheet in sheet_paths:
+        return sheet_paths[sheet]
+    trimmed = sheet.strip("/")
+    return f"/{trimmed}/" if trimmed else "/"
+
+
 def _name_key(scope: str, text: str, sheet: str) -> tuple[str, str]:
     """Merge key for the global same-name pass.
 
@@ -290,13 +315,20 @@ def _name_key(scope: str, text: str, sheet: str) -> tuple[str, str]:
 
 
 def build_nets(
-    prims: model.NetPrimitives, *, t_midspan_connects: bool = True
+    prims: model.NetPrimitives,
+    *,
+    t_midspan_connects: bool = True,
+    sheet_paths: Mapping[str, str] | None = None,
 ) -> list[model.Net]:
     """Infer nets from raw primitives. See module docstring for the pipeline.
 
     ``t_midspan_connects`` selects step 3's dialect: ``True`` (Altium — a wire
     vertex on another wire's mid-span connects with no explicit dot), ``False``
     (eeschema — only a junction node joins a mid-span touch).
+
+    ``sheet_paths`` maps the caller's sheet keys to the human-readable sheet
+    paths KiCad qualifies net names with (``{"": "/", "/<uuid>": "/Amp/"}``); it
+    only feeds ``Net.sheet_path`` (netlist emission) and never connectivity.
     """
     dsu = _DSU()
 
@@ -530,7 +562,7 @@ def build_nets(
     for text, scope, sheet, ql in label_nodes:
         if scope == "hier":
             continue  # synthetic connector: merges clusters, never names them
-        names_by_root[dsu.find(ql)].append((text, scope))
+        names_by_root[dsu.find(ql)].append((text, scope, sheet))
 
     nets: list[model.Net] = []
     for root, members in members_by_root.items():
@@ -541,10 +573,21 @@ def build_nets(
         # distinct names on this net, preserving (name -> first-seen scope).
         scope_of: dict[str, str] = {}
         order: list[str] = []
-        for text, scope in names_by_root.get(root, []):
+        # ...and, per name, whether ANY occurrence of it is global-scoped plus
+        # the sheet of its first sheet-scoped one. One text can be carried by
+        # both a local and a global label (the corpus board does exactly that
+        # for V3V3/NRST): eeschema's driver priority then picks the global one
+        # and writes the name UNqualified, so first-seen scope is not enough.
+        globalish: dict[str, bool] = {}
+        sheet_of: dict[str, str] = {}
+        for text, scope, sheet in names_by_root.get(root, []):
             if text not in scope_of:
                 scope_of[text] = scope
                 order.append(text)
+            sheet_scoped = scope in _SHEET_SCOPED_SCOPES
+            globalish[text] = globalish.get(text, False) or not sheet_scoped
+            if sheet_scoped:
+                sheet_of.setdefault(text, sheet)
 
         merge_reasons: list[str] = []
         if order:
@@ -557,6 +600,10 @@ def build_nets(
             aliases = [n for n in all_names if n != canonical]
             is_named = True
             confidence = 1.0
+            sheet_path = (
+                "" if globalish[canonical]
+                else _sheet_path(sheet_of[canonical], sheet_paths)
+            )
             if len(all_names) > 1:
                 confidence = _MULTI_NAME_CONFIDENCE
                 merge_reasons.append("multiple names on one net: " + ", ".join(all_names))
@@ -571,6 +618,7 @@ def build_nets(
             all_names = []
             is_named = False
             confidence = 1.0
+            sheet_path = ""
 
         nets.append(
             model.Net(
@@ -584,6 +632,7 @@ def build_nets(
                 is_named=is_named,
                 confidence=confidence,
                 merge_reasons=merge_reasons,
+                sheet_path=sheet_path,
             )
         )
 

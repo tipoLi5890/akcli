@@ -17,12 +17,10 @@
   },
   "groups_board.kicad_sch": {
     "fingerprints": [
-      "0a4ffdc8460e69518d736ded8e32501d",
       "1263fcdd392062085741287b56985c0c",
-      "32150da953bd0db7fbdc3c30c54f636e",
+      "705b99222fb44e561e77d8ebc83c9bc9",
       "8fb96b97a67e56ed57903e160e6b8597",
       "a827ca83be43d4676bb6c5628b606cfa",
-      "adac07eac6c84b1eb5b6d2288f27381a",
       "bbb45c6b0a30c1ad334877b9f5bed672",
       "c255310b9f30b3e6172dd72ba6dc1831",
       "c68e264b8e06e375969028b141962c6a",
@@ -33,7 +31,7 @@
     ],
     "severity_hist": {
       "info": 1,
-      "warning": 12
+      "warning": 10
     },
     "codes": [
       "REVIEW_CONN_UNPROTECTED",

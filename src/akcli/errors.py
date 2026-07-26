@@ -30,6 +30,7 @@ ERROR_CODES: frozenset[str] = frozenset(
         "KICAD_SEXPR_UNTERMINATED",
         "KICAD_SEXPR_TOOBIG",
         "KICAD_SEXPR_BAD_NUMBER",
+        "KICAD_BAD_ENCODING",
         "INTERNAL",
         # writer / op-list / verify
         "SYMBOL_NOT_FOUND",
@@ -44,8 +45,13 @@ ERROR_CODES: frozenset[str] = frozenset(
         "TARGET_LOCKED",
         "GROUP_UNKNOWN",
         "GROUP_NO_ORIGIN",
+        # power-port / hierarchy document integrity (raised by the writer AND
+        # emitted as a connectivity Finding code by ``verify``)
+        "POWER_PORT_STACKED",
+        "SHEET_FILE_MISSING",
         # safety / IO
         "PATH_OUTSIDE_ROOT",
+        "FILE_UNREADABLE",
         # external tooling
         "KICAD_CLI_TIMEOUT",
         "KICAD_CLI_MISSING",
@@ -103,6 +109,9 @@ _CODE_EXIT: dict[str, int] = {
     "KICAD_SEXPR_UNTERMINATED": EXIT["PARSE"],
     "KICAD_SEXPR_TOOBIG": EXIT["PARSE"],
     "KICAD_SEXPR_BAD_NUMBER": EXIT["PARSE"],
+    # not decodable as UTF-8 at all -> the same "corrupt input" class as the
+    # Altium container's ALTIUM_BAD_MAGIC: the bytes are not this format.
+    "KICAD_BAD_ENCODING": EXIT["PARSE"],
     "INTERNAL": EXIT["PARSE"],
     # op-list / verify failures -> 6
     "SYMBOL_NOT_FOUND": EXIT["OPLIST"],
@@ -117,11 +126,17 @@ _CODE_EXIT: dict[str, int] = {
     "TARGET_LOCKED": EXIT["OPLIST"],
     "GROUP_UNKNOWN": EXIT["OPLIST"],
     "GROUP_NO_ORIGIN": EXIT["OPLIST"],
+    "POWER_PORT_STACKED": EXIT["OPLIST"],
+    "SHEET_FILE_MISSING": EXIT["OPLIST"],
     # sim deck build: the schematic/spec cannot be turned into an honest deck;
     # nothing ran, so this is an op-list-class refusal (6), never a tool error.
     "SIM_NO_GROUND": EXIT["OPLIST"],
     "SIM_NODE_COLLISION": EXIT["OPLIST"],
     "SIM_VALUE_INVALID": EXIT["OPLIST"],
+    # the path exists but the process cannot read bytes out of it (a directory
+    # passed where a file was expected, mode 000, an IO error) -> 4, the same
+    # "the path you gave me is not a usable file" class as a missing file.
+    "FILE_UNREADABLE": EXIT["NOT_FOUND"],
     # usage / config errors -> 2
     "PATH_OUTSIDE_ROOT": EXIT["USAGE"],
     "BAD_CONFIG": EXIT["USAGE"],
@@ -190,6 +205,10 @@ REMEDIATION: dict[str, str] = {
         "a numeric field in the file is not a valid number (corrupt merge, "
         "disk damage or hand edit) — open the file at the quoted token and "
         "repair it, or restore from backup",
+    "KICAD_BAD_ENCODING":
+        "the file is not valid UTF-8 text, so it is not a KiCad document at "
+        "all (binary file, wrong path, or disk damage) — check the path, or "
+        "restore/re-save the file from KiCad",
     # writer / op-list / verify
     "SYMBOL_NOT_FOUND":
         "pass the defining library via --symbols <lib.kicad_sym> (or config "
@@ -226,10 +245,23 @@ REMEDIATION: dict[str, str] = {
     "GROUP_NO_ORIGIN":
         "declare the group's origin as 'origin': [x_mil, y_mil] (50-mil grid "
         "recommended); grouped op coordinates are relative to it",
+    "POWER_PORT_STACKED":
+        "two power symbols sit on the same coordinate (one hides the other and "
+        "their nets merge silently); keep one port per point — move the second "
+        "(50-mil grid) or drop it, and `akcli draw` with a "
+        "`delete_object` op (kind 'symbol') to clear a stacked leftover",
+    "SHEET_FILE_MISSING":
+        "the (sheet ...) points at a child .kicad_sch that does not exist next "
+        "to this file; create it first with `akcli new <file>` (then re-run), "
+        "or fix the 'file' field — nets/check/render refuse the whole design "
+        "while the child is missing",
     # safety / IO
     "PATH_OUTSIDE_ROOT":
         "the path escapes the working root; use a path inside the project "
         "(no .. traversal or absolute paths outside it)",
+    "FILE_UNREADABLE":
+        "the path exists but its bytes cannot be read — check it is a file "
+        "(not a directory) and that you have read permission on it",
     # external tooling
     "KICAD_CLI_TIMEOUT":
         "the kicad-cli run timed out; retry, or skip the advisory run with "
@@ -362,13 +394,26 @@ def fail(code: str, msg: str = "") -> NoReturn:
 
 
 def to_exit(exc: BaseException) -> int:
-    """Map any exception onto a process exit code from the ``EXIT`` table."""
+    """Map any exception onto a process exit code from the ``EXIT`` table.
+
+    Used by ``cli.main`` for BOTH the structured ``AkcliError`` path and the
+    unstructured fallbacks, so the non-``AkcliError`` branches below are live
+    classification rules, not decoration: an OS-level "I cannot read that
+    path" failure is exit 4 (``NOT_FOUND``) and a decoding failure is exit 3
+    (``PARSE``). Only a genuinely unknown exception falls through to the
+    ``INTERNAL``/parse default.
+    """
     if isinstance(exc, AkcliError):
         return exit_for_code(exc.code)
-    if isinstance(exc, FileNotFoundError):
+    if isinstance(exc, BrokenPipeError):
+        # a closed downstream pipe (``| head``) is not our failure
+        return EXIT["OK"]
+    if isinstance(exc, OSError):
+        # FileNotFoundError / IsADirectoryError / NotADirectoryError /
+        # PermissionError and any other errno-carrying IO failure
         return EXIT["NOT_FOUND"]
-    if isinstance(exc, (IsADirectoryError, PermissionError)):
-        return EXIT["NOT_FOUND"]
+    if isinstance(exc, UnicodeDecodeError):
+        return EXIT["PARSE"]
     return EXIT["PARSE"]
 
 

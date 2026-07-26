@@ -24,6 +24,7 @@ from pathlib import Path
 from ..readers import kicad as _krd
 from ..readers import kicad_lib, sexpr
 from ..report import Finding, Severity, anchor
+from ..safety import read_text_guarded
 
 LAYOUT_SYMBOL_OVERLAP = "LAYOUT_SYMBOL_OVERLAP"    # two symbol bodies intersect
 LAYOUT_LABEL_OVER_SYMBOL = "LAYOUT_LABEL_OVER_SYMBOL"  # label text crosses a body
@@ -171,7 +172,7 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
             LAYOUT_SYMBOL_OVERLAP, Severity.INFO,
             "layout lint supports .kicad_sch only; skipped", refs=[str(p)],
         )]
-    root = sexpr.parse(p.read_text(encoding="utf-8", errors="replace"))
+    root = sexpr.parse(read_text_guarded(p))
 
     libsym = root.find("lib_symbols")
     library = (
@@ -262,15 +263,32 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
     findings: list[Finding] = []
     n = len(sym_full_boxes)
 
-    # A power symbol whose pin tip sits ON another symbol's pin tip draws its
-    # body over that pin. The generic overlap advice ("move one apart") is
-    # WRONG here — moving the port breaks the connection; the fix is anchoring
-    # it mid-wire — so this dedicated finding replaces LAYOUT_SYMBOL_OVERLAP
-    # for the pair.
+    # A power symbol whose pin tip sits on another symbol's pin tip is either
+    # the BLESSED rail anchoring or a genuine pile-up, and the difference is
+    # what the symbol IS plus whether its body actually lands on the part:
+    #
+    # * a **rail port** (``GND``, ``+3V3``, any net-naming power symbol) at a
+    #   pin tip is rung 1 of the connection ladder — ``place_gnd`` /
+    #   ``place_vcc`` / ``place_power_port at "REF.PIN"``, what
+    #   docs/op-list-authoring.md tells every author to write. Its body
+    #   extends away from the tip, so nothing renders over the pin and there
+    #   is nothing to fix: flagging it put one WARNING on every rail
+    #   connection of a perfectly drawn board;
+    # * a **PWR_FLAG** at a pin tip is NOT a connection at all (it names no
+    #   net; it only asserts "driven" for ERC) and the docs are explicit that
+    #   it goes MID-WIRE — two bodies stacked on one point;
+    # * any power symbol whose BODY really interpenetrates the other symbol
+    #   (a port rotated back over the part, a deep-bodied port) does render
+    #   on top of the pin — the case the rule was written for.
+    #
+    # The pair is registered as "anchored" either way: the generic overlap
+    # advice ("move one apart") would break the connection, so it must never
+    # fire for these two.
     anchored_pairs: set[tuple[int, int]] = set()
     for i in range(n):
         if not sym_power[i]:
             continue
+        is_flag = sym_kind[i].upper() == "PWR_FLAG"
         for tip in sym_pin_tips[i]:
             for j in range(n):
                 if j == i or sym_power[j]:
@@ -279,14 +297,20 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
                 if num is None:
                     continue
                 anchored_pairs.add((min(i, j), max(i, j)))
-                who = ("PWR_FLAG" if sym_kind[i].upper() == "PWR_FLAG"
+                if not is_flag and not _overlaps(sym_boxes[i], sym_full_boxes[j]):
+                    continue              # blessed rail anchoring: nothing to fix
+                who = ("PWR_FLAG" if is_flag
                        else f"power symbol {sym_kind[i]}")
+                fix = ("it renders on top of the pin; move it mid-wire on the "
+                       "net's wire instead (see the place_pwr_flag macro)"
+                       if is_flag else
+                       "its body renders over the part; rotate it so the body "
+                       "extends away from the pin, or anchor it mid-wire")
                 findings.append(Finding(
                     LAYOUT_POWER_ON_PIN, Severity.WARNING,
                     f"{who} ({sym_boxes[i].name}) anchored on "
-                    f"{sym_full_boxes[j].name} pin {num} tip {_fmt(tip)} — it "
-                    "renders on top of the pin; move it mid-wire on the net's "
-                    "wire instead (see the place_pwr_flag macro)",
+                    f"{sym_full_boxes[j].name} pin {num} tip {_fmt(tip)} — "
+                    + fix,
                     refs=[sym_boxes[i].name, f"{sym_full_boxes[j].name}.{num}"],
                     pos=tip,
                     anchors=[

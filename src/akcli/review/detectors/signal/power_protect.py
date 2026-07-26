@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 
+from .... import classify
 from ....report import Finding, Severity, anchor
 from ... import Detector, Rule, register
 from ... import tables, topo
@@ -28,6 +29,11 @@ from ... import tables, topo
 # recognises as power (``VBUS_5V``). A token buried in a longer signal name
 # (``VBUS_SENSE``, ``VBAT_STAT``) is a derived signal, not an entry — those
 # nets are still covered when the walk reaches them from the real entry.
+# A rail STAGE name (``VBUS_FUSED``, ``VBAT_PROT`` — see
+# :func:`akcli.classify.is_stage_name`) is not a seed either: it is the same
+# rail *after* a protector, and seeding there reports the very fuse/diode
+# upstream of it as missing whenever the chain walk cannot cross the part
+# between them (a load switch, an ideal-diode controller).
 _ENTRY_FULL_RX = re.compile(
     r"^[+\-]?" + tables.POWER_ENTRY_RX_TOKENS + r"\d*$", re.IGNORECASE)
 _ENTRY_TOKEN_RX = re.compile(
@@ -116,11 +122,13 @@ def _parse_current(text: str | None) -> float | None:
 
 def _entry_names(net) -> bool:
     from ....checks.power import _net_candidate_names
-    if any(_ENTRY_FULL_RX.match(n or "") for n in _net_candidate_names(net)):
+    names = _net_candidate_names(net)
+    if any(_ENTRY_FULL_RX.match(n or "") for n in names):
         return True
+    if any(classify.is_stage_name(n) for n in names):
+        return False                      # downstream stage, not the entry
     return (topo.net_is_power(net)
-            and any(_ENTRY_TOKEN_RX.search(n or "")
-                    for n in _net_candidate_names(net)))
+            and any(_ENTRY_TOKEN_RX.search(n or "") for n in names))
 
 
 def _chain_from(ctx: topo.ReviewCtx, seed) -> tuple[list, list[str]]:

@@ -8,8 +8,12 @@ geometry carried in the evidence.
 
 from __future__ import annotations
 
-from ....checks._rails import implied_voltage
-from ....checks.power import _is_ground, _is_power
+from ....classify import (
+    implied_voltage,
+    is_ground as _is_ground,
+    is_power as _is_power,
+    refdes_prefix as _prefix,
+)
 from ....report import Finding, Severity, anchor
 from ... import Detector, Rule, register
 from ... import geometry
@@ -33,16 +37,6 @@ RULES = (
         reference="supply-loop inductance vs decoupling effectiveness "
                   "(high-speed layout guidance)"),
 )
-
-
-def _prefix(ref: str) -> str:
-    out = []
-    for ch in ref or "":
-        if ch.isalpha():
-            out.append(ch.upper())
-        else:
-            break
-    return "".join(out)
 
 
 def _is_power_net(name: str | None) -> bool:

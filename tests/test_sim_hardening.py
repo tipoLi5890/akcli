@@ -139,6 +139,66 @@ def test_passive_value_rejects_unparseable(raw):
     assert "R9" in ei.value.message
 
 
+# --- 1a. the gate must not reject what ngspice itself accepts ---------------
+# SPICE suffixes are case-insensitive, and the tool's main on-ramp (Altium
+# import) routinely carries upper-cased values. The gate used to refuse "10U",
+# "100N", "4U7", "1T" and a greek-mu "1μF" — values ngspice reads without
+# complaint — which turned a legal schematic into exit 6.
+@pytest.mark.parametrize("raw,letter,expected", [
+    ("10U", "C", "10u"),
+    ("1U", "C", "1u"),
+    ("4U7", "C", "4.7u"),          # IEC embedded decimal, upper case
+    ("100N", "C", "100n"),
+    ("1P", "C", "1p"),
+    ("10UF", "C", "10u"),          # upper-cased farad unit too
+    ("1μF", "C", "1u"),            # U+03BC GREEK SMALL LETTER MU
+    ("1µF", "C", "1u"),            # U+00B5 MICRO SIGN
+    ("1T", "R", "1T"),             # tera
+    ("1t", "R", "1T"),
+    ("10K", "R", "10k"),
+    ("10G", "R", "10G"),
+    ("10g", "R", "10G"),
+    ("10UH", "L", "10u"),
+    ("2M2", "R", "2.2MEG"),        # M is still mega...
+    ("2m2", "R", "2.2m"),          # ...and m is still milli
+])
+def test_passive_value_accepts_spice_legal_case_variants(raw, letter, expected):
+    assert passive_value(raw, letter, "X1")[0] == expected
+
+
+def test_passive_value_case_folding_never_touches_milli_vs_mega():
+    # m/M is the one pair where case carries the meaning; the deck renders the
+    # unambiguous SPICE spellings so ngspice can never re-read them either way.
+    assert passive_value("1M", "R", "R1")[0] == "1MEG"
+    assert passive_value("1m", "R", "R1")[0] == "1m"
+    assert passive_value("1MEG", "R", "R1")[0] == "1MEG"
+
+
+# --- 1b. values Python's float() accepts but a circuit can never mean -------
+# ``float()`` was the gate's first test, and it happily returns a number for
+# ``inf``/``nan``/``1_000``/``1e400``. Those strings then reached the deck
+# VERBATIM: ngspice reads "1_000" as *1*, so a 10k/1_000 divider off 3.3 V
+# measured 3.3e-4 V and still exited 0/PASS — the exact class of confident
+# wrongness this gate exists to stop.
+@pytest.mark.parametrize("raw", [
+    "1_000", "1_0", "inf", "-inf", "INF", "Infinity", "nan", "NaN", "1e400",
+])
+def test_passive_value_rejects_what_python_float_would_accept(raw):
+    with pytest.raises(AkcliError) as ei:
+        passive_value(raw, "R", "R9")
+    assert ei.value.code == "SIM_VALUE_INVALID"
+    assert "R9" in ei.value.message
+
+
+def test_value_gate_error_lists_the_accepted_formats():
+    # A refusal has to teach the fix, not just say no.
+    with pytest.raises(AkcliError) as ei:
+        passive_value("1_000", "R", "R9")
+    msg = ei.value.message
+    for hint in ("4700", "1e-7", "4.7k", "4k7", "m=milli", "M=mega", "1_000"):
+        assert hint in msg, msg
+
+
 def test_ohms_marked_value_on_inductor_is_invalid():
     # A ferrite bead's "600R" is 600 ohms at its test frequency; emitting
     # "L1 ... 600" would simulate a 600 HENRY inductor.
@@ -401,6 +461,46 @@ def test_cli_op_assert_exits_2(tmp_path, capsys):
 # --------------------------------------------------------------------------- #
 # live: the original "10k 1%" repro, through the real engine
 # --------------------------------------------------------------------------- #
+def test_deck_refuses_the_digit_separator_value(tmp_path):
+    # "1_000" never reaches ngspice now: it would have been read as 1 ohm, and
+    # the 10k/1_000 divider would have measured 3.3e-4 V with a PASS verdict.
+    with pytest.raises(AkcliError) as ei:
+        deckmod.build(_divider_sch("1_000"), _spec(tmp_path), gnd="GND")
+    assert ei.value.code == "SIM_VALUE_INVALID"
+
+
+def test_deck_emits_upper_case_value_as_canonical_spice(tmp_path):
+    d = deckmod.build(_divider_sch("10K"), _spec(tmp_path), gnd="GND")
+    assert "R2 MID 0 10k" in d.text
+
+
+@_needs_ngspice
+def test_live_upper_case_suffix_simulates_identically(tmp_path):
+    """ngspice reads "10K" as 10k; so does the gate. Same divider, same volts.
+
+    ``4K7`` is the stronger half: an upper-cased embedded decimal that used to
+    be refused outright must now land on ngspice as 4.7 kΩ, so the 10k/4.7k
+    divider off 3.3 V has to measure 3.3·4.7/14.7 = 1.055 V — proof the *number*
+    (not just the string) survived the gate.
+    """
+    spec = _spec(tmp_path)
+
+    def measure(raw: str) -> float:
+        d = deckmod.build(_divider_sch(raw), spec, gnd="GND")
+        with tempfile.TemporaryDirectory(prefix="akcli-sim-test-") as td:
+            result = engine.run(d.text, assertions.run_commands(spec),
+                                timeout=60.0, workdir=Path(td))
+        assert result.ok, result.error
+        _findings, values = assertions.evaluate(
+            spec, assertions.parse_meas_output(result.meas_lines))
+        return values["vmid"]
+
+    lower, upper = measure("10k"), measure("10K")
+    assert upper == pytest.approx(1.65, rel=0.02)
+    assert upper == pytest.approx(lower, rel=1e-9)
+    assert measure("4K7") == pytest.approx(3.3 * 4.7 / 14.7, rel=0.01)
+
+
 @_needs_ngspice
 def test_live_tolerance_token_divider_reads_half_the_rail(tmp_path):
     """The repro: "10k 1%" used to read 3.30 V (R2 seen as 10 ohms) and PASS."""

@@ -37,6 +37,7 @@ __all__ = [
     "write_instance",
     "alloc_pwr_ref",
     "instances_path",
+    "sibling_paths",
     "project_name",
     "root_uuid",
     "deterministic_uuid",
@@ -137,6 +138,11 @@ def instances_path(doc: SNode, sheet: str | None = "") -> str:
     ``sheet`` is the target sheet identifier.  Flat v1 only accepts the root sheet
     (``""``, ``"/"``, the root UUID, or ``"/<root-uuid>"``); any deeper hierarchy
     raises ``HIERARCHICAL_UNSUPPORTED``.
+
+    This is the path for a file edited as its own top sheet.  A file edited as a
+    CHILD of a hierarchy needs its parents' paths instead — those cannot be
+    derived from the child alone, so :func:`sibling_paths` copies them off a
+    symbol already placed in the same file (see :func:`write_instance`).
     """
     ru = root_uuid(doc)
     segs = [s for s in (sheet or "").strip().strip("/").split("/") if s]
@@ -147,6 +153,48 @@ def instances_path(doc: SNode, sheet: str | None = "") -> str:
             f"flat-only v1: cannot write instance onto sub-sheet path {sheet!r}",
         )
     return "/" + ru
+
+
+def _symbol_instance_paths(sym: SNode) -> list[str]:
+    """The ``(path "...")`` strings of one placed symbol's ``(instances)``."""
+    out: list[str] = []
+    inst = sym.find("instances")
+    if inst is None:
+        return out
+    for proj in inst.find_all("project"):
+        for path in proj.find_all("path"):
+            kids = path.children or []
+            if len(kids) >= 2 and kids[1].is_atom and kids[1].value:
+                out.append(kids[1].value)
+    return out
+
+
+def sibling_paths(doc: SNode, exclude: SNode | None = None) -> list[str]:
+    """Instance paths shared by the symbols ALREADY placed in ``doc``.
+
+    A child ``.kicad_sch`` opened on its own has no idea what its parents are:
+    the hierarchy lives in the ROOT file's ``(sheet ...)`` nodes, and each of a
+    child's symbols records one ``(path "/<top-root>/<sheet-uuid>…")`` per
+    instantiation of that child (two entries when the sheet is instantiated
+    twice).  A newly placed symbol must join the SAME set — writing the
+    single-segment ``/<own-root>`` form instead left the new part on a sheet
+    path KiCad does not know, which annotated as ``R?`` (and broke outright
+    when the sheet was instantiated twice).
+
+    Returned in document order for the first symbol that carries a full set;
+    an empty list means "no siblings to copy" (a genuinely flat file).
+    """
+    for sym in doc.find_all("symbol"):
+        if sym.find("lib_id") is None or sym is exclude:
+            continue
+        paths = _symbol_instance_paths(sym)
+        if paths:
+            # Preserve order, drop duplicates.
+            seen: dict[str, None] = {}
+            for p in paths:
+                seen.setdefault(p, None)
+            return list(seen)
+    return []
 
 
 # --------------------------------------------------------------------------- #
@@ -229,13 +277,40 @@ def _set_reference_property(sym: SNode, ref: str) -> None:
     _append_child(sym, prop, _child_indent(sym))
 
 
-def _build_instances(project: str, path: str, ref: str, unit: int) -> SNode:
-    """Construct a complete ``(instances (project ... (path ...)))`` node."""
-    reference = _list(_atom("reference"), _atom(_q(ref)))
-    unit_node = _list(_atom("unit"), _atom(str(int(unit))))
-    path_node = _list(_atom("path"), _atom(_q(path)), reference, unit_node)
-    project_node = _list(_atom("project"), _atom(_q(project)), path_node)
+def _build_instances(project: str, paths: list[str], ref: str, unit: int) -> SNode:
+    """Construct a complete ``(instances (project ... (path ...)+))`` node.
+
+    One ``(path ...)`` entry per sheet path the symbol lives on — a child sheet
+    instantiated twice contributes two, and KiCad expects an entry for each.
+    """
+    path_nodes = [
+        _list(_atom("path"), _atom(_q(path)),
+              _list(_atom("reference"), _atom(_q(ref))),
+              _list(_atom("unit"), _atom(str(int(unit)))))
+        for path in paths
+    ]
+    project_node = _list(_atom("project"), _atom(_q(project)), *path_nodes)
     return _list(_atom("instances"), project_node)
+
+
+def _effective_paths(doc: SNode, sym: SNode, path: str) -> list[str]:
+    """Sheet paths to record for ``sym``: its siblings' set, else ``[path]``.
+
+    ``path`` is the flat ``/<own-root>`` form :func:`instances_path` derives.
+    It is right for a file edited as its own top sheet and WRONG for a child
+    sheet, where the parents' uuids are unknowable from inside the child — so
+    when the file's other symbols all carry multi-segment hierarchy paths that
+    ``path`` is not among, the new symbol joins them instead.  Single-segment
+    sibling paths are never copied: on a flat file they either already equal
+    ``path`` or are corrupt, and ``INVALID_INSTANCES_PATH`` must keep catching
+    the corrupt case rather than have the writer spread it.
+    """
+    sibs = sibling_paths(doc, exclude=sym)
+    if not sibs or path in sibs:
+        return [path]
+    if all(len([s for s in p.strip("/").split("/") if s]) >= 2 for p in sibs):
+        return sibs
+    return [path]
 
 
 def write_instance(
@@ -254,6 +329,11 @@ def write_instance(
     defaults to :func:`project_name` of ``doc``; ``unit`` is read from the symbol's
     own ``(unit N)``.
 
+    On a CHILD sheet of a hierarchy the flat ``path`` is not the truth — the
+    symbol has to sit on the same sheet path(s) as the parts already in the file
+    (one per instantiation of that child).  :func:`_effective_paths` copies them
+    off a sibling; see its docstring for when the flat form is kept.
+
     Idempotent: the instances block is rebuilt deterministically and replaces any
     existing one, so a repeated call leaves ``sym`` byte-identical.
     """
@@ -262,7 +342,7 @@ def write_instance(
 
     _set_reference_property(sym, ref)
 
-    new_inst = _build_instances(proj, path, ref, unit)
+    new_inst = _build_instances(proj, _effective_paths(doc, sym, path), ref, unit)
     existing = sym.find("instances")
     if existing is None:
         _append_child(sym, new_inst, _child_indent(sym))
@@ -281,6 +361,12 @@ def deterministic_uuid(sheet_uuid: str | None, designator: str, op_index: int) -
     UUID, so re-running ``draw --apply`` updates the existing symbol instead of
     spawning a duplicate.  Falls back to a DNS-namespaced hash when ``sheet_uuid``
     is not a canonical UUID string.
+
+    ``op_index`` is **always 0** from the writer: every node's seed is now its
+    own content (designator, wire endpoints, label name + anchor, sheet file +
+    name…), because an index in the seed re-identified — and so duplicated —
+    every node after an edited op-list's insertion point.  The parameter stays
+    for callers that need a second uuid from one seed.
     """
     try:
         ns = _uuid.UUID(str(sheet_uuid))

@@ -34,14 +34,24 @@ def _pin(
     return Pin(number=number, name=name, x_mil=x, y_mil=y, electrical_type=etype)
 
 
-def _comp(designator: str, pins: list[Pin], *, undesignated: bool = False) -> Component:
+def _comp(
+    designator: str,
+    pins: list[Pin],
+    *,
+    undesignated: bool = False,
+    lib: str = "Device:U",
+    value: str | None = None,
+    dnp: bool = False,
+) -> Component:
     return Component(
         designator=designator,
-        library_ref="Device:U",
+        library_ref=lib,
         x_mil=0.0,
         y_mil=0.0,
         pins=pins,
         undesignated=undesignated,
+        value=value,
+        dnp=dnp,
     )
 
 
@@ -279,6 +289,61 @@ def test_input_with_driver_is_not_floating():
     assert _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT) == []
 
 
+def _pullup_sch(*, r_lib="Device:R", dnp=False, top="V3V3"):
+    """U1.1 (INPUT) held by R1 to ``top`` — the canonical EN/reset pull-up."""
+    return _sch(
+        [_comp("U1", [_pin("1", name="EN", etype=PinType.INPUT)]),
+         _comp("R1", [_pin("1"), _pin("2")], lib=r_lib, value="10k", dnp=dnp),
+         _comp("C1", [_pin("1"), _pin("2")], lib="Device:C", value="100n")],
+        [_net("EN", [("U1", "1"), ("R1", "1"), ("C1", "1")]),
+         _net(top, [("R1", "2")], source_names=[top]),
+         _net("GND", [("C1", "2")], source_names=["GND"])],
+    )
+
+
+def test_passive_pullup_to_a_rail_is_a_driver():
+    # 10k from EN to +3V3 is how EN is CORRECTLY driven; its pins are Passive,
+    # so a type-only rule called the input floating on every real board.
+    assert _by_code(erc.run(_pullup_sch(), _cfg()), erc.ERC_FLOATING_INPUT) == []
+
+
+def test_dnp_pullup_leaves_the_input_floating():
+    # An unpopulated pull-up ties nothing on the shipped board.
+    fl = _by_code(erc.run(_pullup_sch(dnp=True), _cfg()), erc.ERC_FLOATING_INPUT)
+    assert [f.refs for f in fl] == [["U1.1"]]
+
+
+def test_passive_to_a_non_rail_net_is_not_a_driver():
+    # R1's far side is an ordinary signal, not a rail: nothing holds EN.
+    fl = _by_code(erc.run(_pullup_sch(top="SPARE_LN"), _cfg()),
+                  erc.ERC_FLOATING_INPUT)
+    assert [f.refs for f in fl] == [["U1.1"]]
+
+
+def test_capacitor_to_ground_alone_is_not_a_driver():
+    # A cap to GND stores charge; it does not hold a level. (Same board as
+    # the pull-up case with R1 removed.)
+    sch = _sch(
+        [_comp("U1", [_pin("1", name="EN", etype=PinType.INPUT)]),
+         _comp("C1", [_pin("1"), _pin("2")], lib="Device:C", value="100n")],
+        [_net("EN", [("U1", "1"), ("C1", "1")]),
+         _net("GND", [("C1", "2")], source_names=["GND"])],
+    )
+    fl = _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT)
+    assert [f.refs for f in fl] == [["U1.1"]]
+
+
+def test_connector_on_the_net_is_a_driver():
+    # SWDCLK is driven by the debug probe, which is not on this schematic.
+    sch = _sch(
+        [_comp("U1", [_pin("1", name="SWDCLK", etype=PinType.INPUT)]),
+         _comp("J4", [_pin("1"), _pin("2")], lib="Connector_Generic:Conn_01x06")],
+        [_net("SWDCLK", [("U1", "1"), ("J4", "1")]),
+         _net("GND", [("J4", "2")], source_names=["GND"])],
+    )
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT) == []
+
+
 def test_input_on_power_rail_is_not_floating():
     # An INPUT tied to a detected rail is driven by the rail, not floating.
     sch = _sch(
@@ -343,6 +408,46 @@ def test_two_pin_u_part_is_not_an_ic():
     )
 
 
+def test_tvs_array_is_not_asked_for_a_power_connection():
+    # A TPD4E05U06-class ESD array is a "U" part with no supply pin at all:
+    # every channel is a clamp to GND. Demanding power from it was a
+    # guaranteed false positive on any board carrying one.
+    sch = _sch(
+        [
+            _comp("U1", [_pin("1"), _pin("2"), _pin("3")]),
+            _comp("U6", [_pin("1"), _pin("2"), _pin("3")],
+                  lib="corpus_jlc:TPD4E05U06DQAR", value="TPD4E05U06"),
+        ],
+        [
+            _net("GND", [("U1", "1"), ("U6", "3")], source_names=["GND"]),
+            _net("V3V3", [("U1", "2")], source_names=["V3V3"]),
+            _net("USB_DP", [("U1", "3"), ("U6", "1")]),
+        ],
+    )
+    out = erc.run(sch, _cfg())
+    assert _by_code(out, erc.ERC_NO_POWER) == []
+    # the GROUND half still applies to a clamp — here it IS grounded
+    assert _by_code(out, erc.ERC_NO_GROUND) == []
+
+
+def test_tvs_array_without_ground_is_still_flagged():
+    sch = _sch(
+        [
+            _comp("U1", [_pin("1"), _pin("2"), _pin("3")]),
+            _comp("U6", [_pin("1"), _pin("2"), _pin("3")],
+                  lib="Power_Protection:USBLC6-2SC6", value="USBLC6"),
+        ],
+        [
+            _net("GND", [("U1", "1")], source_names=["GND"]),
+            _net("V3V3", [("U1", "2")], source_names=["V3V3"]),
+            _net("USB_DP", [("U1", "3"), ("U6", "1")]),
+        ],
+    )
+    out = erc.run(sch, _cfg())
+    assert [f.refs for f in _by_code(out, erc.ERC_NO_GROUND)] == [["U6"]]
+    assert _by_code(out, erc.ERC_NO_POWER) == []
+
+
 def test_no_power_or_ground_infra_skips_per_ic_checks():
     # No GND/power net anywhere -> do not spam every IC (vacuous-board guard).
     sch = _sch(
@@ -352,6 +457,37 @@ def test_no_power_or_ground_infra_skips_per_ic_checks():
     out = erc.run(sch, _cfg())
     assert _by_code(out, erc.ERC_NO_POWER) == []
     assert _by_code(out, erc.ERC_NO_GROUND) == []
+
+
+def test_derived_rail_name_counts_as_power():
+    # The same copper is VBUS_CONN at the receptacle and VBUS_FUSED after the
+    # PTC; exact-name matching saw neither as power and reported every IC on
+    # them as unpowered.
+    # U4 (ground only) proves the rule is live on this board.
+    sch = _sch(
+        [_comp("U3", [_pin("1"), _pin("2"), _pin("3")]),
+         _comp("U4", [_pin("1"), _pin("2"), _pin("3")])],
+        [_net("GND", [("U3", "3"), ("U4", "3")], source_names=["GND"]),
+         _net("VBUS_FUSED", [("U3", "1")], source_names=["VBUS_FUSED"]),
+         _net("SPARE", [("U4", "1")])],
+    )
+    out = erc.run(sch, _cfg())
+    assert [f.refs for f in _by_code(out, erc.ERC_NO_POWER)] == [["U4"]]
+
+
+def test_rail_named_signal_does_not_count_as_power():
+    # ...but VBUS_DET is a detect LINE, not the rail: an IC whose only
+    # "VBUS-ish" net is the detect signal is still unpowered.
+    sch = _sch(
+        [_comp("U1", [_pin("1"), _pin("2"), _pin("3")]),
+         _comp("U3", [_pin("1"), _pin("2"), _pin("3")])],
+        [_net("GND", [("U1", "3"), ("U3", "3")], source_names=["GND"]),
+         _net("V3V3", [("U1", "1")], source_names=["V3V3"]),
+         _net("VBUS_DET", [("U3", "2"), ("U1", "2")],
+              source_names=["VBUS_DET"])],
+    )
+    out = erc.run(sch, _cfg())
+    assert [f.refs for f in _by_code(out, erc.ERC_NO_POWER)] == [["U3"]]
 
 
 def test_config_rail_name_detected_as_power():

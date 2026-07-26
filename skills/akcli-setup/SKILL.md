@@ -7,10 +7,12 @@ description: >-
   then apply the per-OS remediation for whatever is missing. Use this skill when:
   setting up akcli on a new machine or CI runner; a command fails with
   KICAD_CLI_MISSING, NGSPICE_MISSING, exit 7, "command not found", or import
-  errors; `akcli sim` cannot find an engine; `jlc` cannot reach the network; or
+  errors; `akcli sim` cannot find an engine; every `lib_id` is SYMBOL_NOT_FOUND;
+  `jlc` cannot reach the network; or
   the user asks to "check the environment" / "安裝" / "環境檢查" / "設定 akcli".
   Triggers on keywords: setup, install, doctor, environment, kicad not found,
-  ngspice missing, KICAD_CLI, AKCLI_NGSPICE, PATH, pipx, PEP 668.
+  ngspice missing, SYMBOL_NOT_FOUND, KICAD_SYMBOL_DIR, KICAD_CLI, AKCLI_NGSPICE,
+  PATH, pipx, PEP 668.
 ---
 
 # akcli-setup — probe first, then repair exactly what is missing
@@ -23,7 +25,7 @@ verdict matches what the failing command actually saw. (Exception: `pdftotext`
 ## (1) Probe
 
 ```bash
-akcli doctor                       # offline report: python/akcli/schemas/kicad-cli/ngspice/config
+akcli doctor                       # offline report: python/akcli/schemas/kicad-cli/ngspice/symbols/config/workspace
 akcli doctor --network             # also probe the jlc endpoint (only networked check)
 akcli doctor --json                # machine-readable: {checks: {name: {ok, detail, hint}}, ok}
 ```
@@ -36,6 +38,7 @@ that specific features need:
 |---|---|---|
 | `kicad-cli` | advisory ERC after `draw --apply`, `view live` SVG, parity tests | everything else works; those degrade gracefully |
 | `ngspice` (libngspice) | `akcli sim` execution | `sim --deck-only` still emits the SPICE deck |
+| `symbols` | `akcli pins` / `bbox` / `place_component` resolving a bare `Device:R` | every unqualified `lib_id` is `SYMBOL_NOT_FOUND` until you pass `--symbols` explicitly |
 | `network` | the `jlc` family only | all analysis/authoring/sim stays offline |
 | `pdftotext` (poppler) | `review facts verify` quote checks | verify still runs; quoted facts report `FACTS_QUOTE_UNVERIFIED` (NOTE) instead of a real text match — note: unlike the other rows, `akcli doctor` does not currently probe `pdftotext`; check for the binary manually (e.g. `pdftotext -v`) |
 | `config` (akcli.toml) | `pinmap` MCU pin, rails, waivers, custom grid | defaults apply |
@@ -69,6 +72,17 @@ both rows at once (Linux may need `libngspice0` / `libngspice0-kicad` explicitly
 Override discovery with `AKCLI_NGSPICE=/path/to/libngspice.{dylib,so,dll}`;
 `AKCLI_NGSPICE=off` disables the engine deliberately (CI decks-only mode).
 
+**symbols not resolving** — a stock KiCad install needs no setup: `sym-lib-table`
+addresses the bundled libraries as `${KICAD*_SYMBOL_DIR}/...`, variables KiCad
+compiles in rather than exports, so akcli derives them from the located
+`kicad-cli` (macOS bundle, Linux `/usr/share/kicad/symbols`, Windows
+`<install>\share\kicad\symbols`). Only if `akcli doctor` still reports `symbols`
+MISSING — KiCad installed somewhere it cannot infer — set the variable by hand,
+matching whichever one your `sym-lib-table` actually uses:
+```bash
+export KICAD10_SYMBOL_DIR=/path/to/symbols   # an env value always wins over the derivation
+```
+
 **network unreachable** — only `jlc` cares. Corporate proxy / offline CI is fine:
 everything else runs. `AKCLI_JLC_BASE_URL` points at a self-hosted mirror; cached
 responses under `~/.cache/akcli/jlc` keep working when stale-serving kicks in.
@@ -85,6 +99,7 @@ or remove the toml", not "reinstall".
 
 ```bash
 akcli doctor --require kicad-cli,ngspice     # sim + parity capable runner
+akcli doctor --require symbols               # before any draw/pins job using bare lib_ids
 akcli doctor --require network               # before a jlc-dependent job
 ```
 
@@ -96,6 +111,7 @@ capability, so failures say "ngspice missing" instead of a mid-task exit 7.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `ERROR: NGSPICE_MISSING`, exit 7 | no libngspice | install KiCad or `AKCLI_NGSPICE=...`; verify `akcli doctor --require ngspice` |
+| `SYMBOL_NOT_FOUND` on EVERY `lib_id` (`Device:R` included) | KiCad symbols not reachable from here | `akcli doctor --require symbols` — it resolves `Device:R` down the real path and prints the file; if MISSING, export `KICAD*_SYMBOL_DIR` (above) |
 | `ERROR: NETWORK: ...`, exit 7 | jlc endpoint unreachable | proxy/mirror via `AKCLI_JLC_BASE_URL`; cached data may still serve |
 | advisory ERC silently absent after `--apply` | kicad-cli not found | it is advisory by design; install KiCad or set `KICAD_CLI` to enable |
 | `BAD_CONFIG: unknown key(s)` on EVERY command | stale/typo'd `akcli.toml` up the tree | `akcli doctor` shows which config file was discovered — fix or delete it |

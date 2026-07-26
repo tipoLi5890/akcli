@@ -55,19 +55,32 @@ def test_schema_pins_model_schema_version():
 
 PACKAGED = ROOT / "src" / "akcli" / "schemas"
 
-_ALL_SCHEMAS = sorted(p.name for p in (ROOT / "schemas").glob("*.json"))
+_ROOT_SCHEMAS = sorted(p.name for p in (ROOT / "schemas").glob("*.json"))
+# BOTH sides: ops._schema_text() prefers the packaged mirror, so a mirror
+# whose canonical original was deleted/renamed is not harmless dead weight —
+# the wheel would keep serving that retired schema. Iterating only the
+# canonical side (as this test and tools/sync_schemas.py both used to) can
+# never see it.
+_ALL_SCHEMAS = sorted(set(_ROOT_SCHEMAS)
+                      | {p.name for p in PACKAGED.glob("*.json")})
 
 
 @pytest.mark.parametrize("name", _ALL_SCHEMAS)
 def test_packaged_schema_identical_to_root(name):
-    """EVERY canonical schema ships byte-identically in the wheel."""
-    packaged_path = PACKAGED / name
+    """EVERY canonical schema ships byte-identically in the wheel — and only
+    canonical schemas ship (no orphans)."""
+    packaged_path, root_path = PACKAGED / name, ROOT / "schemas" / name
+    assert root_path.exists(), (
+        f"{name}: orphaned packaged mirror — schemas/{name} is gone but "
+        f"src/akcli/schemas/{name} still ships (and ops._schema_text() reads "
+        f"the mirror FIRST). Run `python3 tools/sync_schemas.py` to prune it."
+    )
     assert packaged_path.exists(), (
         f"{name}: missing from the packaged mirror — "
         f"copy schemas/{name} to src/akcli/schemas/{name}"
     )
-    root_text = (ROOT / "schemas" / name).read_text()
-    assert packaged_path.read_text() == root_text, (
+    root_text = root_path.read_text(encoding="utf-8")
+    assert packaged_path.read_text(encoding="utf-8") == root_text, (
         f"{name}: packaged mirror drifted from canonical schemas/{name} — "
         f"copy the root file over src/akcli/schemas/{name}"
     )
@@ -75,11 +88,36 @@ def test_packaged_schema_identical_to_root(name):
 
 def test_schema_ids_share_one_host():
     """Every schema's $id resolves under the one canonical host."""
-    for name in _ALL_SCHEMAS:
-        doc = json.loads((ROOT / "schemas" / name).read_text())
+    for name in _ROOT_SCHEMAS:
+        doc = json.loads((ROOT / "schemas" / name).read_text(encoding="utf-8"))
         assert doc["$id"].startswith(
             "https://github.com/tipoLi5890/akcli/schemas/"), (
             f"{name}: $id host drifted: {doc['$id']}")
+
+
+def test_sync_schemas_tool_sees_both_sides(tmp_path, monkeypatch, capsys):
+    """`tools/sync_schemas.py --check` must flag an orphaned mirror."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_sync_schemas", ROOT / "tools" / "sync_schemas.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    canonical, mirror = tmp_path / "schemas", tmp_path / "mirror"
+    canonical.mkdir()
+    mirror.mkdir()
+    (canonical / "a.json").write_text("{}\n", encoding="utf-8", newline="\n")
+    (mirror / "a.json").write_text("{}\n", encoding="utf-8", newline="\n")
+    (mirror / "gone.json").write_text("{}\n", encoding="utf-8", newline="\n")
+    monkeypatch.setattr(mod, "CANONICAL", canonical)
+    monkeypatch.setattr(mod, "MIRROR", mirror)
+
+    assert mod.main(["--check"]) == 1
+    assert "orphan" in capsys.readouterr().out
+    assert mod.main([]) == 0                    # sync mode prunes it
+    assert not (mirror / "gone.json").exists()
+    assert mod.main(["--check"]) == 0
 
 
 def test_ops_loaders_use_packaged_or_root():

@@ -21,8 +21,11 @@ exactly that procedure (the extraction is done by the lossless
   atomically (``<name>.bak`` first). **Safety gate (non-negotiable):** after
   splicing, BOTH versions are re-read through :mod:`.readers.kicad` +
   :mod:`.netbuild` and their net membership sets must be identical — a relink
-  must refresh definitions, never rewire the board. Any difference refuses the
-  write with ``VERIFY_FAILED``.
+  must refresh definitions, never rewire the board — AND the spliced document
+  must pass the same :func:`.writers.connectivity.verify` gate ``draw --apply``
+  runs (a definition whose pins moved keeps every membership set while leaving
+  the wires that fed those pins dangling). Either refusal aborts the write with
+  ``VERIFY_FAILED``.
 
 Whitespace: a replaced block keeps the library file's internal formatting,
 deepened one tab to sit at the cache's nesting level; untouched nodes round-trip
@@ -34,6 +37,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 from . import model, safety
@@ -41,7 +45,8 @@ from .errors import fail
 from .readers import kicad, kicad_lib, sexpr
 from .readers.kicad_lib import _read_text
 from .readers.sexpr import SNode
-from .writers import lib_cache
+from .report import Severity
+from .writers import connectivity, lib_cache
 
 __all__ = ["DEFAULT_LIB_DIR", "plan", "apply", "resolve_lib_dirs", "lib_file_for"]
 
@@ -237,6 +242,22 @@ def apply(sch_path: os.PathLike | str, actions: list[dict],
                  f"relink would change connectivity of {p.name}: "
                  f"{len(lost)} net(s) lost [{_fmt_nets(lost)}], "
                  f"{len(gained)} gained [{_fmt_nets(gained)}] — refusing to write")
+        # Membership equality alone is not the write gate the op-list writer
+        # applies: a replacement symbol whose pins moved keeps every net's
+        # MEMBER SET while stranding the wires that used to land on those pins
+        # (and a body that no longer resolves is not a membership change at
+        # all). Run the same document gate `draw --apply` runs — as a DELTA:
+        # relink must not make the file worse, but it is not the tool that
+        # repairs a document already carrying findings (an import with no
+        # (instances) block is still relinkable).
+        introduced = _new_connectivity_errors(doc_before=original, tmp=tmp)
+        if introduced:
+            first = introduced[0]
+            fail("VERIFY_FAILED",
+                 f"relink would break {p.name}: {first.code}: {first.message}"
+                 + (f" (+{len(introduced) - 1} more)"
+                    if len(introduced) > 1 else "")
+                 + " — refusing to write")
         if backup:
             from . import journal
             bdir = journal.ensure_backups_dir(p)
@@ -252,6 +273,31 @@ def apply(sch_path: os.PathLike | str, actions: list[dict],
             pass
         raise
     return result
+
+
+def _connectivity_errors(text: str, path: os.PathLike | str) -> list:
+    """ERROR/CRITICAL findings of the write gate over a document's text."""
+    return [f for f in connectivity.verify(sexpr.parse(text), path=path)
+            if f.severity in (Severity.ERROR, Severity.CRITICAL)]
+
+
+def _new_connectivity_errors(*, doc_before: str, tmp: str) -> list:
+    """Write-gate errors present AFTER the splice that were not there before.
+
+    Keyed by ``(code, refs)`` so a pre-existing finding on one symbol does not
+    mask a brand-new one on another.
+    """
+    before = Counter(
+        (f.code, tuple(f.refs or ())) for f in _connectivity_errors(doc_before, tmp)
+    )
+    out = []
+    for f in _connectivity_errors(_read_text(Path(tmp)), tmp):
+        key = (f.code, tuple(f.refs or ()))
+        if before[key] > 0:
+            before[key] -= 1
+        else:
+            out.append(f)
+    return out
 
 
 def _net_membership(path: os.PathLike | str) -> set[frozenset]:

@@ -9,6 +9,7 @@ invented.
 
 from __future__ import annotations
 
+from ....classify import refdes_prefix as _prefix
 from ....report import Finding, Severity, anchor
 from ... import Detector, Rule, register
 from ... import geometry
@@ -44,16 +45,6 @@ RULES = (
         reference="Tj = Ta + P·θ_JA (facts: theta_ja / power_dissipation / "
                   "t_j_max)"),
 )
-
-
-def _prefix(ref: str) -> str:
-    out = []
-    for ch in ref or "":
-        if ch.isalpha():
-            out.append(ch.upper())
-        else:
-            break
-    return "".join(out)
 
 
 def _package_theta(footprint_name: str | None) -> float | None:

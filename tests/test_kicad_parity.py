@@ -32,7 +32,6 @@ Ground-truth verdicts these tests lock (kicad-cli 10.0.4):
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import uuid as _uuid
 from pathlib import Path
@@ -42,6 +41,7 @@ import pytest
 from akcli import config as config_mod
 from akcli import model, units
 from akcli.checks import nets as netcheck
+from akcli.drivers import kicad_cli as kicad_cli_driver
 from akcli.readers import kicad as kreader
 from akcli.readers import sexpr
 from akcli.writers import geometry
@@ -49,23 +49,13 @@ from akcli.writers import kicad as kw
 
 
 # --------------------------------------------------------------------------- #
-# kicad-cli discovery (PATH, then the macOS / Linux app locations)
+# kicad-cli discovery — the PRODUCT ladder (``KICAD_CLI`` env -> PATH -> known
+# install locations), not a private copy. A second, divergent probe here meant
+# "the ground truth ran" and "akcli can find KiCad" were different questions:
+# these tests could sit skipped on a machine the product happily drives, or
+# (worse) run against a binary the product would never pick.
 # --------------------------------------------------------------------------- #
-def _find_kicad_cli() -> str | None:
-    hit = shutil.which("kicad-cli")
-    if hit:
-        return hit
-    for cand in (
-        "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
-        "/usr/bin/kicad-cli",
-        "/usr/local/bin/kicad-cli",
-    ):
-        if Path(cand).is_file():
-            return cand
-    return None
-
-
-KICAD_CLI = _find_kicad_cli()
+KICAD_CLI = kicad_cli_driver.find()
 needs_kicad = pytest.mark.skipif(
     KICAD_CLI is None, reason="kicad-cli not installed (runs in the CI KiCad job)"
 )
@@ -171,6 +161,12 @@ def _draw(d: Path, name: str, *ops) -> Path:
     if not lib.exists():
         lib.write_text(_LIB)
     tgt = _seed(d, name)
+    # add_sheet refuses a child file that does not exist yet (a dangling sheet
+    # bricks every later nets/check/render), so stub each child first — the
+    # fixtures that care overwrite it with real content afterwards.
+    for op in ops:
+        if op.get("op") == "add_sheet" and not (d / str(op["file"])).exists():
+            _seed(d, str(op["file"]))
     results = kw.apply(_oplist(*ops), str(tgt), apply=True, sources=[str(lib)])
     bad = [r for r in results if r.status != "ok"]
     assert not bad, f"writer refused fixture ops: {bad[0].error_code}: {bad[0].message}"

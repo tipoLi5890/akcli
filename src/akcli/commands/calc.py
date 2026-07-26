@@ -2,7 +2,8 @@
 
 ``calc list`` / ``calc info <name>`` / ``calc <name> key=value ...`` / ``calc
 batch <file>``, with ``--md`` (markdown table), ``--json`` (compute envelope),
-and ``--ops`` (emit a place_component op-list from a design calculator). Heavy
+and ``--ops`` (emit an op-list — macro or place_component — from a design
+calculator). Heavy
 imports stay LAZY per handler.
 """
 
@@ -122,6 +123,20 @@ def _cmd_calc(args: argparse.Namespace) -> int:
                             f"ERROR: unknown calculator {target!r}"
                             f"{_did_you_mean(target or '', CALCS)} "
                             "(see `akcli calc list`)")
+        if getattr(args, "json", False):
+            # Same shape as one `calc list` entry (plus its own `name`), so an
+            # agent parses both with one reader.
+            _emit(_dumps(_stamp({
+                "name": c.name, "title": c.title, "group": c.group,
+                "params": [{"name": p.name, "unit": p.unit, "help": p.help,
+                            "required": p.default is None,
+                            **({"default": p.default} if p.default is not None else {}),
+                            **({"choices": list(p.choices)} if p.choices else {})}
+                           for p in c.params],
+                "reference": c.reference,
+                **({"notes": c.notes} if c.notes else {}),
+            })))
+            return EXIT["OK"]
         lines = [f"{c.name} — {c.title}", ""]
         for p in c.params:
             d = "required" if p.default is None else f"default {p.default}"

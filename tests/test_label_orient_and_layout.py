@@ -19,6 +19,7 @@ from akcli.writers import geometry
 from akcli.writers import kicad as kw
 
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
+POWER = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "power.kicad_sym"
 
 _FRESH = ('(kicad_sch (version 20231120) (generator "akcli") '
           '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
@@ -327,6 +328,33 @@ def test_power_on_pin_suppresses_generic_overlap(tmp_path):
     hit = next(f for f in layout.run(tgt)
                if f.code == layout.LAYOUT_POWER_ON_PIN)
     assert "power symbol GND_DEEP" in hit.message
+
+
+def test_blessed_rail_anchoring_is_clean(tmp_path):
+    # Rung 1 of the connection ladder: place_gnd / place_power_port anchored
+    # AT the pin ("REF.PIN"). The port's body extends away from the tip, so
+    # nothing renders over the part — flagging this put one WARNING on every
+    # rail connection of a perfectly drawn board.
+    tgt = _fresh(tmp_path)
+    results = kw.apply(
+        _oplist(
+            {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+             "x_mil": 2000, "y_mil": 2000},
+            {"op": "place_component", "lib_id": "Device:C", "designator": "C1",
+             "x_mil": 3000, "y_mil": 2000},
+            {"op": "place_gnd", "at": "R1.2"},
+            {"op": "place_gnd", "at": "C1.2"},
+            {"op": "place_power_port", "lib_id": "power:+3V3",
+             "net_name": "+3V3", "at": "R1.1"},
+            {"op": "place_power_port", "lib_id": "power:+3V3",
+             "net_name": "+3V3", "at": "C1.1"},
+        ),
+        str(tgt), apply=True, sources=[str(DEVICE), str(POWER)],
+    )
+    assert all(r.status == "ok" for r in results)
+    codes = _lint_codes(tgt)
+    assert layout.LAYOUT_POWER_ON_PIN not in codes
+    assert layout.LAYOUT_SYMBOL_OVERLAP not in codes
 
 
 def test_free_standing_power_symbol_is_clean(tmp_path):

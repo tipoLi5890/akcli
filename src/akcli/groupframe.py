@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .readers import kicad as _krd
 from .readers import sexpr
+from .safety import read_text_guarded
 
 FRAME_MARGIN_MIL = 200.0
 TITLE_LIFT_MIL = 100.0
@@ -55,7 +56,7 @@ def group_boxes(path: str | Path) -> dict[str, dict]:
     """
     from . import arrange as _arr
 
-    root = sexpr.parse(Path(path).read_text(encoding="utf-8", errors="replace"))
+    root = sexpr.parse(read_text_guarded(path))
     syms, _anchors = _arr._collect(root)
     boxes_by_ref: dict[str, list] = {}
     for s in syms:
@@ -90,7 +91,7 @@ def group_report(path: str | Path) -> list[dict]:
     """Per-group summary rows for ``akcli groups`` (members, box, frame state)."""
     from .writers.kicad import _root_uuid
 
-    root = sexpr.parse(Path(path).read_text(encoding="utf-8", errors="replace"))
+    root = sexpr.parse(read_text_guarded(path))
     root_uuid = _root_uuid(root)
     present: set[str] = set()
     for c in root.children or []:

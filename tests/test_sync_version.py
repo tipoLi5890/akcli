@@ -18,8 +18,10 @@ sv = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sv)
 
 
-def _make_repo(tmp_path: Path, *, version: str | None, plugin_version=None, market_version=None) -> Path:
+def _make_repo(tmp_path: Path, *, version: str | None, plugin_version=None, market_version=None,
+               codex_version=None) -> Path:
     (tmp_path / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".codex-plugin").mkdir(parents=True, exist_ok=True)
 
     if version is None:
         proj = '[project]\nname = "akcli"\n'
@@ -40,6 +42,13 @@ def _make_repo(tmp_path: Path, *, version: str | None, plugin_version=None, mark
     market = {"name": "altium-kicad", "plugins": [entry]}
     (tmp_path / ".claude-plugin" / "marketplace.json").write_text(
         json.dumps(market, indent=2) + "\n", encoding="utf-8"
+    )
+
+    codex: dict = {"name": "altium-kicad"}
+    if codex_version is not None:
+        codex["version"] = codex_version
+    (tmp_path / ".codex-plugin" / "plugin.json").write_text(
+        json.dumps(codex, indent=2) + "\n", encoding="utf-8"
     )
     return tmp_path
 
@@ -115,10 +124,37 @@ def test_main_missing_pyproject(tmp_path: Path):
     assert sv.main(["--check", "--root", str(tmp_path)]) == 2
 
 
+@pytest.mark.parametrize("rel", [sv.PLUGIN_REL, sv.MARKETPLACE_REL, sv.CODEX_PLUGIN_REL])
+def test_missing_manifest_is_an_error_not_a_skip(tmp_path: Path, rel: str):
+    """A manifest that vanished must fail, not silently reduce the sync scope."""
+    repo = _make_repo(tmp_path, version="1.0.0", plugin_version="1.0.0",
+                      market_version="1.0.0", codex_version="1.0.0")
+    (repo / rel).unlink()
+    code, msgs = sv.sync(repo, check=True)
+    assert code == 2
+    assert any("MISSING" in m and rel.rsplit("/", 1)[-1] in m for m in msgs)
+    # write mode must fail the same way (no "fixed it" illusion)
+    assert sv.sync(repo, check=False)[0] == 2
+
+
 def test_repo_manifests_in_sync():
     # Guard the real repo: with a static pyproject version, manifests must not drift.
     code, _ = sv.sync(_REPO_ROOT, check=True)
     assert code == 0
+
+
+def test_repo_manifests_all_declare_a_version():
+    """All three shipped manifests are stamped (CHANGELOG "Versioning policy")."""
+    version = sv.read_pyproject_version(_REPO_ROOT / "pyproject.toml")
+    assert version
+    plugin = json.loads((_REPO_ROOT / sv.PLUGIN_REL).read_text(encoding="utf-8"))
+    codex = json.loads((_REPO_ROOT / sv.CODEX_PLUGIN_REL).read_text(encoding="utf-8"))
+    market = json.loads((_REPO_ROOT / sv.MARKETPLACE_REL).read_text(encoding="utf-8"))
+    assert plugin.get("version") == version
+    assert codex.get("version") == version
+    assert market["plugins"], "marketplace declares no plugins"
+    for entry in market["plugins"]:
+        assert entry.get("version") == version, f"{entry.get('name')} carries no synced version"
 
 
 if __name__ == "__main__":

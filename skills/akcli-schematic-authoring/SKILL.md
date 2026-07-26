@@ -81,8 +81,10 @@ network (`vdivider-design`, `regulator-design`, `led`, `i2c-pullup`,
 `crystal-caps`, ...) and place the returned `*_standard` E-series value; quote
 the printed reference in the report (akcli-design-calc skill has the full catalog).
 Design-type calcs also emit a ready op-list draft — `akcli calc vdivider-design
-vin=3.3 vout=1.8 --ops divider.json` writes `place_component` ops carrying the
-snapped values, so the computed network enters the sheet without transcription.
+vin=3.3 vout=1.8 --ops divider.json` writes a `place_divider` macro op carrying
+the snapped values (other design calcs emit their own macro or plain
+`place_component` ops), so the computed network enters the sheet without
+transcription.
 
 ### Datasheet-driven design — `jlc datasheet` before committing values
 
@@ -140,7 +142,14 @@ Document shape and the op vocabulary (22 ops + 10 macros) are defined in `schema
 "target_format": "kicad", "ops": [...]}`. The validator is strict: unknown
 fields are errors with a did-you-mean hint (`_`-prefixed keys are safe
 annotations), field types are enforced per op, and a duplicate
-`(designator, unit)` placement in one document is rejected.
+`(designator, unit)` placement in one document is rejected. **Macros are
+validated the same way, BEFORE expansion** — a typo (`valu`) is a refusal, not
+a silently-defaulted part — and a macro's `designators` list is **positional**,
+each slot carrying a fixed part role (`place_led_indicator` is `[R, D]`,
+`place_rc_filter` `[R, C]`, `place_crystal` `[Y|X, C, C]`, `place_divider`
+`[R, R]`): writing them in the reading order you had in mind names the resistor
+`D1` and is an error naming the slot. Emit the skeleton with
+`akcli ops template <macro>` rather than guessing.
 
 ### Functional groups — the `groups` envelope (author blocks, not loose parts)
 
@@ -184,8 +193,10 @@ Rules the validator and executor enforce:
 - **Layout lint**: after `--apply`, run `akcli check <file> --layout` — it flags
   overlapping symbol bodies, label text over a body/pin field, label-label
   overlaps, coincident text anchors, wires routed through symbol bodies, and
-  power symbols anchored on another symbol's pin tip (`LAYOUT_POWER_ON_PIN` —
-  see `place_pwr_flag` below). Fix the warnings; ERC cannot see them.
+  a `PWR_FLAG` (or a power symbol whose body lands on the part) anchored on
+  another symbol's pin tip (`LAYOUT_POWER_ON_PIN` — see `place_pwr_flag`
+  below; a rail port at a pin tip is the blessed pattern and stays quiet).
+  Fix the warnings; ERC cannot see them.
   `check --nets` adds attachment near-misses: a pin tip touching a wire
   mid-span with no junction is NOT connected (`NET_PIN_MIDSPAN_TOUCH`), an
   unattached label names nothing (`NET_LABEL_UNATTACHED`), and an L-wire
@@ -210,7 +221,11 @@ Rules the validator and executor enforce:
   blocks on the same sheet (`hierarchical` only when the net leaves the sheet
   through a `(sheet)` pin — see `add_sheet` below);
   `place_power_port` / `place_gnd` / `place_vcc` for rails (power ports merge by
-  name everywhere and auto-allocate `#PWR` refs). Connectivity is name-based, so
+  name everywhere and auto-allocate `#PWR` refs; ONE port per coordinate — a
+  port's identity IS its position, so re-running a list that renames its rail
+  rewrites that port, while a second port on the same point is refused with
+  `POWER_PORT_STACKED`, and a port you MOVE leaves the old node behind for you
+  to `delete_object`). Connectivity is name-based, so
   overlapping/collinear stubs or a wire T-junctioning another net silently MERGE
   nets — the hard write-gates are `DANGLING_ENDPOINT`/`DANGLING_BUS_ENTRY` only,
   so read the **Net changes** block on every plan/draw and verify membership
@@ -287,7 +302,10 @@ Rules the validator and executor enforce:
   (parity-verified against eeschema; confirm with `akcli nets` on the root).
   Wires attach to a sheet pin **by coordinate** — there is NO `Sheet.Pin`
   endpoint — and the child `.kicad_sch` must already exist (`akcli new` it
-  first). KiCad only. Full flow + pin fields: the "Hierarchical sheets"
+  first): pointing at a missing file is refused with `SHEET_FILE_MISSING`,
+  because a dangling sheet makes every later `nets`/`check`/`render` on the
+  design fail. A part drawn INTO a child file joins its siblings' sheet paths
+  automatically. KiCad only. Full flow + pin fields: the "Hierarchical sheets"
   section of `docs/op-list-authoring.md`.
 - **Bus rips — label the WIRE, not the bus**: draw the bus (`add_bus`), name it
   with a vector label (`add_net_label "K[3..0]"` on the bus — inclusive both
@@ -402,22 +420,26 @@ refuses the write (exit 6). An intended merge/rename? Re-run without
 
 ## (6) Idempotency and safe re-runs
 
-- Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus a
-  per-node key: **symbols/pins key on the designator alone**, wires/graphics/
-  annotations on `tag:coords` (annotation `key`s ignore coords entirely).
-  **Re-running the same op-list file converges** — prior same-uuid nodes are
-  replaced, `#PWR` refs are recovered, re-applies stay byte-identical.
-- **Editing an applied op-list is safe for part identity.** Inserting,
-  reordering, or deleting ops does not change any untouched part's uuid, so a
-  re-apply updates in place. What still keys on position is *geometry*: a wire,
-  graphic, or annotation whose coordinates change becomes a new node, and the
-  old one is left behind — remove it with `delete_object` (or use an annotation
-  `key`, which survives moves). Extending an applied sheet with a small
-  delta-only op-list (Example B) remains the tidiest habit, no longer a rule.
-- **One-time migration:** a file written by a *pre-0.17* akcli carries the old
-  `designator:op_index` uuids. Re-apply the UNEDITED op-list once (or start from
-  `akcli undo`) before editing it; editing first can duplicate parts whose
-  original op index was ≠ 0.
+- Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus the
+  node's own CONTENT — **never the op's index**: symbols/pins key on the
+  designator, wires on their endpoints, labels on net name + the anchor as
+  written (`"R1.2"`), sheets on child file + name, graphics on `tag:coords`
+  (annotation `key`s ignore coords entirely). **Re-running the same op-list file
+  converges** — prior same-uuid nodes are replaced, `#PWR` refs are recovered by
+  position, re-applies stay byte-identical.
+- **Editing an applied op-list is safe.** Inserting, reordering, or deleting ops
+  does not change any untouched node's uuid, so a re-apply updates in place
+  instead of stacking a second copy of everything after the edit. What still
+  keys on position is *geometry*: a wire, port, graphic or annotation whose
+  coordinates change becomes a new node and the old one is left behind — remove
+  it with `delete_object` (or use an annotation `key`, which survives moves).
+  Two ops that would seed ONE uuid (two identical wires, two texts on a point,
+  two power ports on a coordinate) are refused, naming both op indices.
+- **One-time migration:** a file written by a *pre-0.18* akcli carries the old
+  `<content>:op_index` uuids for wires/labels/junctions/no-connects/bus
+  entries/sheets/graphics (and pre-0.17 for parts). Re-apply the UNEDITED
+  op-list once (or start from `akcli undo`) before editing it; editing first can
+  duplicate nodes whose original op index was ≠ 0.
 - `set_component_transform` / `set_component_parameters` address parts by
   designator; an unknown designator fails that op with `VERIFY_FAILED` and blocks
   the whole write.
@@ -507,12 +529,17 @@ Three gates that decide whether a `PASS` means anything (full rules:
 `docs/sim.md`):
 
 - **Values are gated, not guessed.** A passive's value must parse: IEC 60062
-  forms work (`2M2`, `1k5`, `4R7`; `1M` = 1 MΩ → SPICE `1MEG`), a split unit is
+  forms work (`2M2`, `1k5`, `4R7`; `1M` = 1 MΩ → SPICE `1MEG`), prefixes are
+  case-insensitive so Altium-style upper-case values pass (`10U`, `100N`,
+  `4U7`, `1T`, and Greek `μ`/micro `µ`) — the ONE exception is `m` (milli) vs
+  `M` (mega), where case is the whole meaning — a split unit is
   re-joined (`4.7 k`, `100 nF`), and trailing rating/tolerance tokens are
   dropped with a `SIM_VALUE_NORMALIZED` warning (`10k 1%` → `10k`). Anything
   unparseable (`LED red`, `TBD`, or an ohms-marked value on an `L`) is
   `SIM_VALUE_INVALID`, exit 6 — the tool refuses to simulate rather than let
-  ngspice read `"10k 1%"` as `10`.
+  ngspice read `"10k 1%"` as `10`. Numbers Python accepts but ngspice reads
+  differently (or not at all) are refused for the same reason: `1_000`
+  (ngspice reads 1), `inf`, `nan`, `1e400`.
 - **Unpopulated parts fail the run they matter to.** A `DNP`/`NP`/`OPEN` value,
   `Sim.Enable=0`, or a `models` `skip` leaves the part out of the deck and
   reports `SIM_PART_SKIPPED`; that finding is an **ERROR** (exit 1) when the

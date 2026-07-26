@@ -1,0 +1,898 @@
+(export
+	(version "E")
+	(design
+		(source "tests/fixtures/kicad/hier/root.kicad_sch")
+		(date "")
+		(tool "Eeschema 10.0.4")
+		(sheet
+			(number "1")
+			(name "/")
+			(tstamps "/")
+			(title_block
+				(title)
+				(company)
+				(rev)
+				(date)
+				(source "root.kicad_sch")
+				(comment
+					(number "1")
+					(value "")
+				)
+				(comment
+					(number "2")
+					(value "")
+				)
+				(comment
+					(number "3")
+					(value "")
+				)
+				(comment
+					(number "4")
+					(value "")
+				)
+				(comment
+					(number "5")
+					(value "")
+				)
+				(comment
+					(number "6")
+					(value "")
+				)
+				(comment
+					(number "7")
+					(value "")
+				)
+				(comment
+					(number "8")
+					(value "")
+				)
+				(comment
+					(number "9")
+					(value "")
+				)
+			)
+		)
+		(sheet
+			(number "2")
+			(name "/Amp/")
+			(tstamps "/bbbb0000-0000-4000-8000-000000000001/")
+			(title_block
+				(title)
+				(company)
+				(rev)
+				(date)
+				(source "amp.kicad_sch")
+				(comment
+					(number "1")
+					(value "")
+				)
+				(comment
+					(number "2")
+					(value "")
+				)
+				(comment
+					(number "3")
+					(value "")
+				)
+				(comment
+					(number "4")
+					(value "")
+				)
+				(comment
+					(number "5")
+					(value "")
+				)
+				(comment
+					(number "6")
+					(value "")
+				)
+				(comment
+					(number "7")
+					(value "")
+				)
+				(comment
+					(number "8")
+					(value "")
+				)
+				(comment
+					(number "9")
+					(value "")
+				)
+			)
+		)
+		(sheet
+			(number "3")
+			(name "/Amp/Deep/")
+			(tstamps "/bbbb0000-0000-4000-8000-000000000001/cccc0000-0000-4000-8000-000000000003/")
+			(title_block
+				(title)
+				(company)
+				(rev)
+				(date)
+				(source "deep.kicad_sch")
+				(comment
+					(number "1")
+					(value "")
+				)
+				(comment
+					(number "2")
+					(value "")
+				)
+				(comment
+					(number "3")
+					(value "")
+				)
+				(comment
+					(number "4")
+					(value "")
+				)
+				(comment
+					(number "5")
+					(value "")
+				)
+				(comment
+					(number "6")
+					(value "")
+				)
+				(comment
+					(number "7")
+					(value "")
+				)
+				(comment
+					(number "8")
+					(value "")
+				)
+				(comment
+					(number "9")
+					(value "")
+				)
+			)
+		)
+		(sheet
+			(number "4")
+			(name "/Amp Two/")
+			(tstamps "/bbbb0000-0000-4000-8000-000000000002/")
+			(title_block
+				(title)
+				(company)
+				(rev)
+				(date)
+				(source "amp.kicad_sch")
+				(comment
+					(number "1")
+					(value "")
+				)
+				(comment
+					(number "2")
+					(value "")
+				)
+				(comment
+					(number "3")
+					(value "")
+				)
+				(comment
+					(number "4")
+					(value "")
+				)
+				(comment
+					(number "5")
+					(value "")
+				)
+				(comment
+					(number "6")
+					(value "")
+				)
+				(comment
+					(number "7")
+					(value "")
+				)
+				(comment
+					(number "8")
+					(value "")
+				)
+				(comment
+					(number "9")
+					(value "")
+				)
+			)
+		)
+		(sheet
+			(number "5")
+			(name "/Amp Two/Deep/")
+			(tstamps "/bbbb0000-0000-4000-8000-000000000002/cccc0000-0000-4000-8000-000000000003/")
+			(title_block
+				(title)
+				(company)
+				(rev)
+				(date)
+				(source "deep.kicad_sch")
+				(comment
+					(number "1")
+					(value "")
+				)
+				(comment
+					(number "2")
+					(value "")
+				)
+				(comment
+					(number "3")
+					(value "")
+				)
+				(comment
+					(number "4")
+					(value "")
+				)
+				(comment
+					(number "5")
+					(value "")
+				)
+				(comment
+					(number "6")
+					(value "")
+				)
+				(comment
+					(number "7")
+					(value "")
+				)
+				(comment
+					(number "8")
+					(value "")
+				)
+				(comment
+					(number "9")
+					(value "")
+				)
+			)
+		)
+	)
+	(components
+		(comp
+			(ref "R1")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Root")
+			)
+			(property
+				(name "Sheetfile")
+				(value "root.kicad_sch")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "d000aaaa-0000-4000-8000-00000000000a")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R2")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Root")
+			)
+			(property
+				(name "Sheetfile")
+				(value "root.kicad_sch")
+			)
+			(sheetpath
+				(names "/")
+				(tstamps "/")
+			)
+			(tstamps "d000aaaa-0000-4000-8000-00000000000b")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R101")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Amp")
+			)
+			(property
+				(name "Sheetfile")
+				(value "amp.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000001/")
+			)
+			(tstamps "d000bbbb-0000-4000-8000-00000000000a")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R102")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Amp")
+			)
+			(property
+				(name "Sheetfile")
+				(value "amp.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000001/")
+			)
+			(tstamps "d000bbbb-0000-4000-8000-00000000000b")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R301")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Deep")
+			)
+			(property
+				(name "Sheetfile")
+				(value "deep.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp/Deep/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000001/cccc0000-0000-4000-8000-000000000003/")
+			)
+			(tstamps "d000cccc-0000-4000-8000-00000000000a")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R302")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Deep")
+			)
+			(property
+				(name "Sheetfile")
+				(value "deep.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp/Deep/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000001/cccc0000-0000-4000-8000-000000000003/")
+			)
+			(tstamps "d000cccc-0000-4000-8000-00000000000b")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R201")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Amp Two")
+			)
+			(property
+				(name "Sheetfile")
+				(value "amp.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp Two/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000002/")
+			)
+			(tstamps "d000bbbb-0000-4000-8000-00000000000a")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R202")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Amp Two")
+			)
+			(property
+				(name "Sheetfile")
+				(value "amp.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp Two/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000002/")
+			)
+			(tstamps "d000bbbb-0000-4000-8000-00000000000b")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R401")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Deep")
+			)
+			(property
+				(name "Sheetfile")
+				(value "deep.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp Two/Deep/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000002/cccc0000-0000-4000-8000-000000000003/")
+			)
+			(tstamps "d000cccc-0000-4000-8000-00000000000a")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+		(comp
+			(ref "R402")
+			(value "1k")
+			(fields
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(libsource
+				(lib "Device")
+				(part "R")
+				(description "")
+			)
+			(property
+				(name "Sheetname")
+				(value "Deep")
+			)
+			(property
+				(name "Sheetfile")
+				(value "deep.kicad_sch")
+			)
+			(sheetpath
+				(names "/Amp Two/Deep/")
+				(tstamps "/bbbb0000-0000-4000-8000-000000000002/cccc0000-0000-4000-8000-000000000003/")
+			)
+			(tstamps "d000cccc-0000-4000-8000-00000000000b")
+			(units
+				(unit
+					(name "A")
+					(pins
+						(pin
+							(num "1")
+						)
+						(pin
+							(num "2")
+						)
+					)
+				)
+			)
+		)
+	)
+	(groups)
+	(variants)
+	(libparts
+		(libpart
+			(lib "Device")
+			(part "R")
+			(fields
+				(field
+					(name "Reference") "R")
+				(field
+					(name "Value") "R")
+				(field
+					(name "Footprint")
+				)
+				(field
+					(name "Datasheet")
+				)
+				(field
+					(name "Description")
+				)
+			)
+			(pins
+				(pin
+					(num "1")
+					(name "")
+					(type "passive")
+				)
+				(pin
+					(num "2")
+					(name "")
+					(type "passive")
+				)
+			)
+		)
+	)
+	(libraries
+		(library
+			(logical "Device")
+			(uri "${KICAD_SYMBOL_DIR}/Device.kicad_sym")
+		)
+	)
+	(nets
+		(net
+			(code "1")
+			(name "/Amp Two/AMP_LOCAL")
+			(class "Default")
+			(node
+				(ref "R201")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "2")
+			(name "/Amp Two/Deep/DEEP_LOCAL")
+			(class "Default")
+			(node
+				(ref "R401")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "3")
+			(name "/Amp Two/Deep/DEEP_OUT")
+			(class "Default")
+			(node
+				(ref "R402")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "4")
+			(name "/Amp/AMP_LOCAL")
+			(class "Default")
+			(node
+				(ref "R101")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "5")
+			(name "/Amp/Deep/DEEP_LOCAL")
+			(class "Default")
+			(node
+				(ref "R301")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "6")
+			(name "/Amp/Deep/DEEP_OUT")
+			(class "Default")
+			(node
+				(ref "R302")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "7")
+			(name "/ROOT_LOCAL")
+			(class "Default")
+			(node
+				(ref "R1")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "8")
+			(name "AMP_GLOBAL")
+			(class "Default")
+			(node
+				(ref "R102")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "R2")
+				(pin "1")
+				(pintype "passive")
+			)
+			(node
+				(ref "R202")
+				(pin "1")
+				(pintype "passive")
+			)
+		)
+		(net
+			(code "9")
+			(name "GND")
+			(class "Default")
+			(node
+				(ref "R1")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R101")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R102")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R2")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R201")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R202")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R301")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R302")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R401")
+				(pin "2")
+				(pintype "passive")
+			)
+			(node
+				(ref "R402")
+				(pin "2")
+				(pintype "passive")
+			)
+		)
+	)
+)

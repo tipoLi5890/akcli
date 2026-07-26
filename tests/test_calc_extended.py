@@ -291,6 +291,57 @@ def test_opsmap_covers_only_registered_calcs():
         assert name in CALCS, f"opsmap maps unknown calc {name!r}"
 
 
+# One realistic invocation per mappable calculator. Only the two macro-mapped
+# entries used to be exercised end-to-end; the plain `place_component` branch
+# (regulator/hysteresis/sallen-key/attenuator) emitted op-lists nothing ever
+# validated — a bad lib_id or a missing result key would surface at the user's
+# `akcli plan`, not here.
+OPSMAP_INPUTS = {
+    "vdivider-design": {"vin": 5, "vout": 3.3},
+    "regulator-design": {"vout": 5},
+    "led": {"vs": 5, "vf": 2, "i": "10m"},
+    "i2c-pullup": {"vdd": 3.3, "cb": "100p"},
+    "crystal-caps": {"cl": "12.5p"},
+    "hysteresis-design": {"vcc": 5, "vt_rising": 3, "vt_falling": 2},
+    "sallen-key": {"fc": "1k", "c": "10n"},
+    "attenuator": {"db": 10},
+}
+
+
+def test_opsmap_inputs_cover_every_mappable_calc():
+    assert set(OPSMAP_INPUTS) == set(opsmap.MAPPABLE)
+
+
+@pytest.mark.parametrize("name", sorted(OPSMAP_INPUTS))
+def test_opsmap_emits_a_valid_oplist(name):
+    doc = compute(name, {k: str(v) for k, v in OPSMAP_INPUTS[name].items()})
+    oplist = opsmap.to_oplist(name, doc)
+    assert ops.validate_oplist(oplist) == [], f"{name}: --ops output invalid"
+    # macros must survive expansion too (the plain branch is a no-op here)
+    expanded = ops.expand_macros(oplist)
+    assert ops.validate_oplist(expanded) == [], f"{name}: expansion invalid"
+    placed = [o for o in expanded["ops"] if o["op"] == "place_component"]
+    assert placed, f"{name}: --ops placed no components"
+    assert len({o["designator"] for o in placed}) == len(placed), \
+        f"{name}: duplicate designators"
+    for o in placed:
+        assert o["lib_id"].startswith("Device:"), o["lib_id"]
+    # the plain branch's whole point is shipping computed E-series values
+    # (macros carry theirs in macro-specific fields instead)
+    for o in oplist["ops"]:
+        if o["op"] == "place_component":
+            assert o.get("value"), f"{name}: {o['designator']} has no value"
+
+
+@pytest.mark.parametrize("topology", ["pi", "tee", "bridged-tee"])
+def test_opsmap_attenuator_every_topology(topology):
+    """Each topology yields a different resistor set — all must map."""
+    doc = compute("attenuator", {"db": "10", "topology": topology})
+    oplist = opsmap.to_oplist("attenuator", doc)
+    assert ops.validate_oplist(oplist) == []
+    assert len(oplist["ops"]) >= 2
+
+
 def test_new_calcs_all_have_references():
     for name in ("diffpair", "convert-length", "hysteresis", "rs485-bias",
                  "can-termination", "ldo", "gate-drive", "sallen-key", "adc",

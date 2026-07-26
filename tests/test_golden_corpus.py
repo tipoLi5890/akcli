@@ -41,6 +41,7 @@ _ALT2 = "tests/fixtures/two_gnd_ports.SchDoc"
 _TJ = "tests/fixtures/t_junction.SchDoc"
 _AFE = "tests/fixtures/corpus/analog_frontend.kicad_sch"
 _PWE = "tests/fixtures/corpus/power_entry.kicad_sch"
+_GRP = "tests/fixtures/corpus/groups_board.kicad_sch"
 
 CASES: list[Case] = [
     Case("nets-board_v8", ("nets", _KI, "--json")),
@@ -73,6 +74,10 @@ CASES: list[Case] = [
     Case("review-power_entry",
          ("review", "analyze", _PWE, "--json", "--profile", "standard")),
     Case("render-power_entry", ("render", _PWE, "-o", "-")),
+    # groups_board has no committed op-list, but its netlist snapshot is what
+    # tests/test_engine_parity.py's two-engine agreement check consumes — that
+    # test skipped itself into permanent silence while this snapshot was absent.
+    Case("nets-groups_board", ("nets", _GRP, "--json")),
 ]
 
 
@@ -144,3 +149,51 @@ def test_golden(case: Case):
         "If the change is INTENTIONAL, regenerate with "
         "`python3 tools/golden_regen.py` and review the diff; if not, this "
         "is a regression.")
+
+
+# --------------------------------------------------------------------------- #
+# tools/golden_regen.py blast-radius guard
+# --------------------------------------------------------------------------- #
+def _load_golden_regen():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "golden_regen", ROOT / "tools" / "golden_regen.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _fake_corpus(gr, tmp_path: Path, n: int) -> list[Case]:
+    """Point golden_regen at *n* synthetic cases rooted in *tmp_path*."""
+    cases = [Case(f"fake{i}", ("nets", f"fake{i}")) for i in range(n)]
+    gr.ROOT = tmp_path
+    gr.CASES = cases
+    gr.snapshot_path = lambda case: tmp_path / "golden" / f"{case.name}.json"
+    gr.capture = lambda case: f"{{}}\n{case.name}\n"
+    return cases
+
+
+def test_golden_regen_refuses_a_wide_bless_without_the_flag(tmp_path: Path, capsys):
+    gr = _load_golden_regen()
+    _fake_corpus(gr, tmp_path, gr.BLESS_LIMIT + 1)
+
+    assert gr.main([]) == 1
+    out = capsys.readouterr().out
+    assert "REFUSING to bless" in out
+    assert "--bless-all" in out
+    # nothing written: the refusal must be all-or-nothing
+    assert not (tmp_path / "golden").exists()
+
+    assert gr.main(["--bless-all"]) == 0
+    assert len(list((tmp_path / "golden").glob("*.json"))) == gr.BLESS_LIMIT + 1
+
+
+def test_golden_regen_blesses_a_small_change_without_the_flag(tmp_path: Path):
+    gr = _load_golden_regen()
+    _fake_corpus(gr, tmp_path, gr.BLESS_LIMIT)
+    assert gr.main([]) == 0
+    assert len(list((tmp_path / "golden").glob("*.json"))) == gr.BLESS_LIMIT
+    # idempotent second run: no changes, still 0
+    assert gr.main([]) == 0

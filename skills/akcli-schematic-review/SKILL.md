@@ -140,7 +140,8 @@ Default families for a bare `check`: ERC-lite + power + BOM + net hygiene +
 layout + **integrity** (+ pair/bus continuity unless `[check].pairs = false`).
 `--integrity` is the write gate's own document checks run read-only over any
 `.kicad_sch`: dangling endpoints, duplicate uuids **and duplicate designators**,
-unresolved `lib_id`s, instance paths, no-connect conflicts. Findings here are
+unresolved `lib_id`s, instance paths, stacked power ports, a `(sheet …)` whose
+child file is missing, no-connect conflicts. Findings here are
 file-structural, not electrical — a `DUPLICATE_UUID` or `UNRESOLVED_LIB_ID` on a
 file that was never written by akcli is a real defect (hand edit, bad merge, a
 library that moved) and belongs in the report at Major or above.
@@ -165,6 +166,8 @@ It fires only on a rail nobody wired, so treat a hit as Major until you find the
 `BOM_DUPLICATE_DESIGNATOR`, `BOM_MISSING_VALUE`, `BOM_MISSING_FOOTPRINT`, `BOM_REFDES_GAP`;
 integrity: `DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`,
 `DUPLICATE_DESIGNATOR`, `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`,
+`POWER_PORT_STACKED` (two net-naming power symbols on one coordinate — the
+rails merge with nothing visible to see), `SHEET_FILE_MISSING`,
 `NO_CONNECT_CONFLICT`;
 `CONTRACT_PASS` (INFO — a contract rule was checked and held), `CONTRACT_WAIVED` (NOTE —
 a rule was demoted/dropped by a waiver), `CONTRACT_EXCEPTION_EXPIRED` (an approved
@@ -265,7 +268,10 @@ suspicious dividers/pull-ups/load caps and cite the printed reference.
 - **Config / strap / boot pins** — BOOT, MODE, ADDR, CFG pins must have a defined level
   (pull-up/down `R`, or driven). A floating strap pin is at least Major.
 - **Unconnected inputs** — on passive-heavy boards `ERC_FLOATING_INPUT` is demoted; manually
-  scan each IC's input pins for nets with no driver.
+  scan each IC's input pins for nets with no driver. The rule also treats a **passive tie to
+  a rail** (pull-up/pull-down, series feed) and a **connector** on the net as drivers, so it
+  says nothing about *whether the level is the right one* — check strap/boot pin polarity by
+  hand.
 - **Connector pinout sanity** — dump each connector (`akcli component board.SchDoc J1`) and
   compare against the mating standard (USB, SWD/JTAG, Qwiic...): power/ground on the right
   positions, no shield-to-signal shorts. For a board-wide sweep,

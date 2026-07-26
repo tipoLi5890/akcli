@@ -2,9 +2,11 @@
 new "analysis primitive" layer.
 
 Everything here is format-agnostic: it consumes :class:`~..model.Schematic`
-(KiCad or Altium alike) and NEVER parses files. Rail/ground semantics are
-imported from :mod:`..checks.power` / :mod:`..checks._rails` so the review
-layer cannot drift from the check layer (single source of truth).
+(KiCad or Altium alike) and NEVER parses files. Rail/ground semantics AND
+part-role classification (crystal / connector / TVS / refdes prefix) are
+imported from :mod:`..classify`, the leaf module the ``checks`` layer uses
+too, so the review layer cannot drift from the check layer (single source of
+truth).
 
 Discipline: helpers return ``None`` rather than guess — a value that does not
 parse, or a net without an implied voltage, propagates as *absence* and the
@@ -17,20 +19,24 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from ..checks import _rails
-from ..checks.power import _is_ground, _is_power, _net_candidate_names
+from .. import classify
+from ..calc.registry import CalcError
+from ..calc.si import parse_value as _si_parse_value
+from ..checks.power import _net_candidate_names
 from ..model import Component, Net, Schematic
 from . import tables
 
 # --------------------------------------------------------------------------- #
-# component classification
+# component classification (delegated to ..classify — one implementation)
 # --------------------------------------------------------------------------- #
-_PREFIX_RX = re.compile(r"^([A-Za-z]+)")
+_is_ground = classify.is_ground
+_is_power = classify.is_power
 
-
-def ref_prefix(designator: str) -> str:
-    m = _PREFIX_RX.match(designator or "")
-    return (m.group(1) if m else "").upper()
+#: Leading alpha run of a refdes, upper-cased. Kept as a review-layer name for
+#: the many call sites; the implementation is the shared one (which also
+#: strips the ``$`` of a synthesized designator, so undesignated parts are
+#: classified instead of silently skipped).
+ref_prefix = classify.refdes_prefix
 
 
 def _lib(comp: Component) -> str:
@@ -48,18 +54,20 @@ def is_capacitor(comp: Component) -> bool:
 
 
 def is_crystal(comp: Component) -> bool:
-    return ("crystal" in _lib(comp) or "xtal" in _lib(comp)
-            or ref_prefix(comp.designator) in tables.CRYSTAL_PREFIXES)
+    """Crystal/resonator: library or value evidence first, ``Y``/``X`` prefix
+    as the fallback (see :func:`akcli.classify.is_crystal`)."""
+    return classify.is_crystal(comp.designator, comp.library_ref, comp.value)
 
 
 def is_connector(comp: Component) -> bool:
-    return (ref_prefix(comp.designator) in tables.CONNECTOR_PREFIXES
-            or "conn" in _lib(comp) or "usb" in _lib(comp))
+    """Connector/header: library evidence first, prefix as the fallback — a
+    part whose library or value says *crystal* is never a connector."""
+    return classify.is_connector(comp.designator, comp.library_ref,
+                                 comp.footprint, comp.value)
 
 
 def is_tvs(comp: Component) -> bool:
-    hay = f"{_lib(comp)} {(comp.value or '').lower()}"
-    return any(k in hay for k in tables.TVS_KEYWORDS)
+    return classify.is_tvs(comp.designator, comp.library_ref, comp.value)
 
 
 def is_fuse(comp: Component) -> bool:
@@ -117,38 +125,44 @@ def is_dnp(comp: Component | None) -> bool:
 # --------------------------------------------------------------------------- #
 # value parsing (engineering notation incl. infix style: 4k7, 1R0, 100n, 10uF)
 # --------------------------------------------------------------------------- #
-_MULT: dict[str, float] = {
-    "G": 1e9, "M": 1e6, "k": 1e3, "K": 1e3, "R": 1.0, "r": 1.0, "Ω": 1.0,
-    "": 1.0, "m": 1e-3, "u": 1e-6, "µ": 1e-6, "n": 1e-9, "p": 1e-12,
-    "f": 1e-15,
-}
-_VAL_RX = re.compile(
-    r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([GMkKmuµnpfRrΩ]?)\s*([0-9]*)\s*"
-    r"(?:F|H|ohms?|Ohms?|OHMS?)?\s*$"
-)
+# Unit tail a schematic Value carries but SI parsing does not want
+# ("10uF" -> "10u", "4k7Ω" -> "4k7").
+_UNIT_TAIL_RX = re.compile(r"\s*(?:F|H|OHMS?|Ω)\s*$", re.IGNORECASE)
+# Unambiguous upper-case multiplier letters (Altium-style "10U"/"100N"/"4P7")
+# folded to their SI spelling. ``M``/``m`` is deliberately NOT folded — that
+# pair is mega vs milli, the one place case carries meaning. ``Ω`` is the IEC
+# 60062 decimal marker, same role as ``R``.
+_LETTER_FOLD = str.maketrans({"U": "u", "N": "n", "P": "p",
+                              "Ω": "R", "μ": "µ"})
 
 
 def parse_value(text: str | None) -> float | None:
     """Engineering-notation component value, or ``None`` — never a guess.
 
     Accepts ``4700`` / ``4.7k`` / ``4k7`` / ``1R0`` / ``100n`` / ``10uF`` /
-    ``2.2µF`` / ``0R``. Case is significant for m (milli) vs M (mega).
+    ``2.2µF`` / ``0R`` / ``10U`` (Altium-style upper case).
+
+    The number crunching is :func:`akcli.calc.si.parse_value` — the same
+    parser the calculators use — so a value the CLI can compute with is a
+    value the review detectors can see. This wrapper only does what a
+    *schematic Value field* needs on top: strip the unit tail and fold the
+    unambiguous upper-case multipliers, then turn a parse failure into
+    ``None`` (a review detector reports *insufficient evidence*; it never
+    raises).
     """
     if not text:
         return None
-    m = _VAL_RX.match(str(text))
-    if not m:
+    s = _UNIT_TAIL_RX.sub("", str(text).strip()).strip().translate(_LETTER_FOLD)
+    if not s:
         return None
-    head, letter, tail = m.groups()
     try:
-        base = float(f"{head}.{tail}") if tail else float(head)
-    except ValueError:
+        return _si_parse_value(s)
+    except (CalcError, ValueError, KeyError):
         return None
-    return base * _MULT.get(letter, 1.0)
 
 
 # --------------------------------------------------------------------------- #
-# net semantics (delegated to the check layer — single source of truth)
+# net semantics (delegated to ..classify — single source of truth)
 # --------------------------------------------------------------------------- #
 def net_is_ground(net: Net) -> bool:
     return any(_is_ground(n) for n in _net_candidate_names(net))
@@ -160,14 +174,14 @@ def net_is_power(net: Net) -> bool:
 
 def net_implied_voltage(net: Net) -> float | None:
     for name in _net_candidate_names(net):
-        v = _rails.implied_voltage(name)
+        v = classify.implied_voltage(name)
         if v is not None:
             return v
     return None
 
 
 def name_implied_voltage(name: str | None) -> float | None:
-    return _rails.implied_voltage(name)
+    return classify.implied_voltage(name)
 
 
 # --------------------------------------------------------------------------- #

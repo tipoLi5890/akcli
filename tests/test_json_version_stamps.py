@@ -180,7 +180,13 @@ def test_capabilities_constraints_and_altium_honesty():
     assert cons["rotation_enum"] == [0, 90, 180, 270]
     assert cons["wire_orthogonal_only"] is True
     assert cons["grid_mil"] == 50
-    assert cons["hierarchy"] == "flat_v1_only"
+    # Hand-maintained prose (no constant to derive from): if the writer's
+    # hierarchy rule changes (writers/instances.instances_path,
+    # writers/connectivity's INVALID_INSTANCES_PATH), update the manifest
+    # strings in commands/capabilities.py AND this pin together.
+    assert cons["hierarchy"] == "hierarchical_write_v1"
+    assert "child .kicad_sch" in cons["hierarchy_note"]
+    assert "HIERARCHICAL_UNSUPPORTED" in cons["hierarchy_note"]
 
 
 def test_dumps_object_literals_carry_version_stamp():

@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -188,3 +189,48 @@ def test_blocks_invalid_oplist_native_windows_path(workspace: Path):
         workspace)
     assert proc.returncode == 2
     assert "structurally invalid" in proc.stderr
+
+
+# --------------------------------------------------------------------------- #
+# hooks/hooks.json wiring — the manifest CI only ever `jq .`-parsed.
+#
+# `jq .` proves the JSON is well-formed, not that the scripts it points at
+# exist. A renamed/moved hook script would have shipped a plugin whose hook
+# silently fails to start (Claude Code just logs and moves on).
+# --------------------------------------------------------------------------- #
+_PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+_HOOKS_JSON = _PLUGIN_ROOT / "hooks" / "hooks.json"
+_PLUGIN_ROOT_VAR = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}(/[^\s\"']+)")
+
+
+def _hook_commands() -> list[str]:
+    doc = json.loads(_HOOKS_JSON.read_text(encoding="utf-8"))
+    out: list[str] = []
+    for event, groups in doc["hooks"].items():
+        assert isinstance(groups, list), f"{event}: expected a list of matcher groups"
+        for group in groups:
+            for entry in group.get("hooks", []):
+                assert entry.get("type") == "command", f"{event}: non-command hook entry"
+                cmd = entry.get("command")
+                assert isinstance(cmd, str) and cmd, f"{event}: empty hook command"
+                out.append(cmd)
+    return out
+
+
+def test_hooks_json_declares_commands():
+    assert _hook_commands(), "hooks.json registers no hook commands"
+
+
+def test_hooks_json_plugin_root_paths_exist():
+    """Every ${CLAUDE_PLUGIN_ROOT}/... path in hooks.json resolves to a file."""
+    referenced = 0
+    for cmd in _hook_commands():
+        for rel in _PLUGIN_ROOT_VAR.findall(cmd):
+            referenced += 1
+            target = _PLUGIN_ROOT / rel.lstrip("/")
+            assert target.is_file(), (
+                f"hooks.json points at {rel} which does not exist in the plugin "
+                f"tree (resolved to {target})")
+    assert referenced, (
+        "no ${CLAUDE_PLUGIN_ROOT} path found in hooks.json — if the hooks stopped "
+        "referencing plugin files, delete this gate deliberately")

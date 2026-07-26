@@ -166,12 +166,20 @@ def _whitespace_for(nd: SNode, depth: int) -> list[str]:
 def quote(value: str) -> str:
     """Return the KiCad source *text* for a quoted-string atom holding ``value``.
 
-    Backslashes and double-quotes are escaped (``\\`` -> ``\\\\``, ``"`` ->
-    ``\\"``), matching the inverse of the parser's unescape table.  The result
-    includes the surrounding quotes and is suitable as :pyattr:`SNode.text`.
+    Backslashes, double-quotes and control characters are escaped (``\\`` ->
+    ``\\\\``, ``"`` -> ``\\"``, newline/CR/tab -> ``\\n``/``\\r``/``\\t``),
+    matching the inverse of the parser's unescape table.  The result includes
+    the surrounding quotes and is suitable as :pyattr:`SNode.text`.
+
+    The control characters are not optional: this parser tolerates a raw
+    newline inside a quoted atom (``_QUOTED_RE`` is DOTALL) but eeschema does
+    not — an unescaped one yields a file KiCad refuses to open while every
+    akcli gate passes.  ``tests/test_sexpr_quoting.py`` pins this against every
+    other quoter in the tree.
     """
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return ('"' + escaped.replace("\n", "\\n").replace("\r", "\\r")
+                        .replace("\t", "\\t") + '"')
 
 
 def atom_for_token(value: str) -> SNode:

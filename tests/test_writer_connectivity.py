@@ -111,16 +111,32 @@ def test_wire_to_wire_endpoint_is_connected():
     assert len(dangling) == 2  # the shared (20,10) corner is connected
 
 
-def test_t_junction_endpoint_is_connected():
-    # Wire B's endpoint lands on the mid-span of wire A -> connected (no dangling).
-    text = (
+def test_t_junction_endpoint_needs_a_junction_to_connect():
+    """A bare T (endpoint on a mid-span, no junction) does NOT connect.
+
+    eeschema's rule, and netbuild's (``t_midspan_connects=False``): the gate
+    used to forgive the junction-less T, so ``draw`` called "connected" what
+    ``akcli nets`` and KiCad both call two nets. ``auto_junctions`` runs before
+    the gate on the draw path, so an akcli-drawn T is never bare.
+    """
+    bare = (
         '(kicad_sch (uuid "%s")\n'
         '(wire (pts (xy 0 0) (xy 40 0)) (uuid "a"))\n'
         '(wire (pts (xy 20 0) (xy 20 20)) (uuid "b")))' % ROOT_UUID
     )
-    findings = connectivity.verify(parse(text))
+    findings = connectivity.verify(parse(bare))
     dangling = {tuple(f.refs) for f in findings if f.code == connectivity.DANGLING_ENDPOINT}
-    assert ("(20 0)",) not in dangling  # the T point is connected
+    assert ("(20 0)",) in dangling       # the bare T point dangles
+
+    joined = (
+        '(kicad_sch (uuid "%s")\n'
+        '(wire (pts (xy 0 0) (xy 40 0)) (uuid "a"))\n'
+        '(wire (pts (xy 20 0) (xy 20 20)) (uuid "b"))\n'
+        '(junction (at 20 0) (uuid "j")))' % ROOT_UUID
+    )
+    findings = connectivity.verify(parse(joined))
+    dangling = {tuple(f.refs) for f in findings if f.code == connectivity.DANGLING_ENDPOINT}
+    assert ("(20 0)",) not in dangling   # with the junction it is connected
 
 
 # --------------------------------------------------------------------------- #
@@ -203,6 +219,93 @@ def test_wrong_instances_path_flagged():
 def test_valid_instances_path_not_flagged():
     findings = connectivity.verify(_doc())
     assert connectivity.INVALID_INSTANCES_PATH not in _codes(findings)
+
+
+# --------------------------------------------------------------------------- #
+# unannotated documents / stacked power ports / missing sheet files (audit)
+# --------------------------------------------------------------------------- #
+def _power_doc(value_a: str, value_b: str, *, at_b: str = "10 10") -> str:
+    """Two power symbols; ``at_b`` decides whether they share a coordinate."""
+    return (
+        '(kicad_sch (uuid "%s")\n'
+        '(lib_symbols (symbol "power:GND" (power) '
+        '(symbol "GND_0_1" (pin power_in line (at 0 0 90) (length 0) '
+        '(name "~") (number "1")))))\n'
+        '(symbol (lib_id "power:GND") (at 10 10 0) (unit 1) (uuid "p1")\n'
+        '  (property "Reference" "#PWR01" (at 10 10 0))\n'
+        f'  (property "Value" "{value_a}" (at 10 10 0))\n'
+        '  (instances (project "p" (path "/%s" (reference "#PWR01") (unit 1)))))\n'
+        f'(symbol (lib_id "power:GND") (at {at_b} 0) (unit 1) (uuid "p2")\n'
+        '  (property "Reference" "#PWR02" (at 10 10 0))\n'
+        f'  (property "Value" "{value_b}" (at 10 10 0))\n'
+        '  (instances (project "p" (path "/%s" (reference "#PWR02") (unit 1))))))'
+    ) % (ROOT_UUID, ROOT_UUID, ROOT_UUID)
+
+
+def test_stacked_power_ports_flagged():
+    """The wreckage 0.17's position+net identity left behind: a stale GND
+    hidden under a +3V3 on one coordinate, silently shorting the two rails."""
+    findings = connectivity.verify(parse(_power_doc("GND", "+3V3")))
+    bad = [f for f in findings if f.code == connectivity.POWER_PORT_STACKED]
+    assert bad and bad[0].severity is Severity.ERROR
+    assert "+3V3" in bad[0].message and "GND" in bad[0].message
+
+
+def test_power_ports_on_distinct_points_are_fine():
+    findings = connectivity.verify(parse(_power_doc("GND", "+3V3", at_b="20 20")))
+    assert connectivity.POWER_PORT_STACKED not in _codes(findings)
+
+
+def test_pwr_flag_may_share_a_ports_coordinate():
+    """PWR_FLAG names no net (netbuild excludes it), so it may coincide."""
+    text = _power_doc("GND", "PWR_FLAG")
+    assert connectivity.POWER_PORT_STACKED not in _codes(
+        connectivity.verify(parse(text)))
+
+
+def test_unannotated_placeholders_are_not_duplicate_designators():
+    """``R?`` is KiCad's UNANNOTATED marker, not a designator: N of them are N
+    parts. Counting them refused every write to an unannotated sheet."""
+    text = (
+        '(kicad_sch (uuid "%s")\n'
+        '(lib_symbols (symbol "Device:R" '
+        '(symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1.27) '
+        '(name "~") (number "1")))))\n'
+        '(symbol (lib_id "Device:R") (at 10 10 0) (unit 1) (uuid "s1")\n'
+        '  (property "Reference" "R?" (at 10 10 0))\n'
+        '  (instances (project "p" (path "/%s" (reference "R?") (unit 1)))))\n'
+        '(symbol (lib_id "Device:R") (at 30 10 0) (unit 1) (uuid "s2")\n'
+        '  (property "Reference" "R?" (at 30 10 0))\n'
+        '  (instances (project "p" (path "/%s" (reference "R?") (unit 1))))))'
+    ) % (ROOT_UUID, ROOT_UUID, ROOT_UUID)
+    assert connectivity.verify(parse(text)) == []
+
+
+def _sheet_doc(child: str) -> str:
+    return (
+        '(kicad_sch (uuid "%s")\n'
+        '(sheet (at 10 10) (size 20 20) (uuid "sh1")\n'
+        '  (property "Sheetname" "child" (at 10 10 0))\n'
+        f'  (property "Sheetfile" "{child}" (at 10 10 0))))' % ROOT_UUID
+    )
+
+
+def test_missing_sheet_file_flagged(tmp_path):
+    doc = parse(_sheet_doc("child.kicad_sch"))
+    target = tmp_path / "root.kicad_sch"
+    bad = [f for f in connectivity.verify(doc, path=target)
+           if f.code == connectivity.SHEET_FILE_MISSING]
+    assert bad and bad[0].severity is Severity.ERROR
+
+    (tmp_path / "child.kicad_sch").write_text("(kicad_sch)\n", encoding="utf-8")
+    assert connectivity.SHEET_FILE_MISSING not in _codes(
+        connectivity.verify(doc, path=target))
+
+
+def test_sheet_file_check_is_skipped_without_a_path():
+    """An in-memory document has no directory to resolve a child against."""
+    assert connectivity.SHEET_FILE_MISSING not in _codes(
+        connectivity.verify(parse(_sheet_doc("child.kicad_sch"))))
 
 
 # --------------------------------------------------------------------------- #

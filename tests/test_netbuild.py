@@ -386,3 +386,51 @@ def test_pin_on_wire_midspan_with_junction_connects():
     hits = _net_with(nets, ("R1", "1"))
     assert len(hits) == 1
     assert ("Q9", "1") in hits[0].members
+
+
+# --- (9) Net.sheet_path: what eeschema qualifies the exported name with ------
+
+def test_sheet_path_qualifies_local_names_only():
+    """Local labels record a sheet path; power ports / global labels record none."""
+    prims = model.NetPrimitives(
+        wires=[_wire(1000, 1000, 2000, 1000), _wire(1000, 2000, 2000, 2000)],
+        pins=[_pin(("R1", "1"), 1000, 1000), _pin(("R2", "1"), 1000, 2000)],
+        labels=[
+            _label("SIG", 1500, 1000, scope="local"),
+            _label("GND", 1500, 2000, scope="power"),
+        ],
+    )
+    by_name = {n.name: n for n in build_nets(prims)}
+    assert by_name["SIG"].sheet_path == "/"      # root sheet (the "" key)
+    assert by_name["GND"].sheet_path == ""       # power port: never qualified
+    # ...and the stored NAME itself never carries the prefix.
+    assert by_name["SIG"].name == "SIG"
+
+
+def test_sheet_path_uses_the_reader_supplied_human_path():
+    """A child sheet's key maps to the human path KiCad writes ("/Amp/")."""
+    prims = model.NetPrimitives(
+        wires=[_wire(1000, 1000, 2000, 1000, sheet="/uuid-1")],
+        pins=[_pin(("R1", "1"), 1000, 1000, sheet="/uuid-1")],
+        labels=[_label("SIG", 1500, 1000, sheet="/uuid-1")],
+    )
+    nets = build_nets(prims, sheet_paths={"": "/", "/uuid-1": "/Amp/"})
+    assert [n.sheet_path for n in nets] == ["/Amp/"]
+    # without a map the raw key is normalized to KiCad's slash convention
+    assert [n.sheet_path for n in build_nets(prims)] == ["/uuid-1/"]
+
+
+def test_same_name_at_local_and_global_scope_is_not_qualified():
+    """A text carried by BOTH a local and a global label: eeschema's driver is
+    the global one, so the exported name stays bare (the corpus board's V3V3)."""
+    prims = model.NetPrimitives(
+        wires=[_wire(1000, 1000, 3000, 1000)],
+        pins=[_pin(("R1", "1"), 1000, 1000)],
+        labels=[
+            _label("V3V3", 1500, 1000, scope="local"),
+            _label("V3V3", 2500, 1000, scope="global"),
+        ],
+    )
+    nets = build_nets(prims)
+    assert [n.name for n in nets] == ["V3V3"]
+    assert nets[0].sheet_path == ""

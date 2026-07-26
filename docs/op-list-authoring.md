@@ -76,7 +76,7 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 | `add_junction` | `at` | usually unnecessary — the executor auto-inserts junctions at 3+-way meets and pin taps |
 | `add_no_connect` | `pin` | `"REF.PIN"` or `[x,y]` |
 | `add_net_label` | `name, at` | `at` also takes `"REF.PIN"` / `"mid(REF.PIN,REF.PIN)"`; `scope: local\|global\|hierarchical` (use `hierarchical` only in a CHILD sheet file, to pair with the parent's same-name sheet pin — see [Hierarchical sheets](#hierarchical-sheets-add_sheet)) |
-| `place_power_port` | `lib_id, net_name, at` | auto-allocates the `#PWR` reference; merges by name everywhere; `at` also takes `"REF.PIN"` / `"mid(...)"` |
+| `place_power_port` | `lib_id, net_name, at` | auto-allocates the `#PWR` reference; merges by name everywhere; `at` also takes `"REF.PIN"` / `"mid(...)"`. One port per coordinate — a second op on the same point is `POWER_PORT_STACKED` (exit 6) |
 | `place_gnd` / `place_vcc` | `at` | sugar over `place_power_port` |
 | `add_bus_entry` | `at` | optional `size` (default 2.54 mm @ 45°); each entry end must land on a bus or a wire, else `DANGLING_BUS_ENTRY` gates the write |
 | `add_text` | `text, at` | free-floating text; optional free `angle`; optional `key` = stable replacement handle |
@@ -87,7 +87,7 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 | `delete_component` | `designator` | removes ALL instances; attached wires are left for the connectivity gate to flag — delete them explicitly, or set `"cascade": true` to also delete wires ending on any deleted pin's coordinate plus labels/no-connects anchored there; an anchored junction is removed only when fewer than two surviving wires still pass through it (a pure-X crossing of untouched wires keeps its junction — deleting it would silently split their net). Cascaded uuids are reported; absent target = replay-safe no-op |
 | `delete_object` | `uuid` **or** `match` | remove ONE top-level object (wire/label/junction/text/...). `match: {kind, name?, at?}` addresses it without a uuid — exactly-one semantics (0 matches = replay-safe note, >1 = error listing the candidate uuids); `match.at` is exact mils, NOT grid-snapped |
 | `move_component` | `designator` + position | destination is `x_mil`+`y_mil` OR `anchor` (+`offset_mil`), like `place_component`. One instance (optional `unit`); its properties travel along; wires do NOT stretch unless `carry_labels`/`carry_wires` |
-| `add_sheet` | `name, file, at, size` | hierarchical sheet: `(sheet …)` with `Sheetname`/`Sheetfile`, deterministic uuids, and edge-computed sheet pins from optional `pins:[{name, type, side, offset_mil}]` (`type: input\|output\|bidirectional\|tri_state\|passive`, `side: left\|right\|top\|bottom`). `at`=TOP-LEFT corner, mils. Wires attach to a sheet pin **by coordinate** (`at`+`offset_mil` along the side, grid-snapped) — there is NO `Sheet.Pin` endpoint. KiCad only (`altium: false`); the child `.kicad_sch` is authored separately (`akcli new`) |
+| `add_sheet` | `name, file, at, size` | hierarchical sheet: `(sheet …)` with `Sheetname`/`Sheetfile`, deterministic uuids, and edge-computed sheet pins from optional `pins:[{name, type, side, offset_mil}]` (`type: input\|output\|bidirectional\|tri_state\|passive`, `side: left\|right\|top\|bottom`). `at`=TOP-LEFT corner, mils. Wires attach to a sheet pin **by coordinate** (`at`+`offset_mil` along the side, grid-snapped) — there is NO `Sheet.Pin` endpoint. KiCad only (`altium: false`); the child `.kicad_sch` must ALREADY exist (`akcli new <child>` first) or the op is refused with `SHEET_FILE_MISSING` |
 
 ### Macro ops (expanded before validation)
 
@@ -115,7 +115,21 @@ label (the facing-pin pattern below).
 `akcli ops list` prints them under the macro section; `akcli ops template
 place_divider` emits a skeleton. `akcli calc <akcli-design-calc> --ops` emits these
 macros directly (placeholder net names — edit them, then `akcli plan`), and
-the validator accepts un-expanded macro documents.
+the validator accepts un-expanded macro documents — macro fields are validated
+**before** expansion, so a typo (`valu`) or an invented field is a refusal, not
+a silently-defaulted part.
+
+**`designators` is positional, and the validator enforces it.** Each slot is a
+fixed part: `place_led_indicator` is `[R, D]`, `place_rc_filter` is `[R, C]`,
+`place_crystal` is `[Y|X, C, C]`, `place_divider` is `[R, R]`;
+`place_decoupling`'s `designator` is the C and `place_pullup`'s is the R.
+Writing them in the "reading order" you had in mind (`["D1", "R3"]`) would
+otherwise name the resistor D1 and the LED R3 — electrically identical, BOM
+wrong, no finding anywhere — so a refdes prefix that contradicts its slot is an
+`OP_UNSUPPORTED` error naming the slot. Overriding `lib_id` to a different part
+class hands the convention back to you and lifts the check.
+`terminate_unused_unit` and `place_array` choose no part, so their designators
+are unconstrained.
 
 ## Modular design with functional groups
 
@@ -226,6 +240,7 @@ LOOK at the result before `--apply`.
    connectivity ERROR
    (`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`,
    `DUPLICATE_DESIGNATOR`, `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`,
+   `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`,
    `NO_CONNECT_CONFLICT`) refuses the write (exit 6) — the same set
    `akcli check <file> --integrity` runs read-only on any `.kicad_sch`, so an
    imported or hand-edited file can be screened before you author against it.
@@ -260,30 +275,42 @@ into a refusal.
 
 Created nodes get deterministic UUIDv5 keyed on the root sheet uuid plus a
 per-node seed. **Replaying the same op-list file converges byte-identically
-after one apply.** There are two seed families, and they tolerate op-list edits
-differently:
+after one apply.** No seed contains the op's INDEX, so inserting, reordering or
+deleting ops never re-identifies an untouched node — a re-apply after an
+op-list edit rewrites nodes in place instead of duplicating everything
+downstream of the edit:
 
 - **Parts are seeded from the designator alone** — `place_component`, and the
-  power symbols behind `place_power_port`/`place_gnd`/`place_vcc`. No op index
-  is involved, so inserting, reordering or deleting ops does **not** change an
-  untouched part's identity: a re-apply after an op-list edit updates parts in
-  place instead of duplicating everything downstream of the edit. An
-  auto-allocated `#PWR0<n>` reference is recovered by position + net name for
-  the same reason (the designator is not carried in the op).
-- **Wires, junctions, no-connects, labels, bus entries and sheets are seeded
-  from a kind tag + their coordinates + the op's index.** Reordering or
-  inserting *those* ops re-derives their uuids, so a re-apply appends a second,
-  coincident node instead of replacing the original — net-neutral, but it
-  accumulates. Safe edits to an already-applied list: append at the END, or
-  change an op in place without changing the number or order of the ops before
-  it. To restructure a list that was already applied, extend with a NEW delta
-  op-list, or `akcli undo` first and re-apply the restructured list from the
-  reverted file.
+  power symbols behind `place_power_port`/`place_gnd`/`place_vcc`. An
+  auto-allocated `#PWR0<n>` reference (the designator is not carried in the op)
+  is recovered by the port's **position** — and its species, so a `PWR_FLAG`
+  may share a real port's coordinate without either claiming the other's
+  reference. Because the net name is *not* part of that identity, re-applying a
+  list that renames a port's rail (`GND` → `+3V3` at the same point) rewrites
+  the existing symbol; it does not stack a second port on top of the first.
+- **Wires, junctions, no-connects, labels, bus entries, sheets and keyless
+  graphics are seeded from a kind tag + their own content**: the segment's two
+  endpoints, the annotation's coordinates, the label's net name + the anchor as
+  WRITTEN (`"R1.2"` stays `"R1.2"`, a raw point stays its coordinates), the
+  sheet's child file + name. Two coincident pins can therefore each carry their
+  own label (`{"at": "R1.2"}` and `{"at": "R2.1"}` are different nodes even
+  though the point is the same) — which is what keeps `move_component
+  --carry_labels` honest.
+- **Two ops that would seed ONE uuid are refused**, naming both op indices
+  (exit 6): two identical wires, two texts on one point, two power ports on one
+  coordinate (`POWER_PORT_STACKED`). The later op would otherwise replace the
+  earlier one's node while both reported `ok`.
 - Graphics/notes with a `key` (`add_rectangle`, `add_text`, `add_text_box`)
-  are exempt from both seeds: the same key always replaces the same node,
-  wherever it is and wherever the op sits in the list. Two ops of the same kind
+  are addressed by that key instead of their coordinates: the same key always
+  replaces the same node, wherever it moves to. Two ops of the same kind
   sharing one `key` are rejected by the validator (they would seed one uuid, so
   the second would silently replace the first's node while both reported ok).
+- **A power port that MOVES leaves its old node behind.** Several `GND` ports
+  on one sheet is legal topology, so nothing can tell "the port moved" from "a
+  second port was added": change the `at` of an already-applied
+  `place_power_port` and you get two. Delete the old one explicitly
+  (`delete_object` with `{"kind": "symbol", "at": [x_mil, y_mil]}`) or `akcli
+  undo` and re-apply the edited list from the reverted file.
 - **Group origins.** Editing a group's `origin` and re-running an
   ALREADY-applied list moves the member parts in place (designator seeds), but
   every label/wire/junction in the group is re-derived at the new coordinates
@@ -292,13 +319,15 @@ differently:
   in a delta list, or `akcli arrange --groups`, then refresh frames.
 - Deletes are replay-safe no-ops when the target is already gone.
 
-**Migration caveat (files written before the designator-only seed).** An older
-akcli seeded parts from `designator:op_index`. Re-applying an *edited* op-list
-against such a file can duplicate parts whose original op index was ≠ 0: the old
-symbol node's uuid no longer matches, so a second node is created.
-`check --integrity` reports it as `DUPLICATE_DESIGNATOR` and the write gate
-refuses. Re-apply the unedited list once, or roll back with `akcli undo`, before
-editing the list.
+**Migration caveat (files written before the op-index-free seeds).** Older akcli
+builds seeded nodes from `<content>:op_index` — parts up to 0.16, and wires /
+junctions / labels / no-connects / bus entries / sheets / keyless graphics up to
+0.17. Re-applying a list against a file written by one of those can append a
+second node for anything whose original op index was ≠ 0, because the old node's
+uuid no longer matches. Parts surface as `DUPLICATE_DESIGNATOR` (the write gate
+refuses); the other nodes are net-neutral duplicates you can see with
+`akcli check --layout` (stacked text/labels) or by diffing. Re-apply the
+unedited list once, or roll back with `akcli undo`, before editing the list.
 
 ## Connectivity is name-based — and only dangling is a hard gate
 
@@ -323,6 +352,12 @@ editing the list.
 - **`power:PWR_FLAG` is special**: it marks a net as driven for ERC but does **not**
   name or merge a net. Use it to satisfy KiCad's `power_pin_not_driven` without
   side effects. (Do not give a *different* power symbol the value `PWR_FLAG`.)
+- **A T needs a junction.** A wire end that stops on another wire's mid-span
+  conducts in eeschema only through an explicit `(junction)` — `akcli nets` and
+  the write gate both apply that rule, and the writer inserts the junction for
+  you (`auto_junctions`) on every wire IT draws. In an imported or hand-drawn
+  file a junction-less T therefore reads as `DANGLING_ENDPOINT`, which is the
+  honest answer: KiCad calls those two nets too.
 - **The only hard connectivity write-gates are `DANGLING_ENDPOINT` and
   `DANGLING_BUS_ENTRY`.** Non-orthogonal and overlapping/collinear wires are
   *tolerated*, so two stubs that overlap or a wire that T-junctions another net
@@ -359,12 +394,15 @@ wrong silently changes netlists:
 `add_sheet` places a child-sheet reference on the parent. The authoring flow,
 parity-verified against eeschema's own netlister (kicad-cli 10):
 
-1. **Create both files.** `akcli new root.kicad_sch` and
-   `akcli new child.kicad_sch` — each gets a root uuid (the namespace for
-   deterministic op uuids). `add_sheet`'s `file` must point at an EXISTING child
-   (`read_sch` requires it), though the writer's own `verify()` is single-doc
-   and does not recurse, so `draw --apply` succeeds before the child is fully
-   authored.
+1. **Create both files, child FIRST.** `akcli new child.kicad_sch` and
+   `akcli new root.kicad_sch` — each gets a root uuid (the namespace for
+   deterministic op uuids). `add_sheet`'s `file` must point at an EXISTING
+   child: the op is refused with `SHEET_FILE_MISSING` otherwise, and the same
+   code fires on any later write to a root whose child has gone missing. (It
+   used to succeed, and then every `nets`/`check`/`render` on the design failed
+   with exit 4 because the child could not be read.) The child needs to exist,
+   not to be finished — a bare `akcli new` stub is enough to start wiring the
+   parent.
 2. **Place the sheet on the parent.**
    `{"op":"add_sheet", "name":"power", "file":"child.kicad_sch",
    "at":[2000,1000], "size":[1000,800],
@@ -382,15 +420,20 @@ parity-verified against eeschema's own netlister (kicad-cli 10):
    reports the merged cross-sheet net (root `VBUS` pin + child `VBUS` pin as ONE
    net) — confirm it matches your block plan, exactly as `kicad-cli` exports it.
 
-Sheet uuids are deterministic (`sheet:<name>` / `sheet:<name>.pin.<pinname>`
-keyed on the root + op index), so replay is byte-identical; the instances page
+Sheet uuids are deterministic (`sheet:<file>:<name>` /
+`sheet:<file>:<name>.pin.<pinname>` keyed on the root, no op index), so replay
+is byte-identical even after an op-list edit; the instances page
 number is `op_index + 2` (root is page 1) and may be non-contiguous when
 non-sheet ops interleave (KiCad tolerates it).
 
 **One op-list per FILE.** A child `.kicad_sch` is a normal draw target: point
 `target_file` at the child and its ops apply there, even though its existing
 symbols carry a `/<top-root>/<sheet>` parent-hierarchy instance path (the
-connectivity gate accepts those). What is still unsupported is reaching into a
+connectivity gate accepts those). A part placed into a child JOINS its
+siblings' sheet path(s) — including both entries when the child is
+instantiated twice — because a child file cannot derive its parents' uuids on
+its own; give it a designator KiCad's annotator would accept for every
+instance. What is still unsupported is reaching into a
 sub-sheet *from the parent's* op-list — an op that names a sub-sheet path fails
 `HIERARCHICAL_UNSUPPORTED`. Author the parent and each child as their own draw
 targets.
@@ -466,7 +509,10 @@ its own section below.
   The `place_pwr_flag` macro places `power:PWR_FLAG` at a grid point on the
   wire (`[x,y]` or `mid(REF.PIN,REF.PIN)`, default rotation 90 so the body
   extends into empty space). The flag marks the net driven for ERC and never
-  names or merges a net.
+  names or merges a net. A **rail port** is the opposite case: `place_gnd` /
+  `place_vcc` / `place_power_port at "REF.PIN"` belongs ON the pin (rung 1
+  above) and the lint stays quiet — it only fires there if the port's *body*
+  actually lands on the part (a port rotated back over the symbol).
 - **Deleting labels can split nets — the Net-changes block catches it.** When
   a net's fragments are held together only by same-name labels, deleting
   "redundant" labels silently splits it (deleting both THR labels split THR

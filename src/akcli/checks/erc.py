@@ -10,10 +10,14 @@ therefore:
 * detects **power / ground by NET NAME** (a net is power/ground when any name it
   answers to — display name, alias, or a contributing power-port/label
   ``source_name`` — matches a rail-name set: the configured ``[[rail]]`` names
-  plus the common ``GND``/``VCC``/``VDD``/``3V3``/``5V`` … patterns);
+  plus the common ``GND``/``VCC``/``VDD``/``3V3``/``5V`` … patterns, including
+  their derived stage names — ``VBUS_FUSED`` is the VBUS rail, ``VBUS_DET`` is
+  a signal *about* it. The vocabulary lives in :mod:`akcli.classify`, shared
+  with ``power.py`` and the whole review layer);
 * tests **"every IC has a power and a ground connection" by NET IDENTITY** — does
   the component share a net with a detected power net and with a detected ground
-  net — never by pin type;
+  net — never by pin type. A **TVS/ESD array** is exempt from the power half
+  (no supply pin by construction) but not from the ground half;
 * gates the genuinely type-dependent rules (**driver conflict**, **floating
   input**, the **pin-type conflict matrix**, **undriven POWER_IN**) behind a
   **type-confidence** = the fraction of pins that carry a real
@@ -27,7 +31,10 @@ therefore:
   (``_CONFLICT_MATRIX``) covers the high-signal cells of KiCad's default
   pin-conflict matrix (open-collector/open-emitter/tri-state vs push-pull and
   power drivers); ``ERC_POWER_IN_UNDRIVEN`` flags a supply pin on a net that is
-  neither a name-recognized rail nor driven by any ``POWER_OUT``;
+  neither a name-recognized rail nor driven by any ``POWER_OUT``. "Driver" for
+  the floating-input rule is not only a pin TYPE: a **passive tie to a rail**
+  (the 10 k from ``EN`` to ``+3V3``) and a **connector** on the net drive it
+  with nothing but Passive pins — see :func:`_driven_by_topology`;
 * flags **single-pin nets** as likely-dangling — but honors **No-ERC** markers
   (a designer-blessed point: a geo-match of the pin tip against
   ``sch.no_erc_points`` within grid tolerance) and config ``erc_waivers``;
@@ -46,13 +53,20 @@ Nothing here mutates ``sch``; every finding is advisory for a human/agent.
 
 from __future__ import annotations
 
-import re
-
+from ..classify import (
+    PASSIVE_TIE_PREFIXES,
+    is_connector as _is_connector,
+    is_ground as _is_ground,
+    is_power as _is_power,
+    is_tvs as _is_tvs,
+    norm as _norm,
+    rail_matches as _rail_matches,
+    refdes_prefix as _prefix,
+)
 from ..config import Config
-from ..model import Net, Pin, PinType, Schematic
+from ..model import Component, Net, Pin, PinType, Schematic
 from ..report import Finding, Severity, anchor
 from ..units import approx_eq, mil_to_nm
-from ._rails import implied_voltage as _implied_voltage, norm as _norm, rail_matches as _rail_matches
 
 __all__ = ["run"]
 
@@ -80,17 +94,10 @@ _RULE_TO_CODE: dict[str, str] = {
     "power_in_undriven": ERC_POWER_IN_UNDRIVEN,
 }
 
-# --- rail-name heuristics (shared shape with power.py; net-NAME based) --------
-_POWER_NAMES: frozenset[str] = frozenset(
-    {
-        "VCC", "VDD", "VBAT", "VBUS", "VIN", "VOUT", "VREF", "VDDA", "VDDIO",
-        "AVDD", "DVDD", "VPP", "VEE", "VCCIO", "VSYS", "VDDH", "VDD33", "VDD18",
-        "PVDD", "IOVDD", "VCORE", "VANA", "VDIG",
-    }
-)
-_GROUND_NAMES: frozenset[str] = frozenset(
-    {"GND", "GROUND", "VSS", "VSSA", "AGND", "DGND", "PGND", "GNDA", "GNDD", "EGND", "SGND"}
-)
+# --- rail-name heuristics (net-NAME based) ------------------------------------
+# ``_is_power`` / ``_is_ground`` / the rail-name vocabulary live in
+# ``akcli.classify`` — power.py and the review layer share the SAME
+# implementation (they used to carry verbatim copies that drifted).
 
 # IC-like designator prefixes (the things that must have power + ground).
 _IC_PREFIXES: frozenset[str] = frozenset({"U", "IC"})
@@ -141,12 +148,6 @@ _NO_ERC_TOL_NM = mil_to_nm(_NO_ERC_TOL_MIL)
 
 
 # --- small helpers -----------------------------------------------------------
-def _prefix(designator: str) -> str:
-    """Leading alpha prefix of a refdes (``$U3`` -> ``U``, ``IC2`` -> ``IC``)."""
-    m = re.match(r"[A-Za-z]+", designator.lstrip("$"))
-    return m.group(0).upper() if m else ""
-
-
 def _unit_letter(unit: int) -> str:
     """KiCad's display letter for a unit number (1 -> A, 2 -> B, 27 -> AA)."""
     s = ""
@@ -154,28 +155,6 @@ def _unit_letter(unit: int) -> str:
         unit, r = divmod(unit - 1, 26)
         s = chr(ord("A") + r) + s
     return s
-
-
-# _norm / _implied_voltage / _rail_matches are shared with power.py — see ._rails.
-
-
-def _is_ground(name: str | None) -> bool:
-    if not name:
-        return False
-    n = _norm(name)
-    if n in _GROUND_NAMES:
-        return True
-    return n.startswith("GND") or n.endswith("GND")
-
-
-def _is_power(name: str | None) -> bool:
-    """True for a (non-ground) power rail by name heuristics."""
-    if not name or _is_ground(name):
-        return False
-    n = _norm(name)
-    if n in _POWER_NAMES:
-        return True
-    return _implied_voltage(name) is not None
 
 
 def _net_names(net: Net) -> list[str]:
@@ -215,6 +194,43 @@ def _net_fully_typed(member_pins: list[tuple[tuple[str, str], Pin | None]]) -> b
         pin is not None and pin.electrical_type in _INFORMATIVE_TYPES
         for _ref, pin in member_pins
     )
+
+
+def _driven_by_topology(
+    net: Net,
+    comps: dict[str, Component],
+    nets_of_comp: dict[str, list[Net]],
+) -> bool:
+    """True when a net holds a level despite carrying no driver PIN.
+
+    ``_DRIVING_TYPES`` only ever sees pins that declare an electrical type,
+    and the two commonest legitimate ways to hold a level declare nothing:
+
+    * a **passive tie** — the ``10k`` from ``EN`` to ``+3V3``, the reset
+      pull-up, a ferrite feeding a rail: the resistor's pins are Passive, so
+      a type-only rule called the (correctly biased) input floating;
+    * a **connector** — ``SWDCLK`` is driven by the debug probe that is not
+      on this schematic at all.
+
+    DNP parts tie nothing: an unpopulated pull-up leaves the input genuinely
+    floating, which is exactly the mistake worth reporting.
+    """
+    for des, _num in net.members:
+        comp = comps.get(des)
+        if comp is not None and comp.dnp:
+            continue
+        if _is_connector(des, comp.library_ref if comp else None,
+                         footprint=comp.footprint if comp else None,
+                         value=comp.value if comp else None):
+            return True
+        if _prefix(des) not in PASSIVE_TIE_PREFIXES:
+            continue
+        for other in nets_of_comp.get(des, []):
+            if other is net:
+                continue
+            if any(_is_power(nm) or _is_ground(nm) for nm in _net_names(other)):
+                return True
+    return False
 
 
 def _type_confidence(sch: Schematic) -> tuple[float, int, int]:
@@ -268,6 +284,7 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
     }
 
     pin_index = _pin_index(sch)
+    comps: dict[str, Component] = {c.designator: c for c in sch.components}
     conf, _typed, _total = _type_confidence(sch)
     low_conf = conf < _TYPE_CONFIDENCE_MIN
 
@@ -428,11 +445,15 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
 
         # (d) floating input (TYPE-gated): an INPUT on a multi-pin, non-rail net
         #     with no driver. Single-pin inputs are covered by the dangling rule.
+        #     "Driver" is NOT only a driving pin type: a passive tie to a rail
+        #     (the 10k from EN to +3V3) and a connector (an off-board probe on
+        #     SWDCLK) hold the level with nothing but Passive pins — see
+        #     :func:`_driven_by_topology`.
         if len(net.members) >= 2 and id(net) not in pg_ids:
             has_driver = any(
                 pin is not None and pin.electrical_type in _DRIVING_TYPES
                 for _ref, pin in member_pins
-            )
+            ) or _driven_by_topology(net, comps, nets_of_comp)
             if not has_driver and not waivers.waives(ERC_FLOATING_INPUT, norm_names):
                 for ref, pin in member_pins:
                     if pin is None or pin.electrical_type is not PinType.INPUT:
@@ -503,10 +524,18 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
         # buzzer or header designated U9). Flagging those is pure noise.
         if len(comp.pins) < 3:
             continue
+        # A TVS / ESD array (TPD4E05U06, USBLC6, …) ships as a "U" part and
+        # has NO supply pin by construction — every channel is a clamp to
+        # GND. Demanding a POWER connection from it is a guaranteed false
+        # positive, so the role classifier (shared with the review layer,
+        # which has always recognized these parts) exempts it from the power
+        # half. The ground half still applies: a clamp with no ground clamps
+        # nothing.
+        needs_power = not _is_tvs(comp.designator, comp.library_ref, comp.value)
         touched = nets_of_comp.get(comp.designator, [])
         des_names = {_norm(comp.designator)}
         comp_pos = (comp.x_mil, comp.y_mil)
-        if has_power and not any(id(n) in power_ids for n in touched):
+        if needs_power and has_power and not any(id(n) in power_ids for n in touched):
             if not waivers.waives(ERC_NO_POWER, des_names):
                 findings.append(
                     Finding(

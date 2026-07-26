@@ -38,7 +38,8 @@ Steps (use the Bash tool; `akcli` is on PATH when the plugin is installed, other
    + differential-pair/bus continuity unless `[check].pairs = false`) by default; narrow with
    `--erc` / `--power` / `--bom` / `--nets` / `--layout` / `--integrity` / `--pairs` if asked.
    `--integrity` is the write gate's document checks read-only (dangling endpoints, duplicate
-   uuids/designators, unresolved `lib_id`s, instance paths, no-connect conflicts) — on a file
+   uuids/designators, unresolved `lib_id`s, instance paths, stacked power ports, a `(sheet …)`
+   whose child file is missing, no-connect conflicts) — on a file
    akcli did not write, a hit there is a real defect (hand edit, bad merge, moved library).
 4. If a prior revision was given, also run `akcli diff <old> <schematic>` and fold net/component
    changes into the summary.

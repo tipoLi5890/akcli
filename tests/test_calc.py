@@ -43,6 +43,46 @@ def test_parse_engineering_notation():
         parse_value("abc")
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("10U", 1e-5), ("1U", 1e-6), ("4U7", 4.7e-6),   # Altium-style upper case
+    ("100N", 1e-7), ("1P", 1e-12),
+    ("1T", 1e12), ("1t", 1e12),                     # tera, both cases
+    ("10K", 1e4), ("10g", 1e10),
+    ("1μ", 1e-6),                              # GREEK SMALL LETTER MU
+    ("1µ", 1e-6),                              # MICRO SIGN
+])
+def test_parse_value_prefixes_are_case_insensitive(text, expected):
+    # SPICE suffixes are case-insensitive and Altium libraries carry upper-cased
+    # values; rejecting "10U" only ever refused a value ngspice understands.
+    assert parse_value(text) == pytest.approx(expected)
+
+
+def test_parse_value_keeps_the_one_case_that_carries_meaning():
+    # m/M is the single pair where case IS the information (milli vs mega).
+    assert parse_value("1m") == pytest.approx(1e-3)
+    assert parse_value("1M") == pytest.approx(1e6)
+    assert parse_value("2M2") == pytest.approx(2.2e6)
+    assert parse_value("2m2") == pytest.approx(2.2e-3)
+
+
+@pytest.mark.parametrize("bad", [
+    "1_000",        # float() reads 1000; ngspice reads 1
+    "inf", "-inf", "Infinity", "nan", "NaN",
+    "1e400",        # float() overflows this to +inf
+    "1" * 400 + "T",  # overflows only after the multiplier
+])
+def test_parse_value_rejects_what_float_would_silently_accept(bad):
+    with pytest.raises(CalcError):
+        parse_value(bad)
+
+
+def test_parse_value_rejects_non_finite_numeric_input():
+    with pytest.raises(CalcError):
+        parse_value(float("inf"))
+    with pytest.raises(CalcError):
+        parse_value(float("nan"))
+
+
 def test_parse_value_rejects_milli_suffix_on_milli_denominated_unit():
     # a field already denominated in mAh/mA must reject a bare 'm' suffix —
     # it would silently apply a second, compounding milli (1000x error)

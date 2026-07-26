@@ -421,15 +421,23 @@ def test_top_level_help_has_workflow_epilog(capsys):
 # --------------------------------------------------------------------------- #
 # review-round regressions: net-diff on hierarchical roots, fail-closed strict
 # --------------------------------------------------------------------------- #
-def _hier_root(tmp_path: Path, with_child: bool = True) -> Path:
+def _hier_root(tmp_path: Path, with_child: bool = True,
+               child: str = "ok") -> Path:
     """board_v8 with a (sheet) reference spliced in. The net-diff dry-apply
     used to copy the root alone into a TemporaryDirectory, so read-back died
-    on the missing child and --strict-nets silently failed OPEN."""
+    on the missing child and --strict-nets silently failed OPEN.
+
+    ``child`` picks what the referenced file looks like: ``"ok"`` a readable
+    stub, ``"corrupt"`` an unparseable one (``read_sch`` raises -> the net diff
+    is unavailable), and ``with_child=False`` no file at all (which the
+    integrity gate itself now refuses with ``SHEET_FILE_MISSING``)."""
     root = _copy_v8(tmp_path)
     if with_child:
         (tmp_path / "child.kicad_sch").write_text(
             '(kicad_sch (version 20231120) (generator "akcli") '
-            '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n',
+            '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n'
+            if child == "ok" else
+            '(kicad_sch (version 20231120) (generator "akcli"\n',
             encoding="utf-8")
     text = root.read_text(encoding="utf-8")
     sheet_node = (
@@ -460,7 +468,7 @@ def test_strict_nets_gate_works_on_hierarchical_root(tmp_path, capsys):
 
 
 def test_strict_nets_fails_closed_when_diff_unavailable(tmp_path, capsys):
-    root = _hier_root(tmp_path, with_child=False)           # read_sch raises
+    root = _hier_root(tmp_path, child="corrupt")            # read_sch raises
     ops = _ops_file(tmp_path, [
         {"op": "add_wire", "vertices": ["R1.1", "R1.2"]},
     ])
@@ -474,7 +482,7 @@ def test_strict_nets_fails_closed_when_diff_unavailable(tmp_path, capsys):
 
 
 def test_missing_diff_warns_but_applies_without_strict(tmp_path, capsys):
-    root = _hier_root(tmp_path, with_child=False)
+    root = _hier_root(tmp_path, child="corrupt")
     ops = _ops_file(tmp_path, [
         {"op": "add_wire", "vertices": ["R1.1", "R1.2"]},
     ])
@@ -484,3 +492,31 @@ def test_missing_diff_warns_but_applies_without_strict(tmp_path, capsys):
     assert rc == EXIT["OK"]
     assert "WARNING: net diff unavailable" in err           # loud, not silent
     assert root.read_bytes() != before                      # advisory only
+
+
+def test_write_refused_while_a_sheet_child_is_missing(tmp_path, capsys):
+    """A dangling (sheet ...) blocks EVERY write to the root, not just sheet ops.
+
+    Audit regression: ``add_sheet`` used to accept a child file that does not
+    exist — exit 0, gate clean — and every later ``nets``/``check``/``render``
+    on the design then failed. The integrity gate now names the real problem
+    (``check`` on such a root cannot even load it — the reader raises
+    FILE_NOT_FOUND naming the sheet — so the write gate is where the code
+    surfaces)."""
+    root = _hier_root(tmp_path, with_child=False)
+    ops = _ops_file(tmp_path, [{"op": "add_wire", "vertices": ["R1.1", "R1.2"]}])
+    before = root.read_bytes()
+    rc = main(["draw", str(root), "--ops", str(ops), "--apply"])
+    out = capsys.readouterr().out
+    assert rc == EXIT["OPLIST"]
+    assert "SHEET_FILE_MISSING" in out
+    assert root.read_bytes() == before
+
+    # authoring the child unblocks the very same write
+    (tmp_path / "child.kicad_sch").write_text(
+        '(kicad_sch (version 20231120) (generator "akcli") '
+        '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n',
+        encoding="utf-8")
+    assert main(["draw", str(root), "--ops", str(ops), "--apply"]) == EXIT["OK"]
+    capsys.readouterr()
+    assert root.read_bytes() != before

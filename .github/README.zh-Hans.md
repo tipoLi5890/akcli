@@ -148,13 +148,16 @@ Python 之外的东西——一律在运行时探测，核心流程永远不需�
 
 ## 路线图
 
-**当前已提供（v0.16.0）：** KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet`、net-diff
-安全护栏、`new`／多级 `undo`）、保持 net 不变的 `arrange --groups` 重新布局、建议性的 `akcli review`
-评审引擎（六大检测族、datasheet facts 存储、`propose`／`tree`／`validate`）、ERC／power／BOM／
-diff／pinmap／intent／contract 检查（含 waiver 与 SARIF）、原理图 ↔ PCB `verify`、项目 `library`
+**当前已提供（v0.18.0）：** KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet` 与写入既有
+层次结构中的子图页、net-diff 安全护栏、`new`／多级 `undo`）、保持 net 不变的 `arrange --groups`
+重新布局、建议性的 `akcli review` 评审引擎（六大检测族，现已纳入电源入口保护检测、datasheet facts
+存储、`propose`／`tree`／`validate`）、ERC／power／BOM／diff／pinmap／intent／contract 检查（含
+waiver 与 SARIF）、只读的文档完整性检查 `check --integrity`、原理图 ↔ PCB `verify`、项目 `library`
 工作区、版本化 `fab` profile、`release preflight` 把关、KiCad 自带 ngspice 上的 `akcli sim`、
-JLCPCB／LCSC 元件搜索与规格书抓取、60 个附标准引用的计算器、纯标准库 SVG 渲染，以及版本容忍的
-Altium／KiCad 读取器。
+JLCPCB／LCSC 元件搜索与规格书抓取、60 个附标准引用的计算器、能画出 KiCad `lib_symbols` 真实符号图形
+的纯标准库 SVG 渲染，以及版本容忍的 Altium／KiCad 读取器。标准符号 nickname 在原厂 KiCad 安装上即可
+解析——那些编译内建的 `${KICAD*_SYMBOL_DIR}` 路径会从找到的 `kicad-cli` 推导，`akcli doctor` 会报告
+这条解析路径在本机是否可用。
 
 **前瞻（→ v1.0）：** 契约冻结审计（contract freeze audit）。首次发布到 PyPI（`pip install
 akcli-kicad`）已于 0.15.0 发布。*按决策暂缓：* 为原理图 PR 把关的 GitHub Action、`view` 波形面板，以及原生 MCP

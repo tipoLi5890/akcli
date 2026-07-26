@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Keep the Claude-Code manifests' version fields in lock-step with ``pyproject.toml``.
 
-``pyproject.toml`` is the single source of truth (SoT) for the project version. The two
-plugin manifests may *optionally* carry a ``version`` field:
+``pyproject.toml`` is the single source of truth (SoT) for the project version. Three
+manifests carry a ``version`` field stamped from it:
 
 * ``.claude-plugin/plugin.json``      -> top-level ``"version"``
 * ``.claude-plugin/marketplace.json`` -> ``"version"`` on each entry of ``"plugins"``
 * ``.codex-plugin/plugin.json``       -> top-level ``"version"``
 
-During active development the manifests deliberately ship **without** a ``version`` key
-(commit-SHA versioning, per SPEC §5.1/§5.2). This tool therefore only ever touches a
-manifest that *already declares* a version: a missing key is treated as "dev mode" and is
-never drift and never injected. Once a release adds a ``version`` field, this tool (and the
-CI ``--check`` gate) guarantees it never silently diverges from ``pyproject.toml``.
+All three files are **required**: a missing manifest is an error (exit 2), not a
+silent skip — "the file moved/was renamed" used to read exactly like "nothing to do"
+and quietly reduced the three-way sync to whatever happened to still be there.
+
+Within a present manifest this tool only ever touches a key that *already exists*: a
+manifest deliberately shipping without a ``version`` (commit-SHA versioning per SPEC
+§5.1/§5.2) is dev mode — never drift, never injected. Once a manifest declares a
+``version``, this tool (and the CI ``--check`` gate) guarantees it never silently
+diverges from ``pyproject.toml``.
 
 Usage::
 
@@ -92,7 +96,7 @@ def sync(root: Path, *, check: bool) -> tuple[int, list[str]]:
     """Sync (or, with *check*, verify) manifest versions against pyproject.
 
     Returns ``(exit_code, messages)``. ``exit_code`` is 0 on success/no-op, 1 on drift
-    detected in check mode.
+    detected in check mode, 2 when a required file is missing.
     """
     pyproject = root / PYPROJECT_REL
     if not pyproject.is_file():
@@ -105,6 +109,7 @@ def sync(root: Path, *, check: bool) -> tuple[int, list[str]]:
 
     messages: list[str] = []
     drifted = False
+    missing = False
 
     targets = (
         (root / PLUGIN_REL, _plan_plugin, _apply_plugin),
@@ -114,7 +119,9 @@ def sync(root: Path, *, check: bool) -> tuple[int, list[str]]:
     )
     for path, plan, apply in targets:
         if not path.is_file():
-            messages.append(f"sync_version: {path} missing; skipped")
+            # Required, not optional: a manifest that vanished must fail loudly.
+            messages.append(f"sync_version: MISSING required manifest {path}")
+            missing = True
             continue
         doc = _load_json(path)
         needs_update = plan(doc, version)
@@ -130,6 +137,8 @@ def sync(root: Path, *, check: bool) -> tuple[int, list[str]]:
 
     if not messages:
         messages.append(f"sync_version: all declared versions match pyproject ({version})")
+    if missing:
+        return 2, messages
     return (1 if drifted else 0), messages
 
 

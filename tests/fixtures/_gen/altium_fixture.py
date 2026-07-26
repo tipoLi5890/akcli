@@ -114,6 +114,32 @@ class SchDocBuilder:
     def no_erc(self, x: int, y: int) -> int:
         return self.add(22, **{"Location.X": x, "Location.Y": y})
 
+    # -- parameters / model links -------------------------------------------
+    def parameter(self, owner: int, name: str, text: str = "") -> int:
+        """RECORD 41 owned by ``owner`` (a component -> ``Component.parameters``)."""
+        return self.add(41, owner=owner, Name=name, Text=text)
+
+    def doc_parameter(self, name: str, text: str = "") -> int:
+        """RECORD 41 with NO OwnerIndex: an Altium *document* parameter (title block)."""
+        return self.add(41, Name=name, Text=text)
+
+    def model(self, owner: int, model_name: str, model_type: str = "PCBLIB",
+              is_current: bool | None = None, **extra) -> int:
+        """The RECORD-44 -> RECORD-45 model link Altium writes under a component.
+
+        ``model_type`` is Altium's ``ModelType`` (``PCBLIB`` footprint, ``SIM``
+        spice model, ``SI``, ``PCB3DLib``); ``is_current`` writes ``IsCurrent=T/F``
+        (omitted when None). Returns the RECORD-45 index.
+        """
+        impl = self.add(44, owner=owner)
+        f: dict = {"ModelName": model_name}
+        if model_type is not None:
+            f["ModelType"] = model_type
+        if is_current is not None:
+            f["IsCurrent"] = "T" if is_current else "F"
+        f.update(extra)
+        return self.add(45, owner=impl, **f)
+
     # -- hierarchy records --------------------------------------------------
     def sheet_symbol(self, x: int, y: int, w: int, h: int) -> int:
         """RECORD 15: Location = TOP-LEFT corner (+Y-up frame); extends right/down."""

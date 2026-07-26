@@ -11,6 +11,16 @@ shared model produced by any reader) and returns a ``str`` netlist:
 
 Unnamed nets (``Net.name is None``) are emitted under their coordinate-free
 ``stable_id`` so the output is deterministic and never coordinate-derived.
+KiCad instead auto-names them ``Net-(R1-Pad2)`` / ``unconnected-(R2-Pad2)``
+after whichever pin its own traversal picked as the subgraph driver — a choice
+that is not derivable from a normalized model, so akcli does NOT imitate it
+(``stable_id`` stays the honest, membership-derived fallback).
+
+Named nets, by contrast, are emitted exactly as eeschema names them: the
+``kicad`` emitter qualifies sheet-scoped names with their sheet path
+(``Net.sheet_path``), so a root-sheet ``(label "GND")`` exports as ``/GND`` and
+a ``power:GND`` symbol or ``(global_label "VOUT")`` as ``GND``/``VOUT``. Protel
+and CSV keep the bare akcli names — they are not KiCad surfaces.
 """
 
 from __future__ import annotations
@@ -51,10 +61,17 @@ def _sorted_components(sch: Schematic) -> list[Component]:
 
 
 def _kicad_quote(s: object) -> str:
-    """Quote a token KiCad-style (escape backslash + double-quote)."""
+    """Quote a token KiCad-style (escape ``\\``, ``"`` and control chars).
+
+    The ``.net`` netlist is an s-expression like the schematic, so it obeys the
+    same rule as ``writers.kicad._q``: a raw newline/CR/tab inside a quoted
+    atom (a multi-line component value carried over from an import) yields a
+    file KiCad's netlist reader rejects. Pinned identical to every other akcli
+    quoter by ``tests/test_sexpr_quoting.py``.
+    """
     text = "" if s is None else str(s)
     text = text.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{text}"'
+    return '"' + text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
 
 
 # --------------------------------------------------------------------------- #
@@ -91,6 +108,25 @@ _COMP_OWN_FIELDS = frozenset({"Reference", "Value", "Footprint"})
 
 # `~` is KiCad's "no pin name" placeholder; its own netlist emits `(name "")`.
 _NO_PIN_NAME = "~"
+
+# Every `(net ...)` carries its net class. akcli's schematic model has no
+# net-class concept, so every net reports KiCad's implicit default class — which
+# is what a real export of a class-free board writes (kicad-cli 10.0.4).
+_DEFAULT_NET_CLASS = "Default"
+
+
+def _kicad_net_name(net: Net) -> str:
+    """Net name as eeschema's own netlist writes it.
+
+    A sheet-scoped name (local/hierarchical label) is qualified with the sheet
+    path it was found on (``/GND`` at the root, ``/Amp/SIG`` one level down); a
+    global label or power port is written bare. Unnamed nets fall back to
+    ``stable_id`` (see the module docstring — KiCad's auto-names are not
+    reproducible from a normalized model).
+    """
+    if not net.name:
+        return net.stable_id
+    return net.sheet_path + net.name
 
 
 def _split_lib_id(lib_id: str) -> tuple[str, str]:
@@ -176,6 +212,11 @@ def to_kicad_netlist(sch: Schematic) -> str:
     ``(date "")`` is emitted **empty on purpose**: the field is part of the
     grammar KiCad writes, but a wall-clock date would make the output
     non-deterministic (same input bytes must give the same output bytes).
+
+    Net names are eeschema's (sheet-qualified where eeschema qualifies them, see
+    :func:`_kicad_net_name`) and every net carries ``(class "Default")`` — both
+    matter downstream: pcbnew keys its board nets by NAME, so a netlist that
+    disagrees with eeschema renames the whole board on the next update.
     """
     lines: list[str] = []
     lines.append('(export (version "E")')
@@ -243,10 +284,15 @@ def to_kicad_netlist(sch: Schematic) -> str:
                 lines.append("        )")
             lines.append("      )")
         lines.append("  )")
-    # nets
+    # nets — ordered by the EMITTED name, the order KiCad assigns codes in
+    # (unnamed nets keep akcli's documented "named first" convention).
     lines.append("  (nets")
-    for code, net in enumerate(_sorted_nets(sch), start=1):
-        lines.append(f"    (net (code {_kicad_quote(code)}) (name {_kicad_quote(_net_name(net))})")
+    ordered = sorted(sch.nets, key=lambda n: (n.name is None, _kicad_net_name(n)))
+    for code, net in enumerate(ordered, start=1):
+        lines.append(
+            f"    (net (code {_kicad_quote(code)}) (name {_kicad_quote(_kicad_net_name(net))})"
+            f" (class {_kicad_quote(_DEFAULT_NET_CLASS)})"
+        )
         for desig, pin in net.members:
             lines.append(f"      (node (ref {_kicad_quote(desig)}) (pin {_kicad_quote(pin)}))")
         lines.append("      )")

@@ -11,6 +11,7 @@ from __future__ import annotations
 import gzip
 import http.client
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -130,7 +131,6 @@ def test_inline_scripts_are_valid_js(tmp_path):
     node = shutil.which("node")
     if node is None:
         pytest.skip("node not installed")
-    import re
     for name in ("calc.html", "live.html", "hub.html"):
         src = re.search(r"<script>(.*)</script>", page(name).decode("utf-8"),
                         re.S).group(1)
@@ -138,6 +138,64 @@ def test_inline_scripts_are_valid_js(tmp_path):
         f.write_text(src, encoding="utf-8")
         r = subprocess.run([node, "--check", str(f)], capture_output=True)
         assert r.returncode == 0, f"{name}: {r.stderr.decode()}"
+
+
+# ----------------------------------------------- calc.html <-> registry ----
+# calc.html carries the THIRD enumeration of the calc family (after the
+# registry and the CLI): the DIAGRAMS illustrations and the ANNOT live
+# captions, both keyed by calc name in hand-written JS. Nothing links them to
+# the registry, so a new/renamed calculator silently loses its drawing (and a
+# deleted one leaves a key nothing can ever reach). These two tests are that
+# link — inspected as text, no JS engine required.
+
+# Calculators that are unit conversions, not circuits: there is no topology to
+# draw and the generic FALLBACK illustration is the right answer. Adding a
+# calc here is a deliberate "no diagram" decision, not an oversight.
+NO_DIAGRAM = {"convert-copper", "convert-length", "convert-power"}
+
+_JS_KEY = re.compile(r'(?:^ {2}|,\s+)(?:"([A-Za-z][\w-]*)"|([A-Za-z][\w-]*))\s*:',
+                     re.M)
+
+
+def _js_table(src: str, start: str, end: str) -> set[str]:
+    """Top-level keys of a `const NAME = { ... }` object literal in calc.html."""
+    block = src[src.index(start):src.index(end)]
+    return {quoted or bare for quoted, bare in _JS_KEY.findall(block)}
+
+
+def _diagram_keys(src: str) -> set[str]:
+    keys = _js_table(src, "const DIAGRAMS = {", "const FALLBACK")
+    keys |= set(re.findall(r'DIAGRAMS\["([\w-]+)"\]\s*=', src))
+    keys |= set(re.findall(r'DIAGRAMS\.(\w+)\s*=', src))
+    return keys
+
+
+def test_calc_diagrams_cover_registry():
+    src = page("calc.html").decode("utf-8")
+    keys = _diagram_keys(src)
+    assert keys, "DIAGRAMS table not found — did calc.html restructure?"
+    assert not keys - set(CALCS), (
+        f"calc.html DIAGRAMS keys {sorted(keys - set(CALCS))} are not "
+        f"registered calculators (renamed or deleted?)")
+    missing = set(CALCS) - keys - NO_DIAGRAM
+    assert not missing, (
+        f"calculators with no DIAGRAMS entry: {sorted(missing)} — draw one "
+        f"(or alias an existing topology, or list it in NO_DIAGRAM)")
+    assert not NO_DIAGRAM - set(CALCS), "NO_DIAGRAM lists a dead calc name"
+
+
+def test_calc_annotations_reference_live_diagrams():
+    """ANNOT rewrites the `an1` caption INSIDE a diagram: no diagram, no
+    caption. Keys must be real calcs that actually have an illustration."""
+    src = page("calc.html").decode("utf-8")
+    annot = _js_table(src, "const ANNOT = {", "function drawDiagram")
+    assert annot, "ANNOT table not found — did calc.html restructure?"
+    assert not annot - set(CALCS), (
+        f"ANNOT keys {sorted(annot - set(CALCS))} are not registered calcs")
+    orphan = annot - _diagram_keys(src)
+    assert not orphan, (
+        f"ANNOT entries {sorted(orphan)} have no DIAGRAMS entry — the caption "
+        f"element they rewrite never renders")
 
 
 # --------------------------------------------------------------- routes ----

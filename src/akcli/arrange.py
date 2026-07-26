@@ -23,6 +23,7 @@ from pathlib import Path
 from .checks.layout import _Box, _overlaps, _mil, _world_box
 from .readers import kicad as _krd
 from .readers import kicad_lib, sexpr
+from .safety import read_text_guarded
 
 GRID_MIL = 100.0          # nudge step (2x the 50-mil pin grid)
 MARGIN_MIL = 50.0         # required clearance between full boxes
@@ -114,7 +115,7 @@ def groups_from_properties(path: str | Path) -> dict[str, list[str]]:
     the modules without the original op-list. Power satellites (``#`` refs)
     are skipped — they ride their host bundle anyway.
     """
-    root = sexpr.parse(Path(path).read_text(encoding="utf-8", errors="replace"))
+    root = sexpr.parse(read_text_guarded(path))
     out: dict[str, list[str]] = {}
     for sym in _krd._placed_symbols(root):
         props = _krd._props(sym)
@@ -143,7 +144,7 @@ def plan(path: str | Path, *, grid: float = GRID_MIL,
     Returns ``{"moves": [Move], "anchored_overlaps": [ref], "clean": bool,
     "symbols": N}``. Never touches the file.
     """
-    root = sexpr.parse(Path(path).read_text(encoding="utf-8", errors="replace"))
+    root = sexpr.parse(read_text_guarded(path))
     syms, anchors = _collect(root)
     for s in syms:
         s.anchored = bool(s.pin_tips & anchors)
@@ -255,7 +256,7 @@ def plan_groups(path: str | Path, groups: dict[str, list[str]], *,
     (mil). The moves are applied through the standard draw pipeline
     (``.bak`` + connectivity verify + ``undo``).
     """
-    root = sexpr.parse(Path(path).read_text(encoding="utf-8", errors="replace"))
+    root = sexpr.parse(read_text_guarded(path))
     syms, _anchors_pts = _collect(root)
     by_ref = {s.ref: s for s in syms}
 

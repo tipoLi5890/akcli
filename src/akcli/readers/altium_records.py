@@ -50,6 +50,7 @@ RECORD_BUS_ENTRY = 37     # ★ (NOT read — surfaced by the skipped-record his
 RECORD_IMPL_44 = 44
 RECORD_IMPL_MODEL = 45
 RECORD_IMPL_FOOTPRINT = 46
+RECORD_IMPL_PIN_ASSOC = 47   # implementation <-> symbol-pin map (part of the model link)
 RECORD_IMPL_48 = 48
 
 # id -> human name, used by the readers' skipped-record histogram (an unknown id
@@ -91,6 +92,7 @@ RECORDS: dict[int, str] = {
     RECORD_IMPL_44: "Implementation",
     RECORD_IMPL_MODEL: "ModelImplementation",
     RECORD_IMPL_FOOTPRINT: "FootprintImplementation",
+    RECORD_IMPL_PIN_ASSOC: "ImplementationPinAssociation",
     RECORD_IMPL_48: "Implementation48",
 }
 
@@ -221,5 +223,6 @@ __all__ = [
     "RECORD_IMPL_44",
     "RECORD_IMPL_MODEL",
     "RECORD_IMPL_FOOTPRINT",
+    "RECORD_IMPL_PIN_ASSOC",
     "RECORD_IMPL_48",
 ]

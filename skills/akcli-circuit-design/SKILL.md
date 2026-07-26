@@ -161,7 +161,11 @@ otherwise the write is rejected and the original file is untouched. **After appl
 ## Exit codes
 
 `0` success / no findings · `1` check findings present (lint-style; `--fail-on never` forces 0) ·
-`2` usage/arg error · `3` parse error (corrupt OLE2/S-expr) · `4` file not found ·
+`2` usage/arg error (incl. `BAD_CONFIG` — an explicit `-C` that is missing, a directory, or
+unparseable is never silently ignored) · `3` parse error (corrupt OLE2/S-expr, or bytes that
+are not UTF-8 at all: `KICAD_BAD_ENCODING`) · `4` path not usable: missing (`FILE_NOT_FOUND`)
+or present but unreadable — a directory where a file was expected, no read permission, an IO
+error (`FILE_UNREADABLE`) ·
 `5` unsupported format · `6` op-list / verify failure (also covers `TARGET_LOCKED`, a
 KiCad GUI lock on the target — every write path refuses on it: `draw`, `arrange`,
 `undo`, `relink-symbols --apply`, `library repair --apply`; `--allow-open` overrides) ·

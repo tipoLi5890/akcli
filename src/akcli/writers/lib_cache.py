@@ -46,7 +46,7 @@ from ..errors import fail
 from ..kicad_escape import escape_lib_id, unescape_string
 from ..readers import kicad_lib, sexpr
 from ..readers.sexpr import SNode
-from ..safety import MAX_FILE_BYTES
+from ..safety import read_text_guarded
 
 __all__ = ["ensure_cached", "find_cached"]
 
@@ -487,9 +487,15 @@ def _unqual(name: str | None) -> str:
 
 
 def _quote(s: str) -> str:
-    """Quote a symbol name the KiCad way (escape ``\\`` then ``"`` and newlines)."""
-    body = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-    return f'"{body}"'
+    """Quote a symbol name the KiCad way (escape ``\\``, ``"`` and control chars).
+
+    CR and TAB escape alongside the newline: eeschema rejects any raw control
+    character inside a quoted atom, and a scraped/imported symbol name can
+    carry one. Pinned identical to every other akcli quoter by
+    ``tests/test_sexpr_quoting.py``.
+    """
+    body = s.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + body.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
 
 
 # --------------------------------------------------------------------------- #
@@ -529,8 +535,10 @@ def _coerce_one(src: object) -> model.Library:
 
 
 def _read_text(path: os.PathLike | str) -> str:
-    """Read a UTF-8 text source bounded by ``MAX_FILE_BYTES``."""
-    data = Path(path).read_bytes()
-    if len(data) > MAX_FILE_BYTES:
-        fail("KICAD_SEXPR_TOOBIG", f"file exceeds {MAX_FILE_BYTES} bytes")
-    return data.decode("utf-8")
+    """Read a UTF-8 text source bounded by ``MAX_FILE_BYTES``.
+
+    One guarded reader for the whole package (see
+    :func:`akcli.safety.read_text_guarded`): a directory / unreadable file /
+    non-UTF-8 bytes become structured errors instead of a traceback.
+    """
+    return read_text_guarded(path)

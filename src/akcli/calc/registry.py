@@ -8,6 +8,7 @@ source is not an engineering answer. Registration happens at import time via
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -71,6 +72,47 @@ class CalcError(ValueError):
     """Bad input to a calculator (maps to exit 2 at the CLI layer)."""
 
 
+def _run(calc: Calc, kwargs: dict[str, object]) -> list[Result]:
+    """Evaluate one calculator, converting arithmetic blow-ups into ``CalcError``.
+
+    ONE guard for the whole registry instead of a per-calculator zero check.
+    Every calculator is a closed-form formula over user numbers, so a degenerate
+    input reaches Python as an arithmetic exception — ``calc rc r=0 c=0`` divides
+    by ``2πRC``, and that ``ZeroDivisionError`` used to escape as ``INTERNAL``
+    exit 3 plus a traceback. These are all BAD INPUT (exit 2), not akcli bugs:
+
+    * ``ZeroDivisionError`` — a denominator the caller drove to zero;
+    * ``OverflowError`` — ``math.exp``/``**`` past the float range;
+    * ``ValueError`` — ``math.log``/``sqrt`` outside their domain (``CalcError``
+      is a ``ValueError`` subclass, so a calculator's OWN refusal passes
+      through first, keeping its specific message).
+
+    Non-finite RESULTS are refused for the same reason ``allow_nan=False``
+    exists on the JSON exit: a bare ``NaN``/``Infinity`` is not valid JSON, so
+    it must never reach the envelope.
+    """
+    try:
+        results = calc.func(**kwargs)
+    except CalcError:
+        raise
+    except ZeroDivisionError:
+        raise CalcError(
+            f"{calc.name}: division by zero — one of the inputs "
+            f"({', '.join(sorted(kwargs))}) is zero where a nonzero value is "
+            f"required (`akcli calc info {calc.name}` describes each)")
+    except OverflowError:
+        raise CalcError(f"{calc.name}: the result overflows a float; "
+                        "check the input magnitudes")
+    except ValueError as exc:
+        raise CalcError(f"{calc.name}: {exc}")
+    for r in results:
+        if isinstance(r.value, float) and not math.isfinite(r.value):
+            raise CalcError(
+                f"{calc.name}: result {r.name!r} is not finite ({r.value}); "
+                "the inputs are degenerate for this formula")
+    return results
+
+
 def compute(name: str, raw: dict[str, str]) -> dict[str, object]:
     """Run calculator ``name`` with string inputs; returns the full envelope."""
     from .si import parse_value
@@ -100,7 +142,7 @@ def compute(name: str, raw: dict[str, str]) -> dict[str, object]:
         else:
             raise CalcError(f"missing required parameter {p.name!r} "
                             f"({p.help}, unit: {p.unit or '-'})")
-    results = calc.func(**kwargs)
+    results = _run(calc, kwargs)
     return {
         "calc": calc.name,
         "title": calc.title,

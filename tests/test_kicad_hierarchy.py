@@ -171,6 +171,127 @@ def test_child_sheet_is_writable(tmp_path, capsys):
     assert "reviewed" in child.read_text(encoding="utf-8")
 
 
+def _instance_paths(sym) -> list[str]:
+    out = []
+    inst = sym.find("instances")
+    for proj in (inst.find_all("project") if inst is not None else []):
+        for path in proj.find_all("path"):
+            out.append(path.children[1].value)
+    return out
+
+
+def _placed(doc, ref: str):
+    """The placed symbol whose instances (or Reference property) name ``ref``."""
+    for sym in doc.find_all("symbol"):
+        if sym.find("lib_id") is None:
+            continue
+        refs = []
+        inst = sym.find("instances")
+        for proj in (inst.find_all("project") if inst is not None else []):
+            for path in proj.find_all("path"):
+                r = path.find("reference")
+                if r is not None:
+                    refs.append(r.children[1].value)
+        for prop in sym.find_all("property"):
+            kids = prop.children or []
+            if len(kids) >= 3 and kids[1].value == "Reference":
+                refs.append(kids[2].value)
+        if ref in refs:
+            return sym
+    return None
+
+
+def _place_into_child(tmp_path, n_sheets: int):
+    """Place R9 into the CHILD file of an n-instance hierarchy; return it."""
+    import json
+
+    from akcli.cli import main
+
+    _write_design(tmp_path, n_sheets)
+    lib = tmp_path / "lib.kicad_sym"
+    lib.write_text(
+        '(kicad_symbol_lib (version 20231120) (generator t)\n'
+        '  (symbol "RR" (pin_numbers (hide yes)) (in_bom yes) (on_board yes)\n'
+        '    (property "Reference" "R" (at 0 0 0))\n'
+        '    (symbol "RR_1_1"\n'
+        '      (pin passive line (at 0 3.81 270) (length 1.27)\n'
+        '        (name "~") (number "1"))\n'
+        '      (pin passive line (at 0 -3.81 90) (length 1.27)\n'
+        '        (name "~") (number "2")))))\n', encoding="utf-8")
+    ops = tmp_path / "ops.json"
+    ops.write_text(json.dumps({
+        "protocol_version": 1, "target_format": "kicad",
+        "ops": [{"op": "place_component", "lib_id": "RR", "designator": "R9",
+                 "x_mil": 3000, "y_mil": 3000}],
+    }), encoding="utf-8")
+    child = tmp_path / "child.kicad_sch"
+    rc = main(["draw", str(child), "--ops", str(ops), "--apply",
+               "--symbols", str(lib)])
+    assert rc == 0
+    return child
+
+
+def test_child_sheet_placement_joins_the_sibling_sheet_paths(tmp_path, capsys):
+    """A part placed INTO a child sheet must sit on the sheet path(s) its
+    siblings do — the flat ``/<own-root>`` form annotated as R? in KiCad."""
+    from akcli.readers import sexpr as sx
+
+    child = _place_into_child(tmp_path, 1)
+    capsys.readouterr()
+    doc = sx.parse(child.read_text(encoding="utf-8"))
+    assert _instance_paths(_placed(doc, "R9")) == \
+        _instance_paths(_placed(doc, "R101"))
+
+
+def test_twice_instantiated_child_placement_copies_both_paths(tmp_path, capsys):
+    """A sheet instantiated twice gives each symbol TWO (path ...) entries; a
+    newly placed one must carry both (kicad-cli reported an annotation error
+    when it carried a single, wrong, one)."""
+    from akcli.readers import sexpr as sx
+
+    child = _place_into_child(tmp_path, 2)
+    capsys.readouterr()
+    doc = sx.parse(child.read_text(encoding="utf-8"))
+    sibling = _instance_paths(_placed(doc, "R101"))
+    assert len(sibling) == 2
+    assert _instance_paths(_placed(doc, "R9")) == sibling
+
+    # ...and the write replays byte-identically
+    import json
+
+    from akcli.cli import main
+    once = child.read_bytes()
+    assert main(["draw", str(child), "--ops", str(tmp_path / "ops.json"),
+                 "--apply", "--symbols", str(tmp_path / "lib.kicad_sym")]) == 0
+    capsys.readouterr()
+    assert child.read_bytes() == once
+    assert json  # keep the import honest for linters
+
+
+def test_unannotated_child_sheet_is_writable(tmp_path, capsys):
+    """The child fixture's symbols carry the placeholder ``R?`` reference in
+    their property; a doc full of ``R?`` used to count as N duplicates and
+    refuse EVERY write (even an add_text)."""
+    import json
+
+    from akcli.cli import main
+
+    _write_design(tmp_path, 1)
+    child = tmp_path / "child.kicad_sch"
+    # strip the (instances) refs so R? is the only reference in the file
+    child.write_text(
+        child.read_text(encoding="utf-8").replace('"R101"', '"R?"'),
+        encoding="utf-8")
+    ops = tmp_path / "ops.json"
+    ops.write_text(json.dumps({
+        "protocol_version": 1, "target_format": "kicad",
+        "ops": [{"op": "add_text", "text": "note", "at": [4000, 4000]}],
+    }), encoding="utf-8")
+    assert main(["draw", str(child), "--ops", str(ops), "--apply"]) == 0
+    capsys.readouterr()
+    assert "note" in child.read_text(encoding="utf-8")
+
+
 def test_flat_file_bad_instances_path_still_refused(tmp_path):
     """The relaxed rule still rejects a single-segment path naming a WRONG
     root — flat-file corruption stays caught."""

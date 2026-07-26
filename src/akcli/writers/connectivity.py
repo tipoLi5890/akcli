@@ -9,9 +9,15 @@ the whole gate works **with no KiCad installed** (SPEC risk #6). Two entry point
 
   - **Dangling wire endpoints.** Every terminal endpoint of every ``(wire)`` must
     be *exactly coincident* (integer-nm) with a pin, a label/global/hierarchical
-    label, a junction, a ``(no_connect)``, a ``(bus_entry)`` end, or another wire
-    (another wire's endpoint, or its mid-span — a T). An endpoint touching none
-    of those is the failure mode "the wire we just drew didn't connect to
+    label, a junction, a ``(no_connect)``, a ``(bus_entry)`` end, or another
+    wire's **endpoint**. Landing on another wire's mid-span (a T) does **not**
+    count on its own — eeschema joins a mid-span touch only through an explicit
+    ``(junction)``, which is exactly :mod:`..netbuild`'s rule
+    (``t_midspan_connects=False``); a junction-less T is therefore reported as a
+    dangling endpoint by BOTH engines (``tests/test_engine_parity.py``). The
+    ``draw`` path runs :func:`auto_junctions` first, so a T akcli itself drew is
+    junction-marked before this gate ever sees it. An endpoint touching none of
+    those is the failure mode "the wire we just drew didn't connect to
     anything". A wire ending on a ``(bus)`` segment does **not** count as
     attached — in KiCad buses join wires only through bus entries.
   - **Dangling bus entries.** Each ``(bus_entry)`` has two ends — ``(at)`` and
@@ -26,6 +32,15 @@ the whole gate works **with no KiCad installed** (SPEC risk #6). Two entry point
     "empty netlist / R?" failure, SPEC risk #8).
   - **No-connect conflict** — a ``(no_connect)`` sitting on a pin that is *also*
     wired (honoring ``(no_connect)`` both ways).
+  - **Stacked power ports** — two NET-NAMING power symbols on the exact same
+    coordinate: one hides the other and their two nets merge silently. A ``GND``
+    overwritten in place by a ``+3V3`` used to leave exactly this wreckage.
+    ``PWR_FLAG`` is exempt (it names no net; sharing a port's coordinate is a
+    prescribed pattern), matching netbuild's own carve-out.
+  - **Missing sheet file** (only when ``path`` names the document's own file) —
+    a ``(sheet ...)`` whose ``Sheetfile`` does not exist next to it; the design
+    still "writes", then every later ``nets``/``check``/``render`` fails on the
+    unreadable child.
 
 * :func:`auto_junctions` — mutate ``doc`` in place, inserting a ``(junction)`` at
   every genuine 3+-way meet that lacks one: ``>=3`` wire ends coinciding, a wire
@@ -42,8 +57,10 @@ via :func:`units.mm_to_nm` and pin world coordinates via
 
 from __future__ import annotations
 
+import os
 import uuid as _uuid
 from collections import Counter
+from pathlib import Path
 
 from .. import model, units
 from ..errors import AkcliError
@@ -65,6 +82,12 @@ DUPLICATE_DESIGNATOR = "DUPLICATE_DESIGNATOR"
 UNRESOLVED_LIB_ID = "UNRESOLVED_LIB_ID"
 INVALID_INSTANCES_PATH = "INVALID_INSTANCES_PATH"
 NO_CONNECT_CONFLICT = "NO_CONNECT_CONFLICT"
+# These two double as ``errors.ERROR_CODES`` members: the writer REFUSES an op
+# that would create them, and the same code names the finding when an existing
+# document already carries the damage (stock files from the 0.17 power-port
+# regression, hand edits, imports).
+POWER_PORT_STACKED = "POWER_PORT_STACKED"
+SHEET_FILE_MISSING = "SHEET_FILE_MISSING"
 
 # A point in the canonical +Y-down frame, integer nanometres.
 Point = tuple[int, int]
@@ -278,6 +301,20 @@ def _pin_points(
     return pts, owner, findings
 
 
+def _symbol_at(sym: SNode) -> Point | None:
+    """A placed symbol's ``(at x y ...)`` anchor in integer nm."""
+    return _pt_nm(sym.find("at"), 1)
+
+
+def _property(node: SNode, key: str) -> str | None:
+    """Value of ``(property "<key>" "<value>" ...)`` on ``node``, or ``None``."""
+    for prop in node.find_all("property"):
+        kids = prop.children or []
+        if len(kids) >= 3 and kids[1].value == key:
+            return kids[2].value
+    return None
+
+
 def _all_uuids(doc: SNode) -> list[str]:
     """Every ``(uuid "...")`` value in the tree (iterative, no native recursion)."""
     out: list[str] = []
@@ -296,15 +333,82 @@ def _all_uuids(doc: SNode) -> list[str]:
     return out
 
 
+def _names_a_net(sym: SNode, library: model.Library) -> bool:
+    """True for a power symbol that INJECTS a net name at its pin.
+
+    ``#PWR0<n>``-style references and ``(power)`` definitions are the markers;
+    ``PWR_FLAG`` is deliberately excluded — netbuild excludes it too
+    (``readers/kicad.py``), because a flag only marks a rail as driven for ERC.
+    A flag may therefore share a coordinate with a real port without shorting
+    anything, and that pattern is prescribed (``place_pwr_flag``).
+    """
+    lib_id = _av(sym.find("lib_id"), 1) or ""
+    value = _property(sym, "Value") or ""
+    if (lib_id.split(":")[-1].upper() == "PWR_FLAG"
+            or value.upper() == "PWR_FLAG"):
+        return False
+    ref = _symbol_reference(sym) or ""
+    if ref.startswith("#PWR"):
+        return True
+    if ref.startswith("#FLG"):
+        return False
+    try:
+        return kicad_lib.is_power_symbol(kicad_lib.resolve(lib_id, [library]))
+    except AkcliError:
+        return False
+
+
+def _sheet_file_findings(
+    doc: SNode, path: os.PathLike | str | None,
+) -> list[Finding]:
+    """One finding per ``(sheet ...)`` whose child ``.kicad_sch`` is missing.
+
+    Child paths resolve relative to the DIRECTORY of ``path`` (KiCad's rule,
+    and the reader's), so passing the temp file of an atomic write works — it
+    lives beside the real one. No ``path``, no check: an in-memory document has
+    no directory to resolve against.
+    """
+    if path is None:
+        return []
+    directory = Path(os.fspath(path)).parent
+    out: list[Finding] = []
+    for sh in doc.find_all("sheet"):
+        if sh.find("lib_id") is not None:      # a placed symbol, not a sheet
+            continue
+        fname = _property(sh, "Sheetfile")
+        if not fname:
+            continue
+        name = _property(sh, "Sheetname") or fname
+        if (directory / fname).exists():
+            continue
+        out.append(
+            Finding(
+                SHEET_FILE_MISSING,
+                Severity.ERROR,
+                f"sheet {name!r} references {fname!r}, which does not exist "
+                f"next to this file — nets/check/render fail on the whole "
+                f"design until the child is authored",
+                refs=[name, fname],
+            )
+        )
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # verify
 # --------------------------------------------------------------------------- #
-def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
+def verify(doc: SNode, *, tol_nm: int = 0,
+           path: os.PathLike | str | None = None) -> list[Finding]:
     """Run the pure-Python connectivity gate over a parsed ``.kicad_sch`` ``doc``.
 
     Returns a list of :class:`~..report.Finding`; an empty list means the document
     is electrically self-consistent (no dangling wires, duplicate UUIDs, unresolved
     symbols or broken instance paths). Never shells out — safe with no KiCad.
+
+    ``path`` is the document's own file path (or any path in the directory it
+    lives in, e.g. the temp file of an atomic write). It enables only the checks
+    that need the filesystem — today ``SHEET_FILE_MISSING`` — and is skipped
+    entirely when omitted, so a doc built in memory still verifies.
     """
     findings: list[Finding] = []
 
@@ -333,6 +437,12 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
         ref = _symbol_reference(sym)
         if not ref:
             continue
+        if "?" in ref:
+            # An UNANNOTATED symbol ("R?", "#PWR?"): KiCad writes the same
+            # placeholder on every unannotated part, so N of them are N
+            # placeholders, not N duplicates of one part. Counting them refused
+            # every write to an unannotated sheet (even an add_text).
+            continue
         unit_node = sym.find("unit")
         unit = _av(unit_node, 1) or "1" if unit_node is not None else "1"
         ref_units[(ref, unit)] += 1
@@ -347,6 +457,37 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
                     refs=[ref],
                 )
             )
+
+    # --- stacked power ports ------------------------------------------------ #
+    # Two power symbols on ONE coordinate render as a single glyph while both
+    # exist: the top one hides the other, and because their pins coincide the
+    # two nets they name merge silently (a GND "replaced" by a +3V3 at the same
+    # point shorted GND into +3V3 with nothing visible to see). The writer
+    # refuses to create this; the check exists for documents that already have.
+    stacked: dict[Point, list[str]] = {}
+    for sym in _placed_symbols(doc):
+        if not _names_a_net(sym, library):
+            continue
+        p = _symbol_at(sym)
+        if p is None:
+            continue
+        stacked.setdefault(p, []).append(
+            f"{_symbol_reference(sym) or '?'}={_property(sym, 'Value') or '?'}")
+    for p, refs in sorted(stacked.items()):
+        if len(refs) > 1:
+            findings.append(
+                Finding(
+                    POWER_PORT_STACKED,
+                    Severity.ERROR,
+                    f"{len(refs)} power symbols share the coordinate {_fmt(p)} "
+                    f"({', '.join(sorted(refs))}) — one hides the other and "
+                    f"their nets merge silently",
+                    refs=[_fmt(p), *sorted(refs)],
+                )
+            )
+
+    # --- sheet files that do not exist -------------------------------------- #
+    findings.extend(_sheet_file_findings(doc, path))
 
     # --- invalid instances path -------------------------------------------- #
     root_uuid = _root_uuid(doc)
@@ -414,10 +555,16 @@ def verify(doc: SNode, *, tol_nm: int = 0) -> list[Finding]:
     bus_end_points = {p for seg in bus_segs for p in seg}
 
     def _on_other_wire(p: Point) -> bool:
-        """``p`` connects to a wire other than (just) terminating itself."""
-        if end_counts.get(p, 0) >= 2:
-            return True  # another wire endpoint also lands here
-        return seg_index.has_interior_hit(p)  # T-junction into a wire's mid-span
+        """``p`` connects to a wire other than (just) terminating itself.
+
+        Endpoint-to-endpoint ONLY. A T (this endpoint on another wire's
+        mid-span) needs an explicit ``(junction)`` to conduct in eeschema —
+        that case is covered by the junction test in the caller, and netbuild
+        applies the identical rule (``t_midspan_connects=False``). Accepting a
+        bare mid-span touch here made the write gate call "connected" what
+        ``akcli nets`` (and KiCad) call two separate nets.
+        """
+        return end_counts.get(p, 0) >= 2
 
     # --- dangling wire endpoints ------------------------------------------- #
     reported: set[Point] = set()

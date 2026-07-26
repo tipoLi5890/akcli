@@ -59,7 +59,16 @@ def _load_groups_file(path: str) -> dict[str, list[str]]:
         raw = p.read_bytes()
     except FileNotFoundError:
         raise _ExitWith(EXIT["NOT_FOUND"], f"ERROR: groups file not found: {path}")
-    text = raw.decode("utf-8", errors="replace")
+    except OSError as exc:  # a directory, mode 000, ... — never a traceback
+        raise _ExitWith(EXIT["NOT_FOUND"],
+                        f"ERROR: groups file unreadable: {path}: "
+                        f"{exc.strerror or exc}")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _ExitWith(EXIT["USAGE"],
+                        f"ERROR: groups file is not UTF-8 text: {path} "
+                        f"(byte 0x{raw[exc.start]:02x} at offset {exc.start})")
     data: object
     if p.suffix.lower() == ".json":
         try:
@@ -230,6 +239,7 @@ def _redundant_wire_deletes(target, sch, ref_group: dict, labeled: set) -> list:
     deleted cluster go with it.
     """
     from ..readers import sexpr as _sexpr
+    from ..safety import read_text_guarded as _read_text_guarded
 
     def key(x: float, y: float) -> tuple:
         return (round(x * 10), round(y * 10))
@@ -244,7 +254,7 @@ def _redundant_wire_deletes(target, sch, ref_group: dict, labeled: set) -> list:
         for r, p in net.members:
             pin_net[(r, p)] = net.name if net.is_named else None
 
-    root = _sexpr.parse(target.read_text(encoding="utf-8", errors="replace"))
+    root = _sexpr.parse(_read_text_guarded(target))
     segs: list = []          # (uuid, (x0,y0), (x1,y1))
     for wire in root.find_all("wire"):
         pts = wire.find("pts")
@@ -528,11 +538,6 @@ def _refresh_frames(args: argparse.Namespace, target, cfg) -> int:
     return len(ops_list) // 2
 
 
-def _bak_name(name: str, level: int) -> str:
-    """Rotated-backup filename: level 1 is ``<name>.bak``, 2 ``.bak2``, …"""
-    return f"{name}.bak" if level <= 1 else f"{name}.bak{level}"
-
-
 _BACKUP_SCAN_MAX = 99          # matches the config backup_depth ceiling
 
 
@@ -560,11 +565,16 @@ def _backup_stack(target) -> list:
     this target, fall back to the legacy pre-0.12 location (``<name>.bak``
     next to the file) so `undo` keeps working on an existing workspace.
     """
+    # ONE naming authority: the writer both rotates and names the backups, so
+    # `undo` scans with the writer's own function (a local copy of the rule
+    # drifting from it would silently hide snapshots).
+    from ..writers.kicad import backup_name
+
     def _scan(base: Path) -> list:
         return [
             (p, level)
             for level in range(1, _BACKUP_SCAN_MAX + 1)
-            if (p := base / _bak_name(target.name, level)).exists()
+            if (p := base / backup_name(target.name, level)).exists()
         ]
 
     return _scan(_backups_dir(target)) or _scan(target.parent)
@@ -774,6 +784,13 @@ def _blank_sch(paper: str, title: str | None) -> str:
     repair prompt and that ``draw`` can immediately append symbols/wires to.
     """
     import uuid as _uuid
+
+    # ONE quoting authority (writers.kicad._q): a fourth hand-rolled escaper
+    # here missed control characters, so `new --title $'A\nB'` wrote a file
+    # eeschema refused to open while every akcli gate reported success — the
+    # exact bug _q's docstring records fixing on the writer side.
+    from ..writers.kicad import _q as _sexpr_quote
+
     lines = [
         "(kicad_sch",
         f"\t(version {_NEW_SCH_VERSION})",
@@ -785,7 +802,7 @@ def _blank_sch(paper: str, title: str | None) -> str:
     if title:
         lines += [
             "\t(title_block",
-            f'\t\t(title "{_sexpr_escape(title)}")',
+            f'\t\t(title {_sexpr_quote(title)})',
             "\t)",
         ]
     lines += [
@@ -799,11 +816,6 @@ def _blank_sch(paper: str, title: str | None) -> str:
         "",
     ]
     return "\n".join(lines)
-
-
-def _sexpr_escape(text: str) -> str:
-    """Escape a bare string for a KiCad s-expression double-quoted token."""
-    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -905,21 +917,21 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         opsfile = getattr(args, "opsfile", None)
         if not opsfile:
             raise _ExitWith(EXIT["USAGE"], "ERROR: ops validate needs an op-list file")
-        # target-free structural validation: envelope + per-op fields + macro
-        # expansion, exactly the checks plan/draw run before touching a target
+        # target-free structural validation: envelope + per-op fields (macros
+        # included — prepare_oplist validates BEFORE it expands) + the
+        # expansion itself, exactly the checks plan/draw run before touching a
+        # target
         errors: list[dict] = []
         oplist = None
         try:
             oplist = opsmod.load_oplist(opsfile)
-            oplist = opsmod.expand_macros(oplist)
-            oplist = opsmod.resolve_groups(oplist)
+            oplist, errs = opsmod.prepare_oplist(oplist)
+            errors.extend(
+                {"op_index": e.op_index, "code": e.code, "message": e.message}
+                for e in errs)
         except AkcliError as exc:
             errors.append({"op_index": None, "code": exc.code,
                            "message": exc.message or str(exc)})
-        if oplist is not None:
-            errors.extend(
-                {"op_index": e.op_index, "code": e.code, "message": e.message}
-                for e in opsmod.validate_oplist(oplist))
         valid = not errors
         if args.json:
             _emit(_dumps({
@@ -1031,18 +1043,17 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
     if not getattr(args, "ops", None):
         raise _ExitWith(EXIT["USAGE"], "ERROR: missing --ops <oplist.json>")
 
-    from ..ops import expand_macros, load_oplist, resolve_groups, validate_oplist
+    from ..ops import load_oplist, prepare_oplist
     from ..writers import kicad as kwriter
 
     # FileNotFound / malformed-JSON / bad-macro / bad-group failures raise
     # AkcliError and surface via cli.main — which renders them as a
     # machine-readable {"error": {...}} envelope under --json (never a bare
-    # non-JSON stdout). Order matters: macros expand first (propagating each
-    # op's `group` tag), then group-local coordinates resolve to absolute.
-    oplist = load_oplist(args.ops)
-    oplist = expand_macros(oplist)
-    oplist = resolve_groups(oplist)
-    errs = validate_oplist(oplist)
+    # non-JSON stdout). prepare_oplist owns the order: validate the author's
+    # ops (so a macro's own fields are checked), expand macros (propagating
+    # each op's `group` tag), resolve group-local coordinates, validate the
+    # result — with error indices mapped back onto the author's op-list.
+    oplist, errs = prepare_oplist(load_oplist(args.ops))
     if errs:
         if args.json:
             # Same draw-result shape as a normal run, so an agent parses ONE

@@ -117,7 +117,8 @@ akcli check board.kicad_sch -C akcli.toml --json
 `--integrity` is the diagnosis shortcut for "the file itself is wrong": it runs
 the same checks `draw --apply` gates on (`DANGLING_ENDPOINT`,
 `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`, `DUPLICATE_DESIGNATOR`,
-`UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`, `NO_CONNECT_CONFLICT`) over a file
+`UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`, `POWER_PORT_STACKED`,
+`SHEET_FILE_MISSING`, `NO_CONNECT_CONFLICT`) over a file
 akcli did not write — the fastest way to tell a hand edit / bad merge / moved
 library from an electrical problem, and to confirm a target is clean BEFORE
 blaming an op-list for a refused write.
@@ -133,9 +134,15 @@ Real fault vs false positive, per rule:
 
 - `ERC_FLOATING_INPUT` / `ERC_DRIVER_CONFLICT`: trust only when pin types are real (see the
   passive-pin gate above). Verify by `akcli component <file> <REF>` on the flagged parts.
+  A net held by a **passive tie to a rail** (the 10k from `EN` to `+3V3`, a reset pull-up)
+  or reaching a **connector** (an off-board probe drives it) counts as driven and is not
+  reported — a DNP pull-up ties nothing, so that case still fires.
 - `ERC_NO_POWER` / `ERC_NO_GROUND`: **name-based**, and only components with `U`/`IC` designator
-  prefixes are checked. False positive when the rail exists under an unrecognized name — add a
-  `[[rail]]` entry in config. Note the waiver quirk: `[[erc_waiver]]` for these two rules matches
+  prefixes are checked. TVS/ESD arrays (`TPD4E05U06`, `USBLC6`…) are exempt from the POWER half
+  only — they have no supply pin by construction, but a clamp still needs its ground. False
+  positive when the rail exists under an unrecognized name — add a
+  `[[rail]]` entry in config (derived rail names like `VBUS_FUSED`/`VCC_3V3_A` are recognized
+  already; `VBUS_DET`-style *signals about* a rail deliberately are not). Note the waiver quirk: `[[erc_waiver]]` for these two rules matches
   the waiver `net` field against the component **designator**, not a net name.
 - `ERC_DANGLING_NET`: single-pin net. Real for forgotten wires; false positive for intentional
   test points — waive via `[[erc_waiver]]` (rule tokens are the lowercase forms, e.g.
@@ -165,8 +172,12 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
 
 - **Reading the connectivity-gate refusal:** the dry-run/apply output ends with a
   `# connectivity (N)` block. `DANGLING_ENDPOINT`, `DUPLICATE_UUID`, `UNRESOLVED_LIB_ID`,
-  `INVALID_INSTANCES_PATH` are ERRORs — any one of them (or any errored op) makes `draw` exit
-  **6** and refuse the write; `NO_CONNECT_CONFLICT` is a warning. Fix the op-list (usually a wire
+  `INVALID_INSTANCES_PATH`, `POWER_PORT_STACKED`, `SHEET_FILE_MISSING` are ERRORs — any one of
+  them (or any errored op) makes `draw` exit
+  **6** and refuse the write; `NO_CONNECT_CONFLICT` is a warning. A `DANGLING_ENDPOINT` on a
+  wire end that visibly touches another wire means a **T with no `(junction)`** — eeschema
+  reads those as two nets, so add `add_junction` at that point (akcli inserts it automatically
+  for wires it draws). Fix the op-list (usually a wire
   endpoint that misses a pin — prefer `"REF.PIN"` endpoints, which snap exactly) and re-run the
   dry-run until the connectivity block is clean. Run
   `akcli check <target> --integrity --fail-on never` first when the same codes may
@@ -177,7 +188,10 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   instance paths are valid); a single-segment path must still name the file's own
   root uuid. What is still unsupported is placing *into* a sub-sheet path from the
   parent — target the child file directly.
-- Per-op failures name the culprit: `SYMBOL_NOT_FOUND` → add `--symbols`; `VERIFY_FAILED` on
+- Per-op failures name the culprit: `SYMBOL_NOT_FOUND` → add `--symbols`, but when it hits
+  EVERY `lib_id` including `Device:R` the op-list is fine and the environment is not —
+  `akcli doctor --require symbols` resolves `Device:R` down the real path and says where it
+  broke (see the akcli-setup skill); `VERIFY_FAILED` on
   `set_component_transform`/`set_component_parameters` → the designator does not exist in the
   target (check with `akcli component`); `PROTOCOL_MISMATCH` / `OP_UNSUPPORTED` → stop and
   report, do not retry blindly.

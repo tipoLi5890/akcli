@@ -73,7 +73,9 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
         from ..readers import sexpr as _sexpr
         from ..writers import connectivity as _connectivity
         text = Path(args.path).read_text(encoding="utf-8")
-        return _connectivity.verify(_sexpr.parse(text))
+        # the path enables the checks that need the filesystem (a (sheet ...)
+        # whose child file is missing)
+        return _connectivity.verify(_sexpr.parse(text), path=args.path)
     return []
 
 

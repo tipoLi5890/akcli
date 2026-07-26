@@ -154,13 +154,17 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 
 ## ロードマップ
 
-**提供済み（v0.16.0）：** 22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet`、net-diff
-安全レール、`new`／多段 `undo`）、net を保つ `arrange --groups` の再レイアウト、アドバイザリな `akcli
-review` エンジン（6 つの検出器ファミリ、電源入口保護を含む。さらに datasheet facts store、`propose`／
-`tree`／`validate`）、ERC／power／BOM／diff／pinmap／intent／contract チェック（waiver と SARIF 付き）、
+**提供済み（v0.18.0）：** 22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet` と既存
+階層の子シートへの書き込み、net-diff 安全レール、`new`／多段 `undo`）、net を保つ `arrange --groups`
+の再レイアウト、アドバイザリな `akcli review` エンジン（6 つの検出器ファミリ、電源入口保護を含む。さらに
+datasheet facts store、`propose`／`tree`／`validate`）、ERC／power／BOM／diff／pinmap／intent／contract
+チェック（waiver と SARIF 付き）、読み取り専用のドキュメント整合性チェック `check --integrity`、
 回路図 ↔ PCB `verify`、プロジェクト `library` ワークスペース、バージョン管理された `fab` プロファイル、
 `release preflight` ゲート、KiCad 同梱 ngspice 上の `akcli sim`、JLCPCB／LCSC 調達とデータシート取得、
-60 個の規格準拠計算機、純標準ライブラリの SVG レンダリング、バージョン耐性のある Altium／KiCad リーダー。
+60 個の規格準拠計算機、KiCad `lib_symbols` の実際のシンボル図形を描く純標準ライブラリの SVG
+レンダリング、バージョン耐性のある Altium／KiCad リーダー。標準シンボルの nickname は素の KiCad
+インストールで解決します——コンパイル時に組み込まれた `${KICAD*_SYMBOL_DIR}` のパスは検出した
+`kicad-cli` から導出され、`akcli doctor` がこの解決がこの環境で動作するかを報告します。
 
 **今後（→ v1.0）：** contract freeze 監査。最初の PyPI リリース（`pip install akcli-kicad`）は 0.15.0 で
 提供されました。*方針により保留：* 回路図 PR を判定する GitHub Action、`view` の波形パネル、ネイティブ

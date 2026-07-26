@@ -23,12 +23,16 @@ def test_required_codes_present():
         "ALTIUM_BAD_SECTOR_SHIFT", "ALTIUM_ALLOC_GUARD", "ALTIUM_MALFORMED",
         "ALTIUM_UNSUPPORTED",
         "KICAD_SEXPR_DEPTH", "KICAD_SEXPR_UNTERMINATED", "KICAD_SEXPR_TOOBIG",
-        "KICAD_SEXPR_BAD_NUMBER", "INTERNAL",
+        "KICAD_SEXPR_BAD_NUMBER", "KICAD_BAD_ENCODING", "INTERNAL",
         "SYMBOL_NOT_FOUND", "BAD_ANGLE", "NON_ORTHOGONAL_WIRE", "OFF_GRID",
         "OVERLAP", "VERIFY_FAILED", "OP_UNSUPPORTED", "HIERARCHICAL_UNSUPPORTED",
         "PROTOCOL_MISMATCH", "TARGET_LOCKED", "PATH_OUTSIDE_ROOT",
+        "FILE_UNREADABLE",
         # functional groups (envelope `groups` + per-op `group` tag)
         "GROUP_UNKNOWN", "GROUP_NO_ORIGIN",
+        # document integrity shared by the writer and connectivity.verify:
+        # two power ports on one coordinate, a (sheet) with no child file
+        "POWER_PORT_STACKED", "SHEET_FILE_MISSING",
         "KICAD_CLI_TIMEOUT", "KICAD_CLI_MISSING", "BAD_CONFIG",
         # ngspice engine + the jlc networked surface
         "NGSPICE_MISSING", "NGSPICE_FAILED", "NETWORK",
@@ -79,6 +83,10 @@ def test_exit_mapping_categories():
     assert exit_for_code("PATH_OUTSIDE_ROOT") == EXIT["USAGE"]
     assert exit_for_code("KICAD_CLI_MISSING") == EXIT["TOOL_MISSING"]
     assert exit_for_code("BRIDGE_BUSY") == EXIT["OPLIST"]
+    # a refused write is op-list class, whether the op stacked a power port or
+    # pointed a sheet at a child that does not exist
+    assert exit_for_code("POWER_PORT_STACKED") == EXIT["OPLIST"]
+    assert exit_for_code("SHEET_FILE_MISSING") == EXIT["OPLIST"]
     assert exit_for_code("BRIDGE_TIMEOUT") == EXIT["TOOL_MISSING"]
     # sim deck-build refusals are op-list class (nothing ran, exit 6) — never
     # exit 7, which would read as "install a tool"; a bad sim.json is usage (2).

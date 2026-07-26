@@ -188,18 +188,27 @@ def build_manifest() -> dict:
             # Hard vocabulary limits, published here so an agent can branch
             # BEFORE attempting an op instead of learning each constraint
             # from a failed draw (BAD_ANGLE / NON_ORTHOGONAL_WIRE /
-            # HIERARCHICAL_UNSUPPORTED / OFF_GRID). Values come from ops.py's
-            # own validator constants — the manifest cannot drift from what
-            # the validator actually enforces.
+            # HIERARCHICAL_UNSUPPORTED / OFF_GRID).
+            # ``rotation_enum`` and ``grid_mil`` are read from ops.py's own
+            # validator constants and cannot drift. ``wire_orthogonal_only``
+            # and the two ``hierarchy`` fields are hand-maintained prose —
+            # there is no constant to export — so whoever changes the writer's
+            # hierarchy rule (writers/instances.instances_path,
+            # writers/connectivity's INVALID_INSTANCES_PATH) must update these
+            # strings and the pin in tests/test_json_version_stamps.py.
             "constraints": {
                 "rotation_enum": sorted(_ops._VALID_ROTATIONS),  # noqa: SLF001
                 "wire_orthogonal_only": True,
                 "grid_mil": int(_ops._GRID_MIL),  # noqa: SLF001
-                "hierarchy": "flat_v1_only",
-                "hierarchy_note": "ops cannot target a child sheet; add_sheet "
-                                  "creates the sheet symbol, but the child "
-                                  ".kicad_sch must be authored as its own "
-                                  "draw target",
+                "hierarchy": "hierarchical_write_v1",
+                "hierarchy_note": "one op-list per FILE: a child .kicad_sch of "
+                                  "an existing hierarchy is a normal draw "
+                                  "target (the write gate accepts its "
+                                  "/<top-root>/<sheet> parent-hierarchy "
+                                  "instances path); add_sheet places the "
+                                  "parent's sheet symbol, and an op naming a "
+                                  "sub-sheet path from the parent's op-list "
+                                  "still fails HIERARCHICAL_UNSUPPORTED",
             },
             # HONESTY: Altium is import-only — the per-op "altium" support
             # matrix is informational and there is NO Altium write executor;
@@ -224,8 +233,11 @@ def build_manifest() -> dict:
             "json_errors": "with --json, a failing command that would "
                            "otherwise leave stdout empty emits "
                            '{"error": {code, message, exit, remediation}} '
-                           "on stdout; plan/draw op-list errors emit the "
-                           "normal draw-result shape with status refused",
+                           "on stdout; that covers argparse usage failures "
+                           "(unknown command/flag/choice → code USAGE) and "
+                           "unexpected exceptions (code INTERNAL); plan/draw "
+                           "op-list errors emit the normal draw-result shape "
+                           "with status refused",
         },
     }
 

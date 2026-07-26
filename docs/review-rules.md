@@ -181,6 +181,11 @@ the rule text says so and stays `info`.
 
 ### signal.crystal
 
+Crystals classify by library/value keyword (`crystal`/`xtal`/`resonator`)
+first and by designator prefix (`Y`, `X`) only as a fallback — library
+evidence always wins, so a part in a `Connector_*` library is never a
+crystal, and an `X1` in a vendor library (`SC-32S32_768kHz…`) is one.
+
 Two-signal-pin crystals (oscillator modules skip). Checks: no load caps at
 all; one-sided load; >5 % asymmetric pair; else reports
 `CL = C1·C2/(C1+C2) + C_stray` with `C_stray = 4 pF` **stated as an
@@ -191,9 +196,11 @@ C = 2·(CL − C_stray)).
 
 ### signal.protection
 
-Connectors (designator prefix `J/P/CN/X/USB` or library keyword) whose
+Connectors (library/footprint keyword, else designator prefix
+`J/P/CN/USB/XP` — `X` belongs to crystals, see `signal.crystal`) whose
 signal nets (non-power, non-ground, ≥2 members) reach no recognised TVS/ESD
-part (library/value keyword table in `review/tables.py`). Keyword-based role
+part (library/value keyword table in `akcli/classify.py`, shared with
+`check`). Keyword-based role
 detection is honestly `heuristic` — an exotic part naming scheme evades it;
 waive per net or rename the part. Power-only connectors are out of scope
 for this rule.
@@ -204,8 +211,10 @@ for this rule.
 entry token (`VBAT/VIN/VBUS/DCIN/PWR_IN/VSUPPLY/VEXT`) is its WHOLE name
 (optional `+/-` prefix, trailing digits), or when a token-carrying name is
 power-classified by the shared rail heuristics — a token buried in a longer
-signal name (`VBUS_SENSE`) is a derived signal, not an entry, so it never
-seeds a duplicate finding. The walk crosses only fuses, diodes and inductors — never resistors
+signal name (`VBUS_SENSE`) is a derived signal, not an entry, and a rail
+STAGE name (`VBUS_FUSED`, `VBAT_PROT`: the same rail *after* a protector)
+is not an entry either, so neither seeds a duplicate finding that reports
+the very protector in front of it as missing. The walk crosses only fuses, diodes and inductors — never resistors
 or capacitors, so the walk cannot wander into dividers or decoupling — and
 never into ground. Fuses classify by prefix `F` or keyword
 (`fuse/polyfuse/ptc`); diodes by prefix `D/CR` or keyword, with TVS parts
@@ -241,13 +250,20 @@ swing) arrive with the SPICE milestone.
 
 ### validation.i2c_pullup
 
-Nets named `SDA*`/`SCL*` (token match, prefix-tolerant: `I2C1_SDA`). Missing
+Nets whose name carries an `SDA`/`SCL` token (`I2C1_SDA`, `SDA0_3V3`,
+numbered forms included). `SDATA`/`SCLK` also name these lines but are
+shared with I²S/SPI, so they count only when BOTH lines of one bus are
+present (`SENSOR_SDATA` + `SENSOR_SCLK`; a lone `SPI_SCLK` does not).
+Generic `DAT`/`CLK` are not recognised at all — too broad to claim an
+open-drain bus. Missing
 pull-up → warning (internal MCU pull-ups exist but rarely meet spec rise
 times — confirm deliberately). With a pull-up and a rail voltage, the window
 comes from `akcli calc i2c-pullup` (NXP UM10204 §7.1): `R < R_min` needs no
 bus-capacitance guess and warns; `R > R_max` depends on the assumed
 `C_b = 100 pF` and therefore stays a NOTE with the assumption stated.
-SDA/SCL value mismatch is a NOTE.
+SDA/SCL value mismatch is a NOTE, judged per bus (the name minus the
+SDA/SCL token), so two buses on one board are never compared with each
+other.
 
 ### validation.vdomain
 

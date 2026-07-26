@@ -148,13 +148,16 @@ Python 之外的東西——一律在執行期偵測，核心流程永遠不需�
 
 ## 路線圖
 
-**目前已提供（v0.16.0）：** KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet`、net-diff
-安全護欄、`new`／多層 `undo`）、保持 net 不變的 `arrange --groups` 重排、建議性的 `akcli review`
-引擎（六大偵測家族，現已納入電源入口保護偵測、datasheet facts store、`propose`／`tree`／
-`validate`）、ERC／power／BOM／diff／pinmap／intent／contract 檢查（含 waiver 與 SARIF）、原理圖
-↔ PCB `verify`、專案 `library` 工作區、版本化 `fab` profile、`release preflight` 把關、KiCad 自帶
-ngspice 上的 `akcli sim`、JLCPCB／LCSC 料件搜尋與規格書抓取、60 個附標準引用的計算器、純標準函式庫
-SVG 渲染，以及版本容忍的 Altium／KiCad 讀取器。
+**目前已提供（v0.18.0）：** KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet` 與寫入既有
+階層中的子圖頁、net-diff 安全護欄、`new`／多層 `undo`）、保持 net 不變的 `arrange --groups` 重排、
+建議性的 `akcli review` 引擎（六大偵測家族，現已納入電源入口保護偵測、datasheet facts store、
+`propose`／`tree`／`validate`）、ERC／power／BOM／diff／pinmap／intent／contract 檢查（含 waiver 與
+SARIF）、唯讀的文件完整性檢查 `check --integrity`、原理圖 ↔ PCB `verify`、專案 `library` 工作區、
+版本化 `fab` profile、`release preflight` 把關、KiCad 自帶 ngspice 上的 `akcli sim`、JLCPCB／LCSC
+料件搜尋與規格書抓取、60 個附標準引用的計算器、能畫出 KiCad `lib_symbols` 真實符號圖形的純標準函式庫
+SVG 渲染，以及版本容忍的 Altium／KiCad 讀取器。標準符號 nickname 在原廠 KiCad 安裝上即可解析——那些
+編譯內建的 `${KICAD*_SYMBOL_DIR}` 路徑會從找到的 `kicad-cli` 推導，`akcli doctor` 則會回報這條解析
+路徑在本機是否可用。
 
 **前瞻（→ v1.0）：** 契約凍結稽核（contract freeze audit）。第一個 PyPI 版本
 （`pip install akcli-kicad`）已於 0.15.0 發佈。*依決策暫緩：* 為電路圖 PR 把關的 GitHub Action、`view` 波形面板，

@@ -30,8 +30,10 @@ jobs:
           python-version: "3.12"
       - name: Install ruff
         run: python -m pip install ruff
+      # tools/ and hooks/ ship with the plugin and are inside the text-I/O
+      # portability AST gate, so they are held to the same lint bar as src/.
       - name: ruff check
-        run: ruff check src tests
+        run: ruff check src tests tools hooks
       - name: Install mypy (dev extra)
         run: python -m pip install -e ".[dev]"
       - name: mypy (beachhead — scope in pyproject [tool.mypy].files)
@@ -235,14 +237,16 @@ jobs:
       - name: Run KiCad ground-truth tests live (fail if any case is skipped)
         run: |
           set -euo pipefail
-          # Fixture-first is only a real gate if these actually RUN: both files
-          # skip themselves when kicad-cli is missing, so a broken install (or
-          # a broken availability probe) would otherwise turn the whole
-          # ground-truth suite into a silent green.
-          python -m pytest -q -rs -m "" \
-            tests/test_e2e_draw.py tests/test_kicad_cli.py \
+          # Fixture-first is only a real gate if these actually RUN: all three
+          # files skip themselves when kicad-cli is missing, so a broken install
+          # (or a broken availability probe) would otherwise turn the whole
+          # ground-truth suite into a silent green. test_kicad_parity.py is the
+          # biggest of the three (the eeschema netlist parity corpus) and was
+          # the one this assertion used to miss entirely.
+          python -m pytest -q -rs \
+            tests/test_e2e_draw.py tests/test_kicad_cli.py tests/test_kicad_parity.py \
             | tee /tmp/kicad-tests.log
-          # Matches the "kicad-cli not installed" skip reason in both files;
+          # Matches the "kicad-cli not installed" skip reason in all three files;
           # capability-fallback skips (e.g. KiCad < 8 emits no JSON ERC report)
           # stay allowed.
           if grep -qE "^SKIPPED .*kicad-cli not installed" /tmp/kicad-tests.log; then
@@ -250,12 +254,27 @@ jobs:
             grep -E "^SKIPPED" /tmp/kicad-tests.log >&2
             exit 1
           fi
+          # The parity corpus has no capability-fallback skips at all — ANY
+          # skipped case there means the ground truth did not run.
+          if grep -qE "^SKIPPED .*test_kicad_parity" /tmp/kicad-tests.log; then
+            echo "::error::tests/test_kicad_parity.py must not skip in the KiCad job" >&2
+            grep -E "^SKIPPED .*test_kicad_parity" /tmp/kicad-tests.log >&2
+            exit 1
+          fi
       - name: Run sim engine + sim CLI tests live (fail if any live case is skipped)
         run: |
           set -euo pipefail
-          python -m pytest -q -rs -m "" tests/test_sim_engine.py tests/test_sim_cli.py | tee /tmp/sim-tests.log
+          # Every module with an ngspice-gated case, not just the two obvious
+          # ones: fullloop / hardening / sweep / wave each carry live cases that
+          # a broken libngspice probe would silently turn green.
+          python -m pytest -q -rs \
+            tests/test_sim_engine.py tests/test_sim_cli.py \
+            tests/test_sim_fullloop.py tests/test_sim_hardening.py \
+            tests/test_sim_sweep.py tests/test_sim_wave.py \
+            | tee /tmp/sim-tests.log
           if grep -qE "^SKIPPED .*(libngspice|ngspice)" /tmp/sim-tests.log; then
-            echo "::error::sim engine/CLI live tests were skipped despite libngspice being available" >&2
+            echo "::error::sim live tests were skipped despite libngspice being available" >&2
+            grep -E "^SKIPPED" /tmp/sim-tests.log >&2
             exit 1
           fi
 

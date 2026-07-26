@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package and CLI stay `akcli` (see src/akcli/__init__.py name cascade);
 # keep the three in lockstep.
 name = "akcli-kicad"
-version = "0.17.0"
+version = "0.18.0"
 description = "AI-native schematic design agent, purpose-built for KiCad: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -77,12 +77,15 @@ select = ["E4", "E7", "E9", "F", "W"]
 # rather than the whole tree at once. Covered so far: the networked layer
 # (parts), the calculators, the typed core (model/errors/units/safety/
 # netdiff/journal/render_svg/kicad_escape/config/arrange), and the net/parse
-# spine (netbuild, readers/sexpr, checks/diff, writers/geometry, groupframe).
+# spine (netbuild, readers/sexpr, checks/diff, writers/geometry, groupframe),
+# and the shared classification vocabulary (classify).
 files = [
     "src/akcli/parts", "src/akcli/calc",
+    "src/akcli/classify.py",
     "src/akcli/model.py", "src/akcli/errors.py", "src/akcli/units.py",
     "src/akcli/safety.py", "src/akcli/netdiff.py", "src/akcli/journal.py",
-    "src/akcli/render_svg.py", "src/akcli/kicad_escape.py",
+    "src/akcli/render_svg.py", "src/akcli/render_art.py",
+    "src/akcli/kicad_escape.py",
     "src/akcli/config.py", "src/akcli/arrange.py",
     "src/akcli/netbuild.py", "src/akcli/readers/sexpr.py",
     "src/akcli/checks/diff.py", "src/akcli/writers/geometry.py",
@@ -106,3 +109,23 @@ follow_imports = "silent"
 # isn't worth fighting the checker over for a first pass.
 module = "akcli.parts.*"
 disallow_untyped_calls = false
+
+# ---------------------------------------------------------------------------
+# pytest. Turning warnings into errors is the point: a DeprecationWarning from
+# a stdlib API we depend on (the zero-dependency rule makes stdlib the WHOLE
+# dependency surface) is a future Python-version breakage, and CI runs
+# 3.11-3.14 — it must fail the suite the release before it fails the CLI
+# instead of scrolling past in a summary line. Add a targeted `ignore::` entry
+# WITH A COMMENT if a warning is genuinely out of our control.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    # ResourceWarning is emitted by the garbage collector, so *which* test it
+    # lands in depends on collection timing, not on the code under test — as an
+    # error it is a flaky, interpreter-version-dependent gate (and it fires
+    # from inside `__del__`, where pytest can only re-raise it as an
+    # unraisable-exception warning attached to an unrelated test).
+    "ignore::ResourceWarning",
+]

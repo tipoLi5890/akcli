@@ -44,7 +44,9 @@ instead of implying they were checked:
 - **Document integrity is not in the `check` gate.** That gate runs
   ERC/power/BOM/nets only; run `akcli check <sch> --integrity --fail-on never`
   alongside preflight (dangling endpoints, duplicate uuids/designators,
-  unresolved `lib_id`s, instance paths, no-connect conflicts) and report its
+  unresolved `lib_id`s, instance paths, stacked power ports — two rails merged
+  with nothing visible to see — a `(sheet …)` whose child file is missing, and
+  no-connect conflicts) and report its
   result with the manifest — a duplicate designator or an unresolved symbol
   library is a ship-stopper the gate list will not raise.
 
