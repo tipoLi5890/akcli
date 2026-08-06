@@ -27,7 +27,7 @@ import time
 from akcli import model
 from akcli.netbuild import (
     SegmentIndex,
-    _on_seg,
+    on_segment,
     _on_seg_interior,
     build_nets,
 )
@@ -64,7 +64,7 @@ def test_index_matches_bruteforce():
     probes.update({(200, 0), (0, 300), (60, 60), (61, 60)})
 
     for p in probes:
-        want_through = sorted((a, b) for a, b in segs if _on_seg(p, a, b))
+        want_through = sorted((a, b) for a, b in segs if on_segment(p, a, b))
         got_through = sorted(idx.segments_through(p))
         assert got_through == want_through, p
 

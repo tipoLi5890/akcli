@@ -59,9 +59,11 @@ PROTOCOL_VERSION = 1
 
 SIM_ASSERT_FAIL = "SIM_ASSERT_FAIL"
 SIM_MEAS_FAILED = "SIM_MEAS_FAILED"
+SIM_SUSPICIOUS_ZERO = "SIM_SUSPICIOUS_ZERO"
 
 _TOP_KEYS = frozenset(
-    {"protocol_version", "stimuli", "analyses", "models", "assert", "options"}
+    {"protocol_version", "stimuli", "analyses", "models", "assert", "options",
+     "acknowledged_unmodeled"}
 )
 _BOUND_KEYS = ("gt", "lt", "ge", "le", "approx")
 _LOWER_KEYS = ("gt", "ge")   # lower bounds (value must exceed / reach)
@@ -82,6 +84,11 @@ class SimSpec:
     asserts: list[dict] = field(default_factory=list)
     models: dict = field(default_factory=dict)
     options: dict = field(default_factory=dict)
+    # Designators the author explicitly accepts as absent from the deck
+    # (typically ICs with no vendor SPICE model). The deck builder downgrades
+    # their in-series SIM_PART_SKIPPED escalation from ERROR to WARNING —
+    # visible but non-blocking; unlisted parts keep the full ERROR.
+    acknowledged_unmodeled: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -257,6 +264,14 @@ def load(path: str | Path) -> SimSpec:
     if not isinstance(models, dict):
         fail("BAD_CONFIG", f"{where}: 'models' must be an object")
 
+    ack = doc.get("acknowledged_unmodeled", [])
+    if not isinstance(ack, list) or not all(
+        isinstance(x, str) and x.strip() for x in ack
+    ):
+        fail("BAD_CONFIG",
+             f"{where}: 'acknowledged_unmodeled' must be an array of "
+             f"non-empty designator strings (e.g. [\"U1\", \"U2\"])")
+
     options = doc.get("options", {})
     if not isinstance(options, dict):
         fail("BAD_CONFIG", f"{where}: 'options' must be an object")
@@ -291,6 +306,7 @@ def load(path: str | Path) -> SimSpec:
     return SimSpec(
         stimuli=stimuli, analyses=analyses, asserts=asserts,
         models=models, options=options,
+        acknowledged_unmodeled=[x.strip() for x in ack],
     )
 
 
@@ -449,7 +465,10 @@ def evaluate(
     value (``None`` for a failed measurement, or a missing one) in document
     order. Findings: ``SIM_MEAS_FAILED`` (ERROR) when the measurement itself
     failed or never ran; ``SIM_ASSERT_FAIL`` (ERROR) when it ran but violated
-    its bound; nothing on pass.
+    its bound; ``SIM_SUSPICIOUS_ZERO`` (WARNING) when an upper-bound-only
+    assert measured *exactly* 0 — an open circuit (the measured branch lost
+    its load) satisfies every upper bound vacuously, so that PASS proves
+    nothing; nothing extra on an honest pass.
     """
     findings: list[Finding] = []
     measured: dict[str, float | None] = {}
@@ -464,6 +483,28 @@ def evaluate(
                 refs=[name],
             ))
             continue
+        # An exact 0.0 against an upper-bound-only assert is indistinguishable
+        # from an open circuit: a branch whose load component was deleted
+        # measures literally zero and "passes" every MAX < bound vacuously —
+        # this happened on a real board and was only caught by comparing
+        # against historical values. A genuinely tiny-but-live branch shows
+        # float noise, never bit-exact 0, so this fires only on the vacuous
+        # shape. Lower-bounded and approx asserts already fail honestly at 0.
+        if (
+            value == 0.0
+            and any(k in a for k in _UPPER_KEYS)
+            and not any(k in a for k in _LOWER_KEYS)
+            and "approx" not in a
+        ):
+            findings.append(Finding(
+                SIM_SUSPICIOUS_ZERO, Severity.WARNING,
+                f"{name} measured exactly 0 against an upper-bound-only "
+                "assertion — consistent with an open circuit (the measured "
+                "branch may have lost its load), not a genuinely small "
+                "value; verify the branch is populated, or make the "
+                "assertion falsifiable with a gt/ge lower bound or approx",
+                refs=[name],
+            ))
         tol = a.get("tol", _DEFAULT_TOL)
         # A two-sided assert carries both a lower (gt|ge) and an upper (lt|le)
         # bound; report the first side the value violates.

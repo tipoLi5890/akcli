@@ -11,7 +11,7 @@ A contract file is TOML (stdlib ``tomllib``; zero dependencies) holding
     id = "reg-feedback-node"
     evidence = ["ACME-REG datasheet, Table 7"]
     require = [ { pin = "U1.FB2", net = "VFB2" } ]
-    forbid  = [ { pin = "U1.FB1", net = "V3V3" } ]
+    forbid  = [ { pin = "U1.FB1", net = "RAIL_A" } ]
 
     [[contract]]
     id = "usb-c-flip-pair"

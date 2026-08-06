@@ -17,7 +17,9 @@ rather than guess.
 
 Standard fact keys consumed by detectors today: ``vref`` (regulator feedback
 reference, V), ``load_capacitance`` (crystal CL, F), ``abs_max_io``
-(pin absolute maximum, V). Any ``[a-z][a-z0-9_]*`` key is schema-legal so a
+(pin absolute maximum, V), ``i_load`` (fuse continuous current, A), and the
+junction trio ``theta_ja``/``power_dissipation``/``t_j_max`` (pcb.thermal).
+Any ``[a-z][a-z0-9_]*`` key is schema-legal so a
 facts file can carry more than the detectors consume yet.
 """
 

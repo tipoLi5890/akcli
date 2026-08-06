@@ -118,7 +118,7 @@ def _on_seg_f(
     return abs(dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / length <= tol
 
 
-def _mil(node: sexpr.SNode | None, idx: int) -> float:
+def child_mil(node: sexpr.SNode | None, idx: int) -> float:
     return _krd._mm_to_mil(_krd._fnum(node, idx))
 
 
@@ -138,10 +138,22 @@ def _world_box(
     return _Box(min(wx), min(wy), max(wx), max(wy), name, (px, py))
 
 
-def _label_box(text: str, x: float, y: float, angle: int, is_global: bool) -> _Box:
-    """Estimated world box of a label's text (+bubble for global labels)."""
+def label_text_extent_mil(text: str, *, is_global: bool = False) -> tuple[float, float]:
+    """Estimated ``(length, half_height)`` of a label's rendered text, in mils.
+
+    The stroke-font approximation this lint boxes labels with (see the module
+    constants above) — promoted as the ONE label-metric authority so the
+    op-list generator (:mod:`akcli.intentgen`) sizes its cells with exactly
+    the metrics this lint will later judge the drawn sheet by.
+    """
     length = len(text) * _CHAR_ADV + (_PAD_GLOBAL if is_global else _PAD_LOCAL)
     half_h = _HALF_H_GLOBAL if is_global else _HALF_H_LOCAL
+    return length, half_h
+
+
+def _label_box(text: str, x: float, y: float, angle: int, is_global: bool) -> _Box:
+    """Estimated world box of a label's text (+bubble for global labels)."""
+    length, half_h = label_text_extent_mil(text, is_global=is_global)
     a = int(angle) % 360
     if a == 0:      # text extends +X
         return _Box(x, y - half_h, x + length, y + half_h, text, (x, y))
@@ -193,7 +205,7 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
     for sym in _krd._placed_symbols(root):
         lib_id = _krd._av(sym.find("lib_id"), 1) or ""
         at = sym.find("at")
-        px, py = _mil(at, 1), _mil(at, 2)
+        px, py = child_mil(at, 1), child_mil(at, 2)
         rot = int(round(_krd._fnum(at, 3))) % 360
         mnode = sym.find("mirror")
         mirror = (_krd._av(mnode, 1) if mnode is not None else None) or "none"
@@ -245,7 +257,7 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
         for lb in root.find_all(tag):
             text = _krd._av(lb, 1) or ""
             at = lb.find("at")
-            x, y = _mil(at, 1), _mil(at, 2)
+            x, y = child_mil(at, 1), child_mil(at, 2)
             angle = int(round(_krd._fnum(at, 3))) % 360
             label_boxes.append((
                 _label_box(text, x, y, angle, is_global=tag != "label"), tag,
@@ -257,7 +269,7 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
         pts = w.find("pts")
         if pts is None:
             continue
-        xy = [(_mil(q, 1), _mil(q, 2)) for q in pts.find_all("xy")]
+        xy = [(child_mil(q, 1), child_mil(q, 2)) for q in pts.find_all("xy")]
         wires.extend(zip(xy, xy[1:]))
 
     findings: list[Finding] = []
@@ -439,8 +451,8 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
         size = c.find("size")
         if at is None or size is None:
             continue
-        tx, ty = _mil(at, 1), _mil(at, 2)
-        tw, th = _mil(size, 1), _mil(size, 2)
+        tx, ty = child_mil(at, 1), child_mil(at, 2)
+        tw, th = child_mil(size, 1), child_mil(size, 2)
         tbox = _Box(min(tx, tx + tw), min(ty, ty + th),
                     max(tx, tx + tw), max(ty, ty + th), "text_box", (tx, ty))
         for i in range(n):
@@ -498,8 +510,8 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
                     ))
     if group_union:
         from ..groupframe import frame_uuid
-        from ..writers.kicad import _root_uuid
-        root_uuid = _root_uuid(root)
+        from ..writers.kicad import root_uuid as doc_root_uuid
+        root_uuid = doc_root_uuid(root)
         expect = {frame_uuid(root_uuid, g): g for g in group_union}
         for c in root.children or []:
             if (not c.is_list or not (c.children or [])
@@ -514,8 +526,8 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
             st, en = c.find("start"), c.find("end")
             if st is None or en is None:
                 continue
-            rx0, ry0 = _mil(st, 1), _mil(st, 2)
-            rx1, ry1 = _mil(en, 1), _mil(en, 2)
+            rx0, ry0 = child_mil(st, 1), child_mil(st, 2)
+            rx1, ry1 = child_mil(en, 1), child_mil(en, 2)
             rx0, rx1 = min(rx0, rx1), max(rx0, rx1)
             ry0, ry1 = min(ry0, ry1), max(ry0, ry1)
             u = group_union[g]

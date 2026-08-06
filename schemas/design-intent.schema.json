@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/design-intent.schema.json",
+  "title": "AkcliDesignIntent",
+  "description": "Design document for `akcli ops from-intent`: the pin->net table (exactly the `check --intent` nets format) plus the component declarations and layout hints the generator needs. A file of this shape is a SUPERSET of the intent-assertion format, so the same document that generated a sheet remains the assertion baseline for `akcli check --intent`.",
+  "type": "object",
+  "required": ["protocol_version", "nets", "components"],
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": 1
+    },
+    "mode": {
+      "description": "Document-level assertion mode for `check --intent` (generation ignores it).",
+      "enum": ["exact", "subset"]
+    },
+    "nets": {
+      "description": "Net name -> members, exactly the `check --intent` format. For GENERATION every member must be a literal 'REF.PIN' with the pin addressed by NUMBER; wildcard members and bus-vector net names (NAME[a..b], group {..} notation) are refused with DESIGN_UNSUPPORTED.",
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1
+          },
+          {
+            "type": "object",
+            "required": ["members"],
+            "additionalProperties": false,
+            "properties": {
+              "members": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1
+              },
+              "mode": {"enum": ["exact", "subset"]}
+            }
+          }
+        ]
+      }
+    },
+    "components": {
+      "description": "REF -> component declaration. Required for every REF appearing in `nets`; a declared component no net references is still placed, with every pin no-connected.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["lib_id"],
+        "additionalProperties": false,
+        "properties": {
+          "lib_id": {
+            "type": "string",
+            "description": "Symbol to place (e.g. 'Device:R'); resolved through the same --symbols / config [paths] / lib-table chain as plan/draw."
+          },
+          "value": {"type": "string"},
+          "footprint": {"type": "string"},
+          "rotation": {"enum": [0, 90, 180, 270]},
+          "mirror": {
+            "description": "null is accepted as 'none'.",
+            "oneOf": [{"enum": ["none", "x", "y"]}, {"type": "null"}]
+          }
+        }
+      }
+    },
+    "layout": {
+      "description": "Optional grid-layout hints; every key has a sane default. The generator owns all geometry: components go into a uniform grid of cells sized to fit the largest body + pin field + estimated label text.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "description": "[x_mil, y_mil] top-left of the placement grid (default [1000, 1000]); snapped to the 50-mil writer grid. With `group` set it becomes the group origin and op coordinates are group-local.",
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "columns": {
+          "description": "Grid columns (default: ceil(sqrt(placement count)) for a roughly square block).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "margin_mil": {
+          "description": "Extra clearance added around every cell's content, in mils (default 100).",
+          "type": "number",
+          "minimum": 0
+        },
+        "group": {
+          "description": "Functional-group name: every emitted op carries this `group` tag and the op-list envelope declares the group with `origin` (see the ops schema).",
+          "type": "string",
+          "minLength": 1
+        },
+        "no_connect_unlisted": {
+          "description": "Emit an add_no_connect for every pin of a placed component that no net lists (default true).",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -89,10 +89,10 @@ def group_boxes(path: str | Path) -> dict[str, dict]:
 
 def group_report(path: str | Path) -> list[dict]:
     """Per-group summary rows for ``akcli groups`` (members, box, frame state)."""
-    from .writers.kicad import _root_uuid
+    from .writers.kicad import root_uuid as doc_root_uuid
 
     root = sexpr.parse(read_text_guarded(path))
-    root_uuid = _root_uuid(root)
+    root_uuid = doc_root_uuid(root)
     present: set[str] = set()
     for c in root.children or []:
         kids = c.children or []

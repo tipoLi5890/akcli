@@ -303,6 +303,59 @@ def _add_exit_policy_flags(parser: argparse.ArgumentParser) -> None:
                              "--fail-on never)")
 
 
+# --------------------------------------------------------------------------- #
+# gate aggregation — shared by `release preflight` and `gate` (both run a
+# fixed list of sub-checks, each producing "pass" / "fail" / "skipped").
+# --------------------------------------------------------------------------- #
+# A finding at or above WARNING is what turns a gate "fail" (the default
+# --fail-on threshold); NOTE/INFO stay visible but do not flip the status.
+_GATE_ACTIONABLE = {_report.Severity.WARNING, _report.Severity.ERROR,
+                    _report.Severity.CRITICAL}
+
+
+def _gate(name: str, findings: list) -> dict:
+    """One gate's result: ``pass``/``fail`` + its findings, JSON-shaped."""
+    worst = max((_report._SEV_RANK.get(f.severity, 0) for f in findings),
+                default=0)
+    return {
+        "gate": name,
+        "status": "fail" if any(f.severity in _GATE_ACTIONABLE for f in findings)
+                  else "pass",
+        "findings": [
+            {"code": f.code, "severity": f.severity.value, "message": f.message}
+            for f in findings
+        ],
+        "worst_rank": worst,
+    }
+
+
+def _skipped(name: str, reason: str) -> dict:
+    """A gate whose input was absent — explicit, never a silent pass."""
+    return {"gate": name, "status": "skipped", "reason": reason, "findings": []}
+
+
+def _gate_exit(gates: list[dict], args: argparse.Namespace) -> int:
+    """Worst-of exit across a gate list, honoring ``--fail-on``/``--exit-zero``.
+
+    Default (no flag): FINDINGS iff any gate's status is ``fail`` — the
+    ordinary "all pass or skipped" rule, because the default --fail-on
+    threshold (warning) is exactly what ``_gate`` used to compute "fail".
+    A non-default ``--fail-on`` re-thresholds against each gate's
+    ``worst_rank`` (present even on a "pass" gate that only carries
+    sub-warning findings), without changing the reported pass/fail text —
+    same split as ``_findings_exit``: findings are reported honestly,
+    ``--fail-on`` only tunes the exit code.
+    """
+    if getattr(args, "exit_zero", False):
+        return EXIT["OK"]
+    fail_on = getattr(args, "fail_on", None) or "warning"
+    if fail_on == "never":
+        return EXIT["OK"]
+    threshold = _report._SEV_RANK[_FAIL_ON_SEVERITY[fail_on]]
+    worst = max((g.get("worst_rank", 0) for g in gates), default=0)
+    return EXIT["FINDINGS"] if worst >= threshold else EXIT["OK"]
+
+
 def _dumps(obj) -> str:
     """The single JSON exit for every ``--json`` payload in the CLI.
 

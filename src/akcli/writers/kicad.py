@@ -66,7 +66,7 @@ from ..ops import PROTOCOL_VERSION, parse_mid_anchor, validate_oplist
 from ..readers import kicad_lib, sexpr
 from ..readers.sexpr import SNode
 from ..report import Severity
-from ..safety import MAX_FILE_BYTES
+from ..safety import MAX_FILE_BYTES, gui_lock_path
 from . import connectivity, geometry, instances, lib_cache
 
 __all__ = ["OpResult", "apply"]
@@ -242,7 +242,7 @@ def _doc_child_indent(doc: SNode) -> str:
 # --------------------------------------------------------------------------- #
 # document / instance lookups
 # --------------------------------------------------------------------------- #
-def _root_uuid(doc: SNode) -> str | None:
+def root_uuid(doc: SNode) -> str | None:
     node = doc.find("uuid")
     if node is not None and len(node.children or []) >= 2:
         return node.children[1].value
@@ -817,7 +817,7 @@ def _place_symbol(
     # and let phantom pin points mask real dangles in the verifier.
     pin_numbers = [p.number for p in kicad_lib.unit_pins(symdef, unit)]
 
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     # Symbol/pin uuids are seeded from the DESIGNATOR alone (op_index pinned
     # to 0): editing an op-list — inserting or reordering ops — must not
     # change the identity of untouched parts, or a re-apply duplicates the
@@ -928,7 +928,7 @@ def _op_set_component_parameters(doc, op, idx, src_libs, path, ctx) -> list[str]
 def _op_add_wire(doc, op, idx, src_libs, path, ctx, tag="wire") -> list[str]:
     verts = op["vertices"]
     pts = [_resolve_endpoint(doc, ctx, v) for v in verts]
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     return _emit_wire_segments(doc, root, idx, pts, tag, ctx)
 
 
@@ -1045,7 +1045,7 @@ def _op_route_net(doc, op, idx, src_libs, path, ctx) -> list[str]:
     if a == b:
         fail("VERIFY_FAILED", "route_net: from and to resolve to the same point")
     pts = _route_points(a, b, op.get("style", "auto"), _pin_tip_set(doc, ctx))
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     created = _emit_wire_segments(doc, root, idx, pts, "wire", ctx)
     if op.get("label"):
         (ax, ay), (bx, by) = max(
@@ -1065,7 +1065,7 @@ def _op_route_net(doc, op, idx, src_libs, path, ctx) -> list[str]:
 
 def _op_add_junction(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     uid = instances.deterministic_uuid(root, f"junction:{p[0]}:{p[1]}", 0)
     _claim_uid(ctx, uid, idx, f"junction at {_mil_pair(p)}",
                "one junction per point; drop the duplicate op")
@@ -1087,7 +1087,7 @@ def _op_add_no_connect(doc, op, idx, src_libs, path, ctx) -> list[str]:
         p = _resolve_pin_world(doc, ctx, ref, pin_number)
     else:
         p = _point_nm(ep)
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     seed = _anchor_seed(ep, p)
     uid = instances.deterministic_uuid(root, f"no_connect:{seed}", 0)
     _claim_uid(ctx, uid, idx, f"no_connect at {seed}",
@@ -1129,7 +1129,7 @@ def _op_add_net_label(doc, op, idx, src_libs, path, ctx) -> list[str]:
         orientation = 0 if axis == "x" else 90
     else:
         orientation = 0
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     return [_emit_net_label(doc, root, idx, str(op["name"]), p, orientation,
                             scope, ctx, _anchor_seed(at, p))]
 
@@ -1295,7 +1295,7 @@ def _op_add_bus_entry(doc, op, idx, src_libs, path, ctx) -> list[str]:
         size = (geometry.mil_to_nm(float(op["size"][0])), geometry.mil_to_nm(float(op["size"][1])))
     else:
         size = (_BUS_ENTRY_NM, _BUS_ENTRY_NM)
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     uid = instances.deterministic_uuid(root, f"bus_entry:{p[0]}:{p[1]}", 0)
     _claim_uid(ctx, uid, idx, f"bus_entry at {_mil_pair(p)}",
                "one bus entry per rip point; drop the duplicate op")
@@ -1313,7 +1313,7 @@ def _op_add_bus_entry(doc, op, idx, src_libs, path, ctx) -> list[str]:
 def _op_add_text(doc, op, idx, src_libs, path, ctx) -> list[str]:
     p = _point_nm(op["at"])
     angle = float(op.get("angle", 0))
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     uid = _annotation_uuid(root, "text", op, f"{p[0]}:{p[1]}", idx, ctx)
     node = _list(
         _atom("text"),
@@ -1370,7 +1370,7 @@ def _op_add_rectangle(doc, op, idx, src_libs, path, ctx) -> list[str]:
     a = _point_nm(op["start"])
     b = _point_nm(op["end"])
     width_nm = geometry.mil_to_nm(float(op.get("stroke_width_mil", 0) or 0))
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     uid = _annotation_uuid(root, "rectangle", op,
                            f"{a[0]}:{a[1]}:{b[0]}:{b[1]}", idx, ctx)
     node = _list(
@@ -1400,7 +1400,7 @@ def _op_add_text_box(doc, op, idx, src_libs, path, ctx) -> list[str]:
     size_nm = (geometry.mil_to_nm(float(size[0])),
                geometry.mil_to_nm(float(size[1])))
     angle = float(op.get("angle", 0))
-    root = _root_uuid(doc)
+    root = root_uuid(doc)
     uid = _annotation_uuid(root, "text_box", op, f"{p[0]}:{p[1]}", idx, ctx)
     node = _list(
         _atom("text_box"),
@@ -2041,9 +2041,8 @@ _HANDLERS = {
 # --------------------------------------------------------------------------- #
 # public entry point
 # --------------------------------------------------------------------------- #
-def gui_lock_path(path: Path) -> Path:
-    """KiCad's GUI lock-file for ``path`` (``~<name>.lck`` in the same dir)."""
-    return path.parent / f"~{path.name}.lck"
+# gui_lock_path is re-exported from safety (its single source of truth) for
+# the callers that have always imported it from here.
 
 
 def apply(

@@ -155,6 +155,24 @@ def test_cli_report_rerenders_all_formats(tmp_path, capsys):
     assert "REVIEW_DIVIDER_TAP_MISMATCH" in md and "heuristic" in md
 
 
+def test_cli_report_json_flag_emits_json(tmp_path, capsys):
+    """``--json`` is documented as accepted by every subcommand — ``review
+    report`` used to ignore it silently and always render text."""
+    tgt = _seed_review_sheet(tmp_path)
+    out = tmp_path / "r.json"
+    cli.main(["review", "analyze", str(tgt), "--out", str(out)])
+    capsys.readouterr()
+    assert cli.main(["review", "report", str(out), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)          # must parse as JSON
+    assert {f["code"] for f in doc["findings"]} == \
+           {"REVIEW_DIVIDER_TAP_MISMATCH", "REVIEW_RC_CUTOFF"}
+    # an explicit --format still wins over the --json default
+    assert cli.main(["review", "report", str(out), "--format", "text",
+                     "--json"]) == 0
+    text = capsys.readouterr().out
+    assert text.startswith("# metadata")
+
+
 def test_cli_explain_known_and_unknown(capsys):
     assert cli.main(["review", "explain", "REVIEW_RC_CUTOFF"]) == 0
     out = capsys.readouterr().out

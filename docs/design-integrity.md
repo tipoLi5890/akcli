@@ -10,9 +10,10 @@ The common thread: **fail loudly, plan before writing, and keep policy in
 versioned files with evidence** — never in hardcoded constants.
 
 Not to be confused with `akcli check --integrity`, which is the *document*
-integrity family (the write gate's dangling-endpoint / duplicate-uuid /
-duplicate-designator / instances-path checks run read-only); see
-[docs/cli-reference.md](cli-reference.md).
+integrity family (the write gate's nine document checks — dangling
+endpoint/bus entry, duplicate uuid/designator, unresolved lib_id, instances
+path, stacked power port, missing sheet file, no-connect conflict — run
+read-only); see [docs/cli-reference.md](cli-reference.md).
 
 ## Reading footprint libraries
 
@@ -31,6 +32,41 @@ akcli read board.kicad_sch --strict
   and `object_counts`; a non-empty source that normalizes to nothing raises
   an `EMPTY_IMPORT` warning, and `--strict` turns that into exit 1.
 
+## Authoring a symbol from a pin table (and linting one you were given)
+
+```bash
+akcli library new-symbol pins.json -o MyLib.kicad_sym --apply
+akcli library lint-symbols MyLib.kicad_sym
+```
+
+Hand-writing a wide IC symbol is where symbol libraries acquire their one
+undetectable defect: two pins on the same connection point. KiCad treats that
+point as a node, so every placement of the part joins those pins into one net —
+and ERC reports nothing, because the *symbol* is what told it they are the same
+node. A pin table, by contrast, is the part of a datasheet that transcribes
+reliably. `new-symbol` splits the job along exactly that line: you declare
+number, name, electrical type and body side per pin, and akcli computes every
+coordinate (100-mil grid, group-then-order placement, body sized from the pin
+counts and name widths, deterministic bytes). Both `side` and `type` are
+required — a guessed side is a wrong pin position, and a defaulted
+`unspecified` type is a pin KiCad's ERC exempts from every conflict rule.
+
+The one sanctioned same-coordinate case is an explicit `stack_with` (same side,
+same name, same type — KiCad's stacked-pin convention). Anything else is
+refused, and the refusal is a **write gate**, not a warning: a
+`SYMLIB_PIN_COINCIDENT` in the generated output exits 6 (`VERIFY_FAILED`) with
+nothing written. That is a deliberate exception to the "geometry findings are
+advisory" rule elsewhere in akcli, because this particular geometry *is*
+connectivity.
+
+`lint-symbols` runs the same checks over libraries akcli did not write —
+imported, vendor-converted or hand-authored — plus the two hygiene rules that
+travel with them: `SYMLIB_PIN_TYPE_UNSPECIFIED` (untyped pins, the ERC-noise
+source in converted symbols) and `SYMLIB_PIN_OFF_GRID` (a pin no grid-drawn
+wire can reach). Multi-unit symbols are evaluated per unit, so a quad gate
+drawn on one body never produces a false positive. Full flag reference and the
+finding-code table: [cli-reference.md](cli-reference.md).
+
 ## Importing an Altium PcbLib into a KiCad library
 
 ```bash
@@ -39,7 +75,10 @@ akcli library import-altium part.PcbLib --out vendor.pretty --courtyard 0.25 --a
 ```
 
 Pads are carried over verbatim (positions, sizes, drills — never recomputed);
-pad geometry is cross-validated in CI against KiCad's own Altium importer.
+the pad-record offsets they rely on were cross-validated item-by-item against
+KiCad's own Altium importer on real boards during development. That corpus is
+not in the repo, so CI re-checks the record framing against synthetic
+fixtures instead.
 Transformations are **declared**, not silent: filesystem-safe renames and the
 optional synthesized courtyard are reported and recorded, together with the
 source file's SHA-256 and the converter version, in the output directory's
@@ -64,10 +103,19 @@ others:
 | `LIB_URI_UNRESOLVED` / `LIB_PATH_MISSING` | a table URI uses an unresolvable `${VAR}` / points at nothing |
 | `MODEL_MISSING` / `MODEL_NOT_PORTABLE` | a 3D model path does not resolve / is absolute (usable here, breaks elsewhere) |
 | `FOOTPRINT_LEGACY_FORMAT` | a pre-v6 `(module …)` file: parseable via API but invisible to the KiCad GUI browser |
+| `SYMBOL_LIB_UNREGISTERED` | a symbol's `lib_id` nickname is in neither the project nor the global sym-lib-table — the embedded copy still renders, but re-linking will fail |
+| `SYMBOL_MISSING` | nickname resolves to a project library, but that symbol is not in it |
+| `FOOTPRINT_FIELD_MALFORMED` | a Footprint field with no library nickname (`SOT-23` instead of `lib:SOT-23`) |
+| `MODEL_UNRESOLVED` | a 3D model path uses a `${VAR}` that does not resolve here |
+| `LIB_TABLE_MISSING` / `LIB_UNREADABLE` / `SCH_UNREADABLE` | no `sym-lib-table`/`fp-lib-table` at all (note), or a registered library / schematic whose bytes cannot be read (error) |
 
-Only the **project** tables are consulted (the global table belongs to the
-user's KiCad config), so a globally-registered library reads as a NOTE, not a
-false error.
+The global table is consulted when it can be read, but only the **project**
+tables are treated as the project's own commitment. A nickname that resolves
+in the global table produces no finding at all. If the global table cannot be
+read, the finding is downgraded and says so — NOTE for a symbol nickname,
+WARNING for a footprint nickname — instead of a false error. A nickname in
+neither table is a WARNING (symbol) or an ERROR (footprint: KiCad will not
+find the package).
 
 `repair` productizes the two historically hand-`sed`-ed fixes as reviewable
 plans (lossless S-expression rewrite, dry-run by default, `--apply` leaves a
@@ -93,12 +141,18 @@ akcli verify board.kicad_sch board.kicad_pcb
 akcli verify board.kicad_sch board.kicad_pcb --strict --json
 ```
 
-Compares refdes presence, footprint/value assignment, and the **pad-level net
+Compares refdes presence, footprint assignment, and the **pad-level net
 partition** — net names are untrusted (auto-named nets differ legitimately);
 what must hold is that pins joined on the schematic are joined on the board
-and vice versa. Findings are located to the designator/pad:
-`SCHPCB_NET_SPLIT`, `SCHPCB_NET_MERGE`, `SCHPCB_PAD_MISSING`,
-`SCHPCB_FOOTPRINT_MISMATCH`. `#PWR`/`#FLG` pseudo-components are excluded.
+and vice versa. Findings are located to the designator/pad.
+Errors: `SCHPCB_MISSING_ON_PCB`, `SCHPCB_FOOTPRINT_MISMATCH`,
+`SCHPCB_PAD_MISSING`, `SCHPCB_NET_SPLIT`, `SCHPCB_NET_MERGE`.
+Warnings: `SCHPCB_EXTRA_ON_PCB`, `SCHPCB_VALUE_MISMATCH` (reported only under
+`--strict` — a value edited on one side alone is routine; the `release
+preflight` sch-pcb gate does act on it),
+`SCHPCB_UNNETTED_PAD`, `SCHPCB_NO_PAD_DATA` (the board carried no pad-net
+data, so the partition could not be compared — never a silent pass).
+`#PWR`/`#FLG` pseudo-components are excluded.
 
 ## Design contracts
 
@@ -116,7 +170,7 @@ protocol_version = 1
 id = "reg-feedback-node"
 evidence = ["ACME-REG datasheet, Table 7"]
 require = [ { pin = "U1.FB2", net = "VFB2" } ]
-forbid  = [ { pin = "U1.FB1", net = "V3V3" } ]
+forbid  = [ { pin = "U1.FB1", net = "RAIL_A" } ]
 
 [[contract]]
 id = "usb-c-flip-pair"
@@ -133,9 +187,10 @@ expires = "2027-01-01"
 
 Pin specs `REF.PIN` match the pin number first, then the pin name, so rules
 read like the datasheet. The report keeps three outcomes distinct: PASS
-(`CONTRACT_PASS`, info), FAIL (at the rule's severity), and
-SKIPPED-BY-EXCEPTION (`CONTRACT_WAIVED`, note). An expired exception raises
-`CONTRACT_EXCEPTION_EXPIRED` instead of silently passing. Intent snapshots
+(`CONTRACT_PASS`, info), FAIL (`CONTRACT_FAIL`, at the rule's `severity`,
+default error), and SKIPPED-BY-EXCEPTION (`CONTRACT_WAIVED`, note). An
+expired exception raises `CONTRACT_EXCEPTION_EXPIRED` (warning) instead of
+silently passing. Intent snapshots
 (`check --intent`) keep doing net-membership regression; contracts express
 policy — the two compose.
 
@@ -148,14 +203,21 @@ akcli fab explain FAB_VIA_IN_PAD --profile jlc-4l-1oz.toml
 ```
 
 A profile is one vendor capability **revision** with its sources
-(`[source] urls` + `retrieved_at` are mandatory — see
+(`[source] urls` is mandatory — a profile with no evidence link is rejected
+as `BAD_CONFIG`; `retrieved_at` is not enforced but is what dates the
+revision, and a profile that omits it renders its retrieval date as `?` in
+every report — see
 `examples/fab/jlc-4l-1oz.toml`). Severity policy:
 
 - direct violations (paid small-via geometry, tented drill over the cap,
   via-in-pad, blind/buried vias, stackup drift) are **errors**;
 - cost-threshold crossings (board size/area, drill density, fine multilayer
   traces) are **warnings** with the actual value vs the threshold;
-- boundary-exact geometry passes with a **note** ("minimum margin");
+- boundary-exact geometry passes with a **note** ("minimum margin"); a via
+  annular ring below the profile's *preferred* width but above its minimum is
+  likewise a **note** (`FAB_VIA_ANNULAR_BELOW_PREFERRED`), and a profile
+  source akcli cannot parse is a **warning** (`FAB_UNSUPPORTED_SOURCE`),
+  never a silent skip;
 - a registered `thermal_via` exception passes as an explicit note — and an
   expired one is an error;
 - missing evidence (no Edge.Cuts outline) is itself a warning: the check
@@ -174,13 +236,18 @@ akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --contract b
 ```
 
 Runs every applicable gate — schematic checks, intent, contracts, library
-audit, sch↔PCB equivalence, fab policy, order manifest, git cleanliness, and
-(with `--sim <sim.json>`) quantitative SPICE assertions — and
+audit, sch↔PCB equivalence, fab policy, order manifest, (with
+`--sim <sim.json>`) quantitative SPICE assertions, (with
+`--review-policy <policy.toml>`) the calibrated review allowlist, (with
+`--gerbers <dir>`) fab-package completeness, and git cleanliness — and
 writes a manifest binding input SHA-256s, the akcli version, the git revision
 (and, with `--allow-dirty`, the recorded fact of dirtiness) and each gate's
 findings. Gates without inputs are **skipped with a reason**, never silently
 green — except that a *requested* `--sim` gate that cannot run (no libngspice,
-deck build failure) FAILS rather than skips. Exit 0 only when every gate passed.
+deck build failure) FAILS rather than skips. Exit 0 when every gate is `pass`
+**or** `skipped`; any single `fail` exits 1. A skipped gate is therefore not a
+blocker — it is a recorded absence of evidence, which is why the reason is
+written into the manifest.
 
 ## Writer safety: the GUI-open guard
 

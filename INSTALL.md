@@ -63,7 +63,7 @@ pip install git+https://github.com/tipoLi5890/akcli
 ## Use with AI coding agents
 
 `akcli` is a plain CLI, so any agent that can run shell commands drives it once it's on PATH (install it
-with one of the options above). The repo also ships **twelve skills** under `skills/` that teach the agent
+with one of the options above). The repo also ships **12 skills** under `skills/` that teach the agent
 how to drive `akcli`, including `akcli-circuit-design` (read/analyze/draw basics), `akcli-circuit-debug` (connectivity & tool
 triage), `akcli-schematic-review` (severity-ranked design review), `akcli-schematic-authoring` (new circuits from an
 op-list), `akcli-altium-interop` (working with Altium Designer), `akcli-parts-sourcing` (JLC/LCSC parts),
@@ -74,20 +74,21 @@ config. Run the `cp` commands below from a clone of this repo.
 
 ### Claude Code
 
-Install the plugin — it bundles all twelve skills and the slash commands:
+Install the plugin — it bundles all 12 skills and the slash commands:
 
 ```text
 /plugin marketplace add tipoLi5890/akcli
 /plugin install akcli@akcli
 ```
 
-You get the twelve skills and `/akcli:circuit-review`, `circuit-pinmap`,
-`circuit-draw`, `circuit-diff`, and `circuit-parts`, all calling `akcli`.
+You get the 12 skills and `/akcli:circuit-review`, `circuit-pinmap`,
+`circuit-draw`, `circuit-diff`, `circuit-parts`, `circuit-sim`,
+`circuit-datasheet`, and `circuit-release`, all calling `akcli`.
 
 ### Codex
 
 `akcli` runs through Codex's built-in shell once it's on PATH. Install it as a **Codex plugin** —
-it bundles all twelve skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
+it bundles all 12 skills and the session hook (see [docs/codex-plugin.md](docs/codex-plugin.md)):
 
 ```bash
 codex plugin marketplace add tipoLi5890/akcli   # or `add ./` from a clone
@@ -171,8 +172,8 @@ twine check dist/*
 
 - **`kicad-cli` (KiCad 8.x):** enables an *optional secondary* ERC/netlist cross-check. `akcli` detects
   it via `PATH`; if it is absent, the pure-Python connectivity verifier is used and nothing breaks.
-- **Altium Designer 22+ on Windows:** required only for the optional *live* write/draw driver. Offline,
-  Altium files are read-only and need no Altium install.
+- **Altium Designer: never required.** Altium `.SchDoc`/`.SchLib`/`.PcbDoc`/`.PcbLib` files are a
+  read-only import surface parsed offline; there is no live write/draw driver.
 
 ## Verify your install
 
@@ -182,7 +183,8 @@ akcli doctor             # full environment report with a remediation hint per m
 ```
 
 `akcli doctor` probes Python, the install itself, packaged schemas, `kicad-cli`,
-libngspice (for `akcli sim`) and config discovery — each the same way the
+libngspice (for `akcli sim`), config discovery, standard-symbol-library
+resolution, and workspace state — each the same way the
 features themselves discover them — and `--require kicad-cli,ngspice` turns it
 into a CI gate (exit 1 when a named capability is missing). Only Python is a
 hard requirement; everything else degrades gracefully. The bundled

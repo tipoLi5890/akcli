@@ -54,11 +54,16 @@ sourcing loop.
 akcli jlc search NE555                     # keyword search (default 20 results)
 akcli jlc search NE555 --limit 5
 akcli jlc search "0603 100nF" --json       # machine-readable part objects
+akcli jlc search "0402 47K" --category Resistors   # drop NTC thermistors etc.
 akcli jlc show C7593                       # one part by LCSC C-number (bare 7593 also works)
 akcli jlc show C2040 --easyeda             # + 3D/STEP availability, EasyEDA manufacturer/MPN/package
 ```
 
-The query matches MPN, category, and C-number. Text output is a table
+The query matches MPN, category, and C-number. **Read the category column
+before picking a part**: a value/package query (`0402 47K`) mixes NTC
+thermistors (`Sensors`) in with chip resistors — pass
+`--category Resistors` (case-insensitive exact match, client-side filter)
+when the query is by value/package. Text output is a table
 (`LCSC  MPN  PACKAGE  STOCK  PRICE  B  DESCRIPTION`) where the `B` column is `B` for a JLCPCB
 **Basic** part, `P` for **Preferred**, `-` otherwise. `--json` part fields: `lcsc`, `mpn`,
 `package`, `stock`, `price` (lowest-`qFrom` tier as a float, or `null`), `basic`, `datasheet`,
@@ -129,6 +134,26 @@ akcli component board.kicad_sch U1             # confirm the placed part's pin -
   3D. Fix any `FOOTPRINT_LIB_UNREGISTERED`/`MODEL_MISSING` finding with
   `akcli library repair <project> --rename-footprint-lib OLD=NEW --3d-path absolute --apply`
   (leaves a `.bak`, then re-audits) instead of manual `sed`.
+- **No catalog symbol? Author one from the datasheet's pin table — never by hand-writing
+  S-expressions.** Transcribing a pin table is the part you do reliably; laying out coordinates is
+  not, and that failure is silent: two pins on one connection point make KiCad join them into a
+  single node in every placement, with no ERC violation to find (the symbol is what told ERC they
+  are the same node). Write a `schemas/symbol-pins.schema.json` document — one object per pin with
+  `number`, `name`, `type` (a KiCad electrical type) and `side` (`left`/`right`/`top`/`bottom`),
+  optionally `group` to keep related pins together — and let akcli place it:
+
+  ```bash
+  akcli library new-symbol pins.json
+  akcli library new-symbol pins.json -o MyLib.kicad_sym --apply
+  akcli library lint-symbols MyLib.kicad_sym
+  ```
+
+  `side` and `type` are required and never guessed. The generator refuses (exit 6, nothing written)
+  if its own output would put two differing pins on one point; `stack_with` is the only sanctioned
+  way to share a coordinate, and it requires the same name and type. Run `lint-symbols` over any
+  imported or vendor-converted `.kicad_sym` too — `SYMLIB_PIN_TYPE_UNSPECIFIED` is where converted
+  symbols turn KiCad's ERC pin-conflict matrix into a rubber stamp. Multi-unit symbols are not
+  supported yet; the refusal says so explicitly.
 
 ### (4) Datasheets — resolve, fetch, read, verify
 

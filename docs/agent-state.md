@@ -12,25 +12,33 @@ state lives and how a new session picks it up.
 |---|---|---|
 | **The design itself** | `*.kicad_sch` | KiCad / the draw pipeline |
 | **What happened** (edit history) | `.akcli/journal.jsonl` | every write command |
-| **Undo snapshots** | `.akcli/backups/<name>.bak…bakN` | `draw/arrange/undo --apply` |
+| **Undo snapshots** | `.akcli/backups/<name>.bak…bakN` | every `--apply`/`--write` schematic edit (`draw`, `arrange`, `groups --frame`, `relink-symbols`, `jlc bom --fix`, `sim fit-diode`); `undo` swaps within the stack rather than growing it |
 | **Policy & decisions** (grid, rails, waivers + reasons) | `akcli.toml` | you, in git |
 | **Designer intent** (asserted netlist) | intent JSON (`nets --intent-snapshot`) | you, in git |
 | **Audited component facts** | `datasheets/extracted/<MPN>.json` | `review facts add` |
 
 The schematic file is the **single source of truth**: deterministic UUIDs and
 byte-identical re-apply mean re-reading it is always a reliable way to recover
-state. Everything in `.akcli/` is *derived* convenience (history, snapshots) —
-safe to add to `.gitignore`; `akcli.toml`, intent files, and `datasheets/`
-are design decisions and belong in git.
+state. Everything in `.akcli/` is *derived* convenience (history, snapshots)
+and **self-ignoring**: whichever command creates the directory drops a
+`.gitignore` containing `*` inside it, so your own `.gitignore` never needs an
+entry and `git status` stays clean without akcli touching a user file.
+`akcli.toml`, intent files, and `datasheets/` are design decisions and belong
+in git.
 
 ## The `.akcli/` directory
 
 One per workspace (the directory holding the edited file):
 
-- `journal.jsonl` — append-only JSONL write journal. Every `plan`/`draw`/
-  `arrange`/`undo`/`relink-symbols`/`jlc bom --fix` invocation appends one
-  entry: timestamp, command, target, status (`dry-run`/`applied`/`refused`),
-  op-list sha256, op count, net-diff verdict, backup name. Size-capped with
+- `journal.jsonl` — append-only JSONL write journal. Every write that reaches
+  the file appends one entry: timestamp, command, target, status
+  (`dry-run`/`applied`/`refused`), op-list sha256, op count, net-diff verdict,
+  backup name. `plan` and `draw` also journal their dry runs; `arrange`,
+  `undo`, `groups --frame`, `relink-symbols` and `jlc bom --fix` journal only
+  when they apply. The `cmd` field is the journal's own name for the
+  operation, which is what `akcli log --cmd NAME` filters on: `plan`, `draw`,
+  `arrange`, `arrange-groups`, `groups-frame`, `undo`, `relink-symbols`,
+  `jlc-bom-fix`. Size-capped with
   one rotation; corrupt lines are skipped; journaling never fails the parent
   command. Query with `akcli log`.
 - `backups/` — the rotated undo stack (`<name>.bak` newest … `.bakN`, depth
@@ -41,11 +49,15 @@ One per workspace (the directory holding the edited file):
 ## Design intent in the journal
 
 Sessions do not identify themselves — the design is the shared object, not
-the editors. What a later session needs is *why* an edit was made, so write
-commands accept `--note TEXT`, recorded next to the mechanical facts:
+the editors. What a later session needs is *why* an edit was made, so the
+main write commands accept `--note TEXT`, recorded next to the mechanical
+facts. `plan`, `draw`, `arrange` and `undo` take it today; the other
+journaling writers (`relink-symbols`, `jlc bom --fix`, `groups --frame`)
+record the mechanical facts only, so put the *why* for those into a commit
+message or a waiver reason instead:
 
 ```
-akcli draw board.kicad_sch --ops decoupling.json --apply --note "add 100n per rail pin (review finding PWR_NO_DECOUPLING)"
+akcli draw board.kicad_sch --ops decoupling.json --apply --note "add 100n per rail pin (check --power finding POWER_NO_DECOUPLING)"
 akcli log .
 ```
 

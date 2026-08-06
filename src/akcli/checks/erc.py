@@ -80,6 +80,7 @@ ERC_NET_ALIAS = "ERC_NET_ALIAS"                # one net carries multiple names
 ERC_UNPLACED_UNIT = "ERC_UNPLACED_UNIT"        # multi-unit part with units never placed
 ERC_PIN_CONFLICT = "ERC_PIN_CONFLICT"          # pin-type matrix conflict on one net
 ERC_POWER_IN_UNDRIVEN = "ERC_POWER_IN_UNDRIVEN"  # POWER_IN on a non-rail, driverless net
+NC_PIN_CONNECTED = "NC_PIN_CONNECTED"          # no-connect marker on a connected pin
 
 # Waiver ``rule`` token -> finding code (config ``[[erc_waiver]].rule``).
 _RULE_TO_CODE: dict[str, str] = {
@@ -92,6 +93,7 @@ _RULE_TO_CODE: dict[str, str] = {
     "unplaced_unit": ERC_UNPLACED_UNIT,
     "pin_conflict": ERC_PIN_CONFLICT,
     "power_in_undriven": ERC_POWER_IN_UNDRIVEN,
+    "nc_pin_connected": NC_PIN_CONNECTED,
 }
 
 # --- rail-name heuristics (net-NAME based) ------------------------------------
@@ -373,6 +375,36 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
                         f"single-pin net {label}: {ref_str} is the only connection "
                         "(likely dangling / unrouted)",
                         refs=[ref_str],
+                        pos=pos,
+                        anchors=[anchor("pin", ref_str, pos), anchor("net", label)],
+                    )
+                )
+
+        # (b2) no-connect marker on a pin that IS connected (robust; not
+        #     type-gated). netbuild never lets a no-connect marker contribute
+        #     net membership, so a marked pin sitting on a >=2-member net is
+        #     real wire/label connectivity — the marker and the wiring
+        #     contradict each other (KiCad's native ERC flags the same
+        #     conflict). High-frequency agent-flow accident: an op-list edit
+        #     wires up a pin still carrying a stale marker from an earlier
+        #     revision.
+        if len(net.members) >= 2:
+            for ref, pin in member_pins:
+                if pin is None or not _no_erc_suppressed(pin):
+                    continue
+                ref_str = f"{ref[0]}.{ref[1]}"
+                if waivers.waives(NC_PIN_CONNECTED, norm_names | {_norm(ref[0])}):
+                    continue
+                pos = (pin.x_mil, pin.y_mil)
+                findings.append(
+                    Finding(
+                        NC_PIN_CONNECTED,
+                        Severity.WARNING,
+                        f"{ref_str} carries a no-connect marker but is a member "
+                        f"of net {label} ({len(net.members)} pins) — the marker "
+                        "and the wire/label contradict each other; delete the "
+                        "stale marker or disconnect the pin",
+                        refs=[ref_str, label],
                         pos=pos,
                         anchors=[anchor("pin", ref_str, pos), anchor("net", label)],
                     )

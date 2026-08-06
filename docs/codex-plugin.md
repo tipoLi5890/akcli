@@ -1,7 +1,7 @@
 # Codex plugin (`.codex-plugin/`)
 
 This repo ships as an **OpenAI Codex plugin** in addition to a Claude Code plugin. A Codex
-plugin bundles the twelve `akcli` skills (and the Python-version session hook) so Codex can
+plugin bundles the 12 `akcli` skills (and the Python-version session hook) so Codex can
 discover, install, and load them as one unit — no manual copying of skill folders.
 
 Spec reference: <https://developers.openai.com/codex/plugins/build>
@@ -65,7 +65,7 @@ optional metadata; removing it does not change behavior.
 
 ## Skills ⇄ Claude slash commands
 
-Claude Code exposes eight slash commands (`/circuit-review`, `/circuit-diff`,
+Claude Code exposes 8 slash commands (`/circuit-review`, `/circuit-diff`,
 `/circuit-pinmap`, `/circuit-draw`, `/circuit-parts`, `/circuit-sim`, `/circuit-datasheet`,
 `/circuit-release`) from `commands/`. Codex plugins have no separate
 `commands` concept — **skills are the callable units**. The same workflows are covered by the

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from .. import classify
 from ..calc.registry import CalcError
 from ..calc.si import parse_value as _si_parse_value
-from ..checks.power import _net_candidate_names
+from ..checks.power import net_candidate_names
 from ..model import Component, Net, Schematic
 from . import tables
 
@@ -165,15 +165,15 @@ def parse_value(text: str | None) -> float | None:
 # net semantics (delegated to ..classify — single source of truth)
 # --------------------------------------------------------------------------- #
 def net_is_ground(net: Net) -> bool:
-    return any(_is_ground(n) for n in _net_candidate_names(net))
+    return any(_is_ground(n) for n in net_candidate_names(net))
 
 
 def net_is_power(net: Net) -> bool:
-    return any(_is_power(n) for n in _net_candidate_names(net))
+    return any(_is_power(n) for n in net_candidate_names(net))
 
 
 def net_implied_voltage(net: Net) -> float | None:
-    for name in _net_candidate_names(net):
+    for name in net_candidate_names(net):
         v = classify.implied_voltage(name)
         if v is not None:
             return v

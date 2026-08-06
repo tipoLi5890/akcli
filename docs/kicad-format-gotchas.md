@@ -74,8 +74,11 @@ them.
 ### `move_component` with `carry_labels` / `carry_wires`
 
 By default `move_component` moves the body and its property fields but leaves
-labels and wires where they were — the connectivity gate then flags anything the
-move stranded, so the edit stays loud. Two optional booleans promote it to a
+labels and wires where they were. A wire endpoint the move stranded trips the
+connectivity gate (`DANGLING_ENDPOINT`, ERROR) and the write is refused; a
+stranded *label* is invisible to that gate — what makes it loud is `draw`'s
+plan-time net diff, printed by default but advisory unless `--strict-nets`.
+Two optional booleans promote it to a
 **rigid-body** relocation that takes connectivity along:
 
 ```json
@@ -85,6 +88,8 @@ move stranded, so the edit stays loud. Two optional booleans promote it to a
 
 - `carry_labels` — every net label anchored on one of the part's pin tips is
   shifted by the **same** delta, so each pin keeps the label that names its net.
+  One exception: on a tip shared with a *stationary* part's pin, one label per
+  foreign pin is left behind, so the part that stays keeps its net name.
 - `carry_wires` — a wire endpoint on a moved pin follows it; an endpoint on
   another part's pin stays put, so the segment stretches and both nets stay
   connected.
@@ -93,7 +98,10 @@ move stranded, so the edit stays loud. Two optional booleans promote it to a
 cross-part wires — akcli's canonical style), a rigid translation *cannot* change
 the netlist: every pin travels with the label that names it. `carry_labels`
 makes that guarantee real for a single move; the connectivity verify still runs
-after every apply and REFUSES to write on any net change.
+after every apply and refuses the write on any connectivity ERROR (dangling
+endpoint, duplicate uuid/designator, stacked power ports). It does not compare
+netlists: for that, `draw --strict-nets` refuses when a split/merge touches a
+named net, and `arrange --groups` refuses on any net change at all.
 
 ### `arrange --groups` — functional-block re-layout
 
@@ -141,14 +149,45 @@ Use it before any external edit: `akcli library check-lock . && ./relayout.sh`.
 
 ---
 
+## Rotating/mirroring a symbol in the GUI can silently reassign a label
+
+A net label anchored **on a pin tip** stays at its coordinate when the symbol
+under it is rotated or mirrored in eeschema — but the pins move. On a part
+with symmetric pin geometry (any 2-pin passive rotated 180°, many
+connectors), each pin lands exactly where the other was: both labels still
+sit on pin tips, nothing looks wrong, ERC is clean — and the two nets have
+silently swapped pins. This is a **state-comparison** failure mode; no
+single-file lint can distinguish "always meant this pin" from "meant the
+other one before the rotate" (a rotated symbol with a label on a pin is the
+normal case, not a suspicious one). Catch it by comparing against a known
+baseline after every GUI edit session, before trusting the netlist:
+
+```
+akcli diff before.kicad_sch after.kicad_sch    # e.g. before = git show HEAD:...
+akcli verify board.kicad_sch board.kicad_pcb   # sch<->pcb net partition
+akcli check board.kicad_sch --intent intent.json   # against a captured snapshot
+```
+
+`akcli diff` matches nets by membership, so the swap surfaces as
+`DIFF_NET_MEMBERSHIP` changes (on the smallest 2-pin nets it may present as
+one removed + one added net near the Jaccard threshold — every affected pin
+is still listed). The intent flow (`akcli nets board.kicad_sch
+--intent-snapshot` -> `check --intent`) names the exact missing/extra member
+per net, but only if the snapshot was captured before the edit.
+
+---
+
 ## 3D model path policy — pick per situation
 
-`library repair --3d-path` rewrites 3D model references; each strategy trades
-off differently (all three were hit in practice):
+`library repair --3d-path` rewrites **bare-relative** 3D model references (a
+value that already starts with `${VAR}` or is absolute is left alone, so
+switching an already-policy-managed library from one strategy to another is a
+no-op); `--3d-path` accepts `absolute` or a `${VAR}`-style prefix. Each
+strategy trades off differently (all three were hit in practice):
 
 | strategy | resolves when | caveat |
 |---|---|---|
-| `relative` / `${KIPRJMOD}` | PCB opened inside its project | footprint **viewer is always blank** |
+| `${KIPRJMOD}` prefix | PCB opened inside its project | footprint **viewer is always blank** |
 | custom env var (`${MY_3D}`) | wherever the var is set | **KiCad clears the var** in `kicad_common.json` on exit if it was running |
 | `absolute` | any context | machine-bound; moving the repo needs a rewrite |
 

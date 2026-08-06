@@ -41,6 +41,7 @@ from .commands import doc as _doc_cmd
 from .commands import doctor as _doctor_cmd
 from .commands import drawing as _drawing_cmd
 from .commands import fab as _fab_cmd
+from .commands import gate as _gate_cmd
 from .commands import jlc as _jlc_cmd
 from .commands import library as _library_cmd
 from .commands import log as _log_cmd
@@ -157,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     _library_cmd.register(sub, common)
     _fab_cmd.register(sub, common)
     _release_cmd.register(sub, common)
+    _gate_cmd.register(sub, common)
     _doctor_cmd.register(sub, common)
     _sim_cmd.register(sub, common)
     _capabilities_cmd.register(sub, common)

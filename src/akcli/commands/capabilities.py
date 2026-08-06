@@ -228,7 +228,7 @@ def build_manifest() -> dict:
                               "schema_version or a family version field "
                               "(protocol_version, journal_version); the "
                               "documented exceptions are array payloads "
-                              "(net, jlc search, calc batch) and name-keyed "
+                              "(jlc search, calc batch) and name-keyed "
                               "tables (calc list, expected)",
             "json_errors": "with --json, a failing command that would "
                            "otherwise leave stdout empty emits "

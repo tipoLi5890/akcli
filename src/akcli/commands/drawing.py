@@ -264,9 +264,9 @@ def _redundant_wire_deletes(target, sch, ref_group: dict, labeled: set) -> list:
         xy = pts.find_all("xy")
         if len(xy) < 2:
             continue
-        from ..checks.layout import _mil
-        p0 = (_mil(xy[0], 1), _mil(xy[0], 2))
-        p1 = (_mil(xy[-1], 1), _mil(xy[-1], 2))
+        from ..checks.layout import child_mil
+        p0 = (child_mil(xy[0], 1), child_mil(xy[0], 2))
+        p1 = (child_mil(xy[-1], 1), child_mil(xy[-1], 2))
         segs.append((str(un.children[1].value), p0, p1))
 
     # union-find over segments: shared endpoints AND endpoint-on-segment tees
@@ -310,8 +310,8 @@ def _redundant_wire_deletes(target, sch, ref_group: dict, labeled: set) -> list:
         at, un = jn.find("at"), jn.find("uuid")
         if at is None or un is None or len(un.children or []) < 2:
             continue
-        from ..checks.layout import _mil
-        junctions.append((str(un.children[1].value), key(_mil(at, 1), _mil(at, 2))))
+        from ..checks.layout import child_mil
+        junctions.append((str(un.children[1].value), key(child_mil(at, 1), child_mil(at, 2))))
 
     deletes: list = []
     deleted_idx: set = set()
@@ -852,10 +852,12 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
 
 def _cmd_ops(args: argparse.Namespace) -> int:
-    """`ops list` / `ops template <op>` — the op-list authoring kit."""
+    """`ops list` / `ops template <op>` / `ops from-intent` — the authoring kit."""
     from .. import ops as opsmod
 
     action = getattr(args, "action", None)
+    if action == "from-intent":
+        return _cmd_ops_from_intent(args)
     if action == "list":
         try:
             caps = opsmod.load_capabilities()["ops"]  # packaged mirror + repo fallback
@@ -951,8 +953,53 @@ def _cmd_ops(args: argparse.Namespace) -> int:
                     _emit(f"ERROR: {idx}{e['code']}: {e['message']}")
         return EXIT["OK"] if valid else EXIT["OPLIST"]
     raise _ExitWith(EXIT["USAGE"],
-                    "ERROR: use `akcli ops list`, `akcli ops template <op>` "
-                    "or `akcli ops validate <oplist.json>`")
+                    "ERROR: use `akcli ops list`, `akcli ops template <op>`, "
+                    "`akcli ops validate <oplist.json>` or "
+                    "`akcli ops from-intent <design.json>`")
+
+
+def _cmd_ops_from_intent(args: argparse.Namespace) -> int:
+    """`ops from-intent <design.json>` — design document -> complete op-list.
+
+    The design doc is the ``check --intent`` nets table plus ``components``
+    (+ optional ``layout``); the generator owns all geometry and emits only
+    the existing op vocabulary (``place_component`` + label-on-pin
+    ``add_net_label`` + ``add_no_connect``), so the output flows through the
+    ordinary ``plan``/``draw`` pipeline — and the SAME design file is the
+    ``check --intent`` assertion baseline for the drawn sheet. Symbol
+    resolution uses the exact ``plan``/``draw`` chain (``--symbols`` >
+    config ``[paths]`` > lib-table fallback for the needed lib_ids).
+    """
+    design_path = getattr(args, "design", None)
+    if not design_path:
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: ops from-intent needs a design JSON file "
+                        "(see schemas/design-intent.schema.json)")
+    from .. import intentgen
+    from ..writers.lib_cache import _coerce_sources
+
+    design = intentgen.load_design(design_path)   # AkcliError -> cli.main
+    cfg = _load_cfg(args, None)
+    lib_ids = sorted({c.lib_id for c in design.components.values()})
+    sources = _draw_symbol_sources(
+        args, cfg, lib_ids=lib_ids,
+        project_dir=Path(design_path).resolve().parent)
+    oplist = intentgen.generate(design, _coerce_sources(sources))
+    summary = (f"from-intent: {len(design.components)} component(s), "
+               f"{len(design.nets)} net(s) -> {len(oplist['ops'])} op(s)")
+    out = getattr(args, "out", None)
+    if out:
+        Path(out).write_text(_dumps(oplist) + "\n", encoding="utf-8",
+                             newline="\n")
+        sys.stderr.write(
+            f"{summary} -> {out}\n"
+            f"next: `akcli plan <target.kicad_sch> --ops {out}` "
+            "(then draw --apply; assert with `akcli check <target> "
+            f"--intent {design_path}`)\n")
+    else:
+        _emit(_dumps(oplist))
+        sys.stderr.write(summary + "\n")
+    return EXIT["OK"]
 
 
 # --------------------------------------------------------------------------- #
@@ -1360,6 +1407,19 @@ def register(sub, common) -> None:
                                   "(no target needed; exit 6 on any problem)")
     pov.add_argument("opsfile", nargs="?", help="op-list JSON file")
     pov.set_defaults(handler=_cmd_ops, action="validate")
+    pof = ops_sub.add_parser("from-intent", parents=[common],
+                             help="generate a complete op-list from a design "
+                                  "document (the check --intent pin->net "
+                                  "table + components + layout hints)")
+    pof.add_argument("design", nargs="?",
+                     help="design JSON file "
+                          "(see schemas/design-intent.schema.json)")
+    pof.add_argument("-o", "--out", metavar="OUT.json",
+                     help="write the op-list here (default: stdout)")
+    pof.add_argument("--symbols", metavar="PATH", action="append",
+                     help="extra .kicad_sym / template .kicad_sch symbol "
+                          "source (repeatable)")
+    pof.set_defaults(handler=_cmd_ops, action="from-intent")
     p.set_defaults(handler=_cmd_ops)
 
     p = sub.add_parser("plan", parents=[common],

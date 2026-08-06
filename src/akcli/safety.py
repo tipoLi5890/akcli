@@ -152,15 +152,12 @@ def refuse_if_gui_locked(
     executor, ``relink``, ``library repair``) refuses identically, before
     touching a single byte.
 
-    The lock-file naming has exactly one source of truth,
-    :func:`akcli.writers.kicad.gui_lock_path`, imported lazily here:
-    ``writers.kicad`` imports this module at module level, so a top-level
-    import back would be a cycle.
+    The lock-file naming has exactly one source of truth, :func:`gui_lock_path`
+    just below (``writers.kicad`` re-exports it for its callers; it lives here
+    so this leaf module never has to import the executor).
     """
     if allow_open:
         return
-    from .writers.kicad import gui_lock_path
-
     items = [paths] if isinstance(paths, (str, os.PathLike)) else list(paths)
     for cand in items:
         p = Path(os.fspath(cand))
@@ -170,6 +167,11 @@ def refuse_if_gui_locked(
                  f"{p.name} appears open in the KiCad GUI (found {lck.name}); "
                  f"close it first — refusing {what}, because a GUI save would "
                  "overwrite it")
+
+
+def gui_lock_path(path: Path) -> Path:
+    """KiCad's GUI lock-file for ``path`` (``~<name>.lck`` in the same dir)."""
+    return path.parent / f"~{path.name}.lck"
 
 
 def atomic_write_with_backup(

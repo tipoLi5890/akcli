@@ -341,6 +341,10 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
     unmodeled: list[str] = []
     skipped: list[dict] = []
     measured_nodes = _measured_nodes(spec)
+    # sim.json 'acknowledged_unmodeled': designators the author accepts as
+    # absent from the deck — downgrades the in-series ERROR to WARNING.
+    acked = {str(x) for x in (getattr(spec, "acknowledged_unmodeled", []) or [])}
+    acked_used: set[str] = set()
     model_cards: list[str] = []
     # per-node bookkeeping for the floating-node / undriven-rail diagnostics.
     node_ok_letters: dict[str, set[str]] = {}    # node -> SPICE letters emitted
@@ -381,7 +385,24 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
         in_series = len(nodes) >= 2 and bool(hit)
         skipped.append({"designator": comp.designator, "status": status,
                         "reason": note, "nodes": nodes, "measured": in_series})
-        if in_series:
+        if comp.designator in acked:
+            acked_used.add(comp.designator)
+        if in_series and comp.designator in acked:
+            # Explicitly acknowledged: still visible, no longer blocking. The
+            # message keeps the full context so the acceptance stays honest.
+            warnings.append(Finding(
+                code="SIM_PART_SKIPPED",
+                severity=Severity.WARNING,
+                message=f"{comp.designator} is not in the deck ({status}"
+                + (f": {note}" if note else "")
+                + f") but it connects measured node(s) {', '.join(hit)} to "
+                f"{', '.join(n for n in nodes if n not in hit) or 'nothing else'}"
+                " — acknowledged via sim.json acknowledged_unmodeled, "
+                "downgraded to WARNING; the measured value still excludes "
+                "this part",
+                refs=[comp.designator, *hit],
+            ))
+        elif in_series:
             warnings.append(Finding(
                 code="SIM_PART_SKIPPED",
                 severity=Severity.ERROR,
@@ -391,7 +412,8 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
                 f"{', '.join(n for n in nodes if n not in hit) or 'nothing else'}"
                 " — the measured value excludes this series element, so a PASS "
                 "would be meaningless; give it Sim.Device/Sim.Params or a "
-                "spec.models entry, or stop asserting on that node",
+                "spec.models entry, acknowledge it in sim.json "
+                "acknowledged_unmodeled, or stop asserting on that node",
                 refs=[comp.designator, *hit],
             ))
         elif warn:
@@ -488,6 +510,19 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
             for nd in nodes:
                 if nd != "0":
                     node_ok_letters.setdefault(nd, set()).add(letter[0])
+
+    # A stale acknowledged_unmodeled entry (naming a part that is present in
+    # the deck, or gone from the schematic) must not rot silently — a later
+    # regression on that designator would be pre-forgiven.
+    for des in sorted(acked - acked_used):
+        warnings.append(Finding(
+            code="SIM_UNMODELED_ACK_UNUSED",
+            severity=Severity.NOTE,
+            message=f"acknowledged_unmodeled entry {des!r} matched no part "
+            "absent from the deck — the part is modeled or no longer exists; "
+            "remove the stale entry",
+            refs=[des],
+        ))
 
     # --- 3. stimuli -------------------------------------------------------- #
     stim_lines: list[str] = []
@@ -682,6 +717,15 @@ def build(sch: Schematic, spec: object, *, gnd: str = "GND") -> Deck:
                 unmodeled=unmodeled, skipped=skipped)
 
 
+# SPICE element letter -> exact terminal count ngspice expects on the element
+# line.  ``X`` (subcircuit) is deliberately absent: its port count is defined
+# by the .subckt model, unknowable from the letter alone.
+_EXPECTED_TERMINALS: dict[str, int] = {
+    "R": 2, "C": 2, "L": 2, "D": 2, "V": 2, "I": 2, "B": 2,
+    "Q": 3,
+}
+
+
 def _element_nodes(
     comp: Component,
     card: object,
@@ -694,12 +738,32 @@ def _element_nodes(
     given; otherwise the schematic pin order is used.  A pin that is on no net
     gets a unique dangling node ``NC_<ref>_<pin>`` and a ``SIM_DANGLING_PIN``
     warning so it never silently shorts to another terminal.
+
+    Raises :class:`~akcli.errors.AkcliError` ``SIM_NODE_COUNT_MISMATCH`` when
+    the node count disagrees with the element letter's fixed terminal count
+    (e.g. a 2-terminal equivalent model mapped onto a 3+-pad part with no
+    ``pin_order``) — ngspice would otherwise reject the whole deck with only
+    a cryptic ``circuit not parsed``.
     """
     pin_order = getattr(card, "pin_order", None)
     if pin_order:
         numbers = [str(p) for p in pin_order]
     else:
         numbers = [p.number for p in comp.pins]
+
+    letter = (getattr(card, "letter", "") or "").upper()[:1]
+    expected = _EXPECTED_TERMINALS.get(letter)
+    if expected is not None and len(numbers) != expected:
+        source = "pin_order" if pin_order else "schematic pin count"
+        raise AkcliError(
+            "SIM_NODE_COUNT_MISMATCH",
+            f"{comp.designator}: resolves to a {expected}-terminal "
+            f"{letter!r} element but {len(numbers)} node(s) would be emitted "
+            f"({source}) — ngspice rejects such a line with a bare 'circuit "
+            f"not parsed'; set the model's pin_order to exactly {expected} "
+            f"pin number(s) naming which pads are the SPICE terminals, e.g. "
+            f'"pin_order": ["1", "3"]',
+        )
 
     nodes: list[str] = []
     for num in numbers:

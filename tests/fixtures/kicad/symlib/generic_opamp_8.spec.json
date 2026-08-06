@@ -1,0 +1,15 @@
+{
+  "protocol_version": 1,
+  "name": "GENERIC_OPAMP_8",
+  "reference_prefix": "U",
+  "pins": [
+    {"number": "1", "name": "OUT_A", "type": "output",   "side": "right",  "group": "a"},
+    {"number": "2", "name": "IN_A-", "type": "input",    "side": "left",   "group": "a"},
+    {"number": "3", "name": "IN_A+", "type": "input",    "side": "left",   "group": "a"},
+    {"number": "4", "name": "VEE",   "type": "power_in", "side": "bottom", "group": "power"},
+    {"number": "5", "name": "IN_B+", "type": "input",    "side": "left",   "group": "b"},
+    {"number": "6", "name": "IN_B-", "type": "input",    "side": "left",   "group": "b"},
+    {"number": "7", "name": "OUT_B", "type": "output",   "side": "right",  "group": "b"},
+    {"number": "8", "name": "VCC",   "type": "power_in", "side": "top",    "group": "power"}
+  ]
+}

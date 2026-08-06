@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .checks.layout import _Box, _overlaps, _mil, _world_box
+from .checks.layout import _Box, _overlaps, child_mil, _world_box
 from .readers import kicad as _krd
 from .readers import kicad_lib, sexpr
 from .safety import read_text_guarded
@@ -65,7 +65,7 @@ def _collect(root: sexpr.SNode) -> tuple[list[SymInfo], set[tuple[float, float]]
     for sym in _krd._placed_symbols(root):
         lib_id = _krd._av(sym.find("lib_id"), 1) or ""
         at = sym.find("at")
-        px, py = _mil(at, 1), _mil(at, 2)
+        px, py = child_mil(at, 1), child_mil(at, 2)
         rot = int(round(_krd._fnum(at, 3))) % 360
         mnode = sym.find("mirror")
         mirror = (_krd._av(mnode, 1) if mnode is not None else None) or "none"
@@ -99,11 +99,11 @@ def _collect(root: sexpr.SNode) -> tuple[list[SymInfo], set[tuple[float, float]]
         if pts is None:
             continue
         for xy in pts.find_all("xy"):
-            anchors.add((_mil(xy, 1), _mil(xy, 2)))
+            anchors.add((child_mil(xy, 1), child_mil(xy, 2)))
     for tag in ("label", "global_label", "hierarchical_label"):
         for lb in root.find_all(tag):
             at = lb.find("at")
-            anchors.add((_mil(at, 1), _mil(at, 2)))
+            anchors.add((child_mil(at, 1), child_mil(at, 2)))
     return syms, anchors
 
 

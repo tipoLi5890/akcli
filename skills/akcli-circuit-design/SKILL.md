@@ -180,7 +180,7 @@ subcommand: `-C/--config`, `-v`/`-vv`, `-q/--quiet`, `--json`, `--no-color`, `--
 
 ## Companion slash commands
 
-Eight `/circuit-*` commands: `/circuit-review` (review engine + checks, optional diff) ·
+8 `/circuit-*` commands: `/circuit-review` (review engine + checks, optional diff) ·
 `/circuit-pinmap` (pinmap, optional `--expected`) · `/circuit-diff` (diff two revisions) ·
 `/circuit-sim` (deck inspection + SPICE assertions; read-only) · `/circuit-release`
 (`release preflight` GO/NO-GO with a manifest) · `/circuit-draw` (build + validate an

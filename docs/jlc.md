@@ -9,12 +9,16 @@ stdlib only; `sim` and the advisory ERC second opinion optionally use local
 > **Needs network.** `jlc` calls the public **jlcsearch** service
 > (`https://jlcsearch.tscircuit.com`; override with `AKCLI_JLC_BASE_URL` for a
 > self-hosted instance or tests). All other `akcli` commands work with no
-> network and no Altium/KiCad install. Network code is import-isolated under
-> `akcli.parts` and loaded lazily, so it never touches the offline paths.
+> network and no Altium/KiCad install. Network code is confined to the `jlc`
+> command family — the search/metadata clients under `akcli.parts` plus the
+> part converter in `akcli.drivers` and its vendored core — and every one of
+> those imports is lazy, so the offline paths never load them.
+> (`akcli doctor --network` opts into one reachability probe of the same
+> endpoint.)
 
 ## Commands
 
-### `akcli jlc search <query> [--limit N] [--json]`
+### `akcli jlc search <query> [--limit N] [--category NAME] [--json]`
 
 Keyword search. The query matches manufacturer part number (MPN), category, and
 the LCSC C-number (with or without the `C` prefix).
@@ -23,11 +27,25 @@ the LCSC C-number (with or without the `C` prefix).
 akcli jlc search NE555
 akcli jlc search NE555 --limit 5
 akcli jlc search "0603 100nF" --json
+akcli jlc search "0402 47K" --category Resistors
 ```
+
+> **Value/package queries mix categories.** A query like `0402 47K` returns
+> NTC thermistors (category `Sensors`) alongside chip resistors — an agent
+> that keys on value+stock without reading the category column will pick the
+> wrong part. `--category NAME` keeps only results whose `category` field
+> equals `NAME` (case-insensitive **exact** match, e.g. `Resistors`,
+> `Capacitors`, `Sensors` — not a substring search, so `Resistors` does not
+> match `Resistor Networks`). The filter is client-side (the jlcsearch API
+> has no category parameter); the command over-fetches before filtering so a
+> small `--limit` is applied to the *filtered* list.
 
 Text output is a table (`LCSC  MPN  PACKAGE  STOCK  PRICE  B  DESCRIPTION`),
 where the `B` column is `B` for a JLCPCB **Basic** part, `P` for a **Preferred**
-part, else `-`. `--json` emits the full list of part objects.
+part, else `-`. MPN is truncated to 28 characters and DESCRIPTION to 40;
+DESCRIPTION falls back to the part's `category` when the catalog description
+is empty (it often is), so a bare category name in that column means "no
+description". `--json` emits the full, untruncated list of part objects.
 
 Exit codes: `0` on results **and** on a clean no-results path (a `no parts found`
 notice goes to stderr); `7` on a network/HTTP error (a single
@@ -35,13 +53,19 @@ notice goes to stderr); `7` on a network/HTTP error (a single
 
 A `jlc` network error goes through the shared error path like every other
 command, so `--json` gets the standard envelope on stdout
-(`{"error": {"code": "NETWORK", "message", "exit": 7, "remediation"}}`) with the
-plain `ERROR: NETWORK: …` line on stderr for humans.
+(`{"schema_version": "1", "error": {"code": "NETWORK", "message", "exit": 7,
+"remediation"}}`) with the plain `ERROR: NETWORK: …` line on stderr for humans.
 
-### `akcli jlc bom <sch> [--qty N] [--min-stock N] [--suggest] [--fix|--fix-all] [--csv OUT.csv] [--json]`
+### `akcli jlc bom <sch>... [--qty N] [--min-stock N] [--offline] [--suggest] [--fix|--fix-all] [--alternates] [--lock OUT.json] [--against-lock LOCK.json] [--csv OUT.csv] [--md [OUT.md]] [--exit-zero] [--json]`
 
 Check a schematic's **BOM against the live catalog** — every BOM line is
-resolved to a part and reported with stock, price and Basic/Preferred status:
+resolved to a part and reported with stock, price and Basic/Preferred status.
+Several schematics on one command line merge into a single shopping cart:
+lines with the same resolved identity combine across boards, tier pricing is
+evaluated at the merged quantity, and every ref is prefixed `board:ref`.
+`--alternates` proposes second sources for at-risk lines — advisory, nothing
+is written. `--md [OUT.md]` renders the same numbers as Markdown (bare `--md`
+or `-` writes to stdout):
 
 ```bash
 akcli jlc bom board.kicad_sch
@@ -69,30 +93,74 @@ Responses are cached on disk for an hour (`~/.cache/akcli/jlc`;
 restores hard failure).
 
 `--suggest` searches the catalog for every `not-found` / `no-part-id` line
-(query = value + package size from the footprint, e.g. `100n` +
-`C_0402_...` → `100nF 0402`; candidates must match the package, ranking
-prefers in-stock Basic parts) and prints the best candidate. Each suggestion
-is graded **high** confidence (package matched AND the value is visible in
-the candidate's description/MPN) or **low** (package matched only). `--fix`
+that is actually sourced — non-fitted lines (do-not-populate, externally
+sourced, structural) are skipped, and a line whose designators are all
+structural (test points, fiducials, mounting holes) is never given a
+candidate at all (query = value + package size from the footprint, e.g.
+`100n` + `C_0402_...` → `100nF 0402`; candidates must match the package,
+ranking prefers in-stock Basic parts) and prints the best candidate. Each
+suggestion is graded **high** confidence (package matched AND the line's
+normalized value is strictly equal to a value parsed out of the candidate's
+description/MPN/specs — never a substring, so a `1k` line can never match a
+`5.1k` part — and no dielectric conflict) or **low** (anything weaker:
+package-only, a value this parser cannot read, or a contradicted
+dielectric). `--fix`
 writes only high-confidence C-numbers back into the schematic's LCSC
 parameters — in the SAME parameter key when one existed (correcting a wrong
 id in place) — through the draw pipeline (`.bak`, `akcli undo` reverts),
 then re-checks; withheld low-confidence suggestions are counted on stderr.
+It is non-interactive — no confirmation prompt, no per-designator selection;
+every line at or above the confidence floor is written in one pass. It
+refuses (exit `2`) on a non-`.kicad_sch` target, on more than one schematic,
+and together with `--offline`.
 Like `plan`/`draw`/`arrange`, the fix is recorded in the workspace write
 journal — `akcli log` shows a `jlc-bom-fix` entry.
 `--fix-all` also writes the low-confidence ones. Suggestions are heuristics:
 **verify the datasheet before building.**
 
-`--csv OUT.csv` also writes a **JLCPCB upload BOM CSV** (header exactly
-`Comment,Designator,Footprint,LCSC Part #`; all refs of a line comma-joined
-in one quoted Designator cell; footprint shortened after the `:`;
-unresolved/dead-id lines get a **blank** LCSC cell so a dead C-number never
-lands in an order file). `'-'` writes the CSV to stdout.
+`--csv OUT.csv` also writes an **upload BOM CSV in the JLC-EDA template
+shape** (header exactly `No.,Quantity,Comment,Designator,Footprint,Value,
+Manufacturer Part,Manufacturer,Supplier Part,Supplier,Note`): the C-number
+lands in `Supplier Part` with `Supplier` = `LCSC`, all refs of a line are
+comma-joined in one quoted `Designator` cell, and the footprint is shortened
+after the `:`. Every population stays in the file — do-not-populate,
+externally sourced, structural and mismatch rows are kept with the reason in
+`Note`, so the assembler sees the whole board rather than a silently filtered
+one — while unresolved, external and structural lines get a **blank**
+`Supplier Part` so a dead C-number never lands in an order file. `'-'` writes
+the CSV to stdout.
 
 Statuses: `ok` · `low-stock` (below `--min-stock` or the needed quantity) · `out-of-stock` ·
-`not-found` · `no-part-id`. Exit `1` when any of the first three problems is
-present (`no-part-id` never fails the run; `--exit-zero` forces `0`); exit
-`7` on a network error.
+`not-found` · `no-part-id` · `unverified` (an `--offline` cache miss) · plus
+the three populations that short-circuit before any lookup because nothing is
+ordered for them: `dnp`, `external` and `no-part` (structural designators —
+test points, fiducials, mounting holes). Exit `1` when any of the first three
+problems is present, when a line's explicit C-number fails the reverse check
+against the schematic's package/value (a C-number MISMATCH), or when
+`--against-lock` finds any drift (`no-part-id`, `unverified`, `dnp`,
+`external` and `no-part` never fail the run; `--exit-zero` forces `0`); exit
+`2` on a refused flag combination; exit `7` on a network error.
+
+`--offline` answers from the HTTP cache only: the report is bannered
+`OFFLINE (degraded)`, cached entries are served at any age, misses degrade
+the line to `unverified` rather than failing the run, and `--suggest`/`--fix`
+are refused (they must not write from stale data).
+
+`--lock OUT.json` freezes the check as a lockfile: top level
+`schema_version`/`generated_at`/`qty`/`lines`; per row
+`refs`/`value`/`footprint`/`bom_class`/`lcsc`/`mpn`/`status`/`need`/
+`unit_price`/`stock`/`basic`. Rows sort by first designator with stable
+formatting, so a re-lock is a clean git diff.
+
+`--against-lock LOCK.json` reports **drift** against a lockfile: lines pair
+by sorted designator signature (so an id change is reported, not hidden), and
+each change prints `DRIFT <kind>: <refs> — <detail>` plus a
+`lock drift: N change(s) vs <file>` footer. Kinds: `line_added`,
+`id_changed`, `gone`, `status_changed`, `price_changed`, `stock_below_need`,
+`line_removed`; `--json` puts them under `lock_drift`. Any drift exits `1`;
+an unreadable lockfile exits `2`. (The schematic-vs-schematic BOM delta of
+`akcli diff --bom` uses a different, smaller kind vocabulary — the two are
+not the same report.)
 
 ### `akcli jlc datasheet <C-number|MPN|sch> [--fetch] [--out DIR] [--force] [--resolve-mpn] [--json]`
 
@@ -103,7 +171,7 @@ then every BOM line carrying an `LCSC` parameter is resolved in one run.
 ```bash
 akcli jlc datasheet C2984661                     # print the PDF URL + MPN/manufacturer
 akcli jlc datasheet TCRT5000 --fetch             # exact-MPN match, download the PDF
-akcli jlc datasheet board.kicad_sch --fetch --out datasheets  # whole BOM -> ./datasheets (review auto-discovers it)
+akcli jlc datasheet board.kicad_sch --fetch --out datasheets  # whole BOM -> ./datasheets (co-locates the PDFs with the facts store; review picks the dir up once it holds extracted facts)
 akcli jlc datasheet board.kicad_sch --resolve-mpn --fetch   # MPN-only lines get a catalog lookup first
 ```
 
@@ -198,13 +266,20 @@ resolves only next to the library), `absolute` (always resolves on this machine,
 
 **Symbol fields and pin types.** The symbol's `Value` is the part's **actual value** when
 EasyEDA carries one (`10kΩ` → `10k`, `100nF` → `100n`); the manufacturer part number moves
-to a dedicated `MPN` field (`LCSC` keeps the C-number), and `Value` falls back to the MPN
-for parts with no value attribute. Pin **electrical types** are mapped from EasyEDA's
-five-code space (undefined/input/output/bidirectional/power) plus two context rules, because
-that space cannot express KiCad's: a two-pin R/C/L-class part gets `passive` pins (EasyEDA
-codes them `input`, which used to trip ERC's floating-input rule), pins named `NC`/`DNC`
-become `no_connect`, and a power pin named like a supplied rail (`VOUT`, `VREG`, …) becomes
-`power_out`. Everything else keeps its declared code — still a claim to verify.
+to a dedicated `MPN` field (`LCSC` keeps the C-number), and both `Value` and `MPN` fall back
+to the sanitized EasyEDA component **title** for parts with no value attribute (spaces and
+dots become `_`; filesystem-hostile characters become `{slash}`-style tokens) — usually the
+part number, but the title string, not the catalog's manufacturer-part field. Pin
+**electrical types** are mapped from EasyEDA's
+five-code space (undefined/input/output/bidirectional/power) plus three context rules, because
+that space cannot express KiCad's: a two-pin passive-class part (designator prefix
+`R`/`C`/`L`/`FB`/`RN`/`VR`, or a resistor/capacitor/inductor/ferrite tag) gets `passive`
+pins — but only on pins whose declared code is undefined/input/output, so a deliberately
+authored bidirectional or power pin is never overridden (EasyEDA
+codes them `input`, which used to trip ERC's floating-input rule); pins named `NC`/`DNC`
+become `no_connect`; and a power pin named like a supplied rail (`VOUT`, `VREG`, …) becomes
+`power_out` while every other power pin becomes `power_in`. Everything else keeps its
+declared code — still a claim to verify.
 
 A converted library is a CLAIM — verify pin mapping/dimensions against the datasheet, and cross-check the whole
 workspace with `akcli library audit <project>`.
@@ -243,7 +318,7 @@ against the datasheet before wiring the part in.
 | `basic` | `true` for a JLCPCB Basic part |
 | `datasheet` | datasheet URL when provided, else `null` |
 | `category` | top-level category |
-| `attributes` | extra fields: `subcategory`, `is_preferred`, `price_tiers`, `specs` |
+| `attributes` | extra fields: `subcategory`, `is_preferred`, `manufacturer`, `price_tiers`, `specs` (each present only when the catalog supplies it) |
 
 The upstream `price` is a tiered structure; `attributes.price_tiers` keeps the
 full `[{qFrom, qTo, price}, …]` ladder while `price` surfaces the cheapest
@@ -299,7 +374,7 @@ artifacts in one click.
 
 | Artifact | Accepted | Column headers JLCPCB expects |
 |---|---|---|
-| BOM | `.csv`/`.xls`/`.xlsx` | `Comment, Designator, Footprint, LCSC Part #` — exactly what `jlc bom --csv` writes |
+| BOM | `.csv`/`.xls`/`.xlsx` | `Comment, Designator, Footprint, LCSC Part #` — `jlc bom --csv` writes the JLC-EDA template header instead (`No., Quantity, Comment, Designator, Footprint, Value, Manufacturer Part, Manufacturer, Supplier Part, Supplier, Note`): `Comment`/`Designator`/`Footprint` match by name and the C-number is in `Supplier Part`, so let the order page's column mapper bind that one |
 | CPL | `.csv`/`.xls`/`.xlsx` | `Designator, Mid X, Mid Y, Layer, Rotation` |
 
 `kicad-cli pcb export pos --format csv` emits `Ref,Val,Package,PosX,PosY,Rot,Side`

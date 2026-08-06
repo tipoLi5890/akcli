@@ -340,6 +340,51 @@ def test_unmodeled_series_part_on_measured_net_escalates(tmp_path):
     assert {p["designator"] for p in d.skipped} == {"U1"}
 
 
+def test_acknowledged_unmodeled_downgrades_series_error(tmp_path):
+    # The same unmodeled series part, explicitly acknowledged in sim.json:
+    # still reported, no longer an ERROR.
+    u1 = _part("U1", None, lib="Amplifier:LM358")
+    sch = _divider_sch(extra=[u1], extra_nets=[])
+    sch.nets[1].members = sorted([*sch.nets[1].members, ("U1", "1")])
+    sch.nets[2].members = sorted([*sch.nets[2].members, ("U1", "2")])
+    doc = _divider_spec_doc()
+    doc["acknowledged_unmodeled"] = ["U1"]
+    d = deckmod.build(sch, _spec(tmp_path, doc), gnd="GND")
+    hits = [f for f in d.warnings if f.code == "SIM_PART_SKIPPED"]
+    assert [f.severity for f in hits] == [Severity.WARNING]
+    assert "acknowledged" in hits[0].message
+    # the acceptance is honest: the finding still names the measured node
+    assert "MID" in hits[0].refs
+    # no stale-ack note: the entry matched a real absent part
+    assert not any(f.code == "SIM_UNMODELED_ACK_UNUSED" for f in d.warnings)
+
+
+def test_acknowledgment_of_other_part_does_not_downgrade(tmp_path):
+    # Acking U9 must not forgive U1 — and the unused entry is called out.
+    u1 = _part("U1", None, lib="Amplifier:LM358")
+    sch = _divider_sch(extra=[u1], extra_nets=[])
+    sch.nets[1].members = sorted([*sch.nets[1].members, ("U1", "1")])
+    sch.nets[2].members = sorted([*sch.nets[2].members, ("U1", "2")])
+    doc = _divider_spec_doc()
+    doc["acknowledged_unmodeled"] = ["U9"]
+    d = deckmod.build(sch, _spec(tmp_path, doc), gnd="GND")
+    skipped = [f for f in d.warnings if f.code == "SIM_PART_SKIPPED"]
+    assert [f.severity for f in skipped] == [Severity.ERROR]
+    stale = [f for f in d.warnings if f.code == "SIM_UNMODELED_ACK_UNUSED"]
+    assert len(stale) == 1 and stale[0].severity == Severity.NOTE
+    assert "U9" in stale[0].refs
+
+
+def test_stale_acknowledgment_on_clean_deck_raises_note(tmp_path):
+    # Every part modeled: the ack list is pure rot and must say so.
+    doc = _divider_spec_doc()
+    doc["acknowledged_unmodeled"] = ["U1"]
+    d = deckmod.build(_divider_sch(), _spec(tmp_path, doc), gnd="GND")
+    stale = [f for f in d.warnings if f.code == "SIM_UNMODELED_ACK_UNUSED"]
+    assert len(stale) == 1
+    assert "U1" in stale[0].message
+
+
 def test_no_asserts_means_no_escalation(tmp_path):
     # Nothing is measured, so a skipped part is a warning, never an error.
     doc = _divider_spec_doc()

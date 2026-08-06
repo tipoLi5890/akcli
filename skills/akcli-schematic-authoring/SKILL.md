@@ -151,6 +151,18 @@ each slot carrying a fixed part role (`place_led_indicator` is `[R, D]`,
 `D1` and is an error naming the slot. Emit the skeleton with
 `akcli ops template <macro>` rather than guessing.
 
+**Generate before you hand-write.** For a fresh block, `akcli ops from-intent
+design.json -o ops.json` turns a design document — the `check --intent`
+pin→net table plus a `components` map and optional `layout` hints
+(`schemas/design-intent.schema.json`) — into a complete op-list of the
+ordinary vocabulary (`place_component` + label-on-pin `add_net_label` +
+`add_no_connect` on every unlisted pin), with the tool owning all geometry.
+The output goes through the normal plan → dry-run → apply loop below, and the
+SAME design file is the post-apply assertion:
+`akcli check <sch> --intent design.json` must come back clean. Hand-authoring
+remains the tool for surgical edits and anything the generator refuses
+(`DESIGN_UNSUPPORTED` names the reason).
+
 ### Functional groups — the `groups` envelope (author blocks, not loose parts)
 
 Declare each block once in the envelope; tag its ops with `"group"`. Tagged
@@ -282,6 +294,10 @@ Rules the validator and executor enforce:
   (`lib_id`, `designator_prefix`, `count`, `x_mil`/`y_mil`, `pitch_mil`,
   `direction`, per-part `values`) — pull-up banks, LED bars, connector
   terminations; cheaper and less error-prone than N `place_component` ops.
+  When every element gets a label-on-pin, prefer `direction: right` (or a
+  wider `pitch_mil`): a `down` stack auto-orients the labels horizontally
+  across the neighbor below and `check --layout` fills with
+  `LAYOUT_LABEL_OVER_SYMBOL`.
 - **Multi-unit parts**: `place_component` takes an optional `"unit": N` — each
   unit is its own instance sharing the designator (`U1` gate A = unit 1, gate B
   = unit 2 ...). `"REF.PIN"` resolves against the instance whose unit owns the
@@ -498,7 +514,7 @@ wiring.
 asserts a different, stricter layer: pin-level topology *policy* — require or forbid a
 specific pin on a specific net, require or forbid two pins ever sharing a net, expected
 component values, NC pins, and approved exceptions carrying an owner and expiry. For a
-hard invariant like "FB2 must never touch V3V3", a contract is more reliable than manual
+hard invariant like "the regulator feedback node must never touch RAIL_A", a contract is more reliable than manual
 review (it is machine-checked on every run) and it composes with an intent snapshot —
 use intent for "this is what I wired" and a contract for "this must always/never be true".
 

@@ -121,7 +121,7 @@ def _annotated_current_ma(comp: Component) -> float | None:
     return None
 
 
-def _net_candidate_names(net: Net) -> list[str]:
+def net_candidate_names(net: Net) -> list[str]:
     """All names that could identify a net: display + aliases + contributing sources."""
     names: list[str] = []
     for x in [net.name, *net.aliases, *net.source_names]:
@@ -148,7 +148,7 @@ def _entry_named(net: Net) -> bool:
     bare label with no symbol at all, so an entry-named rail is never reported
     as sourceless — the source is simply not on the schematic.
     """
-    for name in _net_candidate_names(net):
+    for name in net_candidate_names(net):
         n = _norm(name).lstrip("-")
         if n in _ENTRY_NAMES:
             return True
@@ -201,7 +201,7 @@ def _series_island(net: Net, nets_of_comp_all: dict[str, list[Net]],
                 continue
             if id(other) in seen:
                 continue
-            if any(_is_ground(x) for x in _net_candidate_names(other)):
+            if any(_is_ground(x) for x in net_candidate_names(other)):
                 continue
             seen.add(id(other))
             island.append(other)
@@ -211,7 +211,7 @@ def _series_island(net: Net, nets_of_comp_all: dict[str, list[Net]],
 
 def _cfg_rail_for_net(net: Net, cfg_rails: list[dict]) -> dict | None:
     """Return the config rail whose ``name`` matches any of the net's names."""
-    cand = {_norm(x) for x in _net_candidate_names(net)}
+    cand = {_norm(x) for x in net_candidate_names(net)}
     for rail in cfg_rails:
         rn = rail.get("name")
         if rn and _norm(rn) in cand:
@@ -231,7 +231,7 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
     ground_nets: list[Net] = []
     rail_nets: list[Net] = []
     for net in named_nets:
-        names = _net_candidate_names(net)
+        names = net_candidate_names(net)
         if any(_is_ground(x) for x in names):
             ground_nets.append(net)
         elif any(_is_power(x) for x in names) or _cfg_rail_for_net(net, cfg_rails):
@@ -400,7 +400,7 @@ def run(sch: Schematic, cfg: Config | None = None) -> list[Finding]:
             )
 
     # ----- config rails declared but not present in the schematic -----
-    present = {_norm(x) for net in rail_nets for x in _net_candidate_names(net)}
+    present = {_norm(x) for net in rail_nets for x in net_candidate_names(net)}
     for rail in cfg_rails:
         rn = rail.get("name")
         if rn and _norm(rn) not in present:

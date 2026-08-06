@@ -63,6 +63,7 @@ from ._shared import (
     _dumps,
     _emit,
     _ExitWith,
+    _load_cfg,
     _load_schematic,
     _require_path,
     _stamp,
@@ -134,23 +135,6 @@ def _measured_table(spec, measured: dict, findings: list) -> str:
     return "\n".join(lines)
 
 
-def _deck_build_exit(exc: AkcliError) -> _ExitWith:
-    """Map a deck-build ``AkcliError`` onto its process exit code.
-
-    ``SIM_NO_GROUND``/``SIM_NODE_COLLISION``/``SIM_VALUE_INVALID`` are
-    op-list-class failures (exit 6); ``BAD_CONFIG`` is a usage error (exit 2);
-    anything else falls back to the registry default via
-    :attr:`AkcliError.exit_code`.
-    """
-    code = {
-        "SIM_NO_GROUND": EXIT["OPLIST"],
-        "SIM_NODE_COLLISION": EXIT["OPLIST"],
-        "SIM_VALUE_INVALID": EXIT["OPLIST"],
-        "BAD_CONFIG": EXIT["USAGE"],
-    }.get(exc.code, exc.exit_code)
-    return _ExitWith(code, exc.as_error_line())
-
-
 def _cmd_sim(args: argparse.Namespace) -> int:
     # Dual-mode dispatch: the literal first positional 'fit-diode' selects the
     # diode-fit subcommand; anything else is treated as a schematic path.
@@ -182,7 +166,7 @@ def _cmd_sim(args: argparse.Namespace) -> int:
     try:
         d = deckmod.build(sch, spec, gnd=args.gnd)
     except AkcliError as exc:
-        raise _deck_build_exit(exc) from exc
+        raise _ExitWith(exc.exit_code, exc.as_error_line()) from exc
     deck_sha = _deck_sha(d.text)
 
     if deck_only:
@@ -294,7 +278,15 @@ def _run_engine(args, path, spec, d, deck_sha, assertions, engine) -> int:
 
     measured = assertions.parse_meas_output(result.meas_lines)
     findings, measured = assertions.evaluate(spec, measured)
-    all_findings = [*d.warnings, *findings]
+    # Config [[waiver]] entries apply to sim findings exactly like check
+    # findings — a deliberate, reviewed acceptance can demote/waive; an
+    # unwaived gap keeps blocking.
+    cfg = _load_cfg(args, path)
+    deck_findings = list(d.warnings)
+    if cfg.waivers:
+        deck_findings, _w1, _d1 = _report.apply_waivers(deck_findings, cfg.waivers)
+        findings, _w2, _d2 = _report.apply_waivers(findings, cfg.waivers)
+    all_findings = [*deck_findings, *findings]
     # The verdict is computed over the DECK findings too, not just the asserts:
     # a part dropped from a measured node (SIM_PART_SKIPPED, ERROR) means the
     # measurement did not include a series element, so PASS would be a lie.
@@ -316,7 +308,7 @@ def _run_engine(args, path, spec, d, deck_sha, assertions, engine) -> int:
             header += (f"\n  parts skipped: {len(dropped)} "
                        f"({', '.join(p['designator'] for p in dropped)})")
         table = _measured_table(spec, measured, findings)
-        if any(f.severity in _FAIL_SEVERITIES for f in d.warnings):
+        if any(f.severity in _FAIL_SEVERITIES for f in deck_findings):
             # The rows above can each satisfy their bound while the run is still
             # invalid — say so instead of letting a PASS column stand alone.
             table += ("\n  ! FAIL: the deck error(s) below invalidate the values "
@@ -482,7 +474,7 @@ def _run_sweep(args, path, sch, spec, sweeps_arg, deck_only, sim_file,
         try:
             d = deckmod.build(sch2, spec, gnd=args.gnd)
         except AkcliError as exc:
-            raise _deck_build_exit(exc) from exc
+            raise _ExitWith(exc.exit_code, exc.as_error_line()) from exc
         for w in d.warnings:
             key = (w.code, w.message)
             if key not in seen_warn:
@@ -744,7 +736,7 @@ def register(sub, common) -> None:
                    help="sim assertion spec (sim.json: stimuli, analyses, asserts)")
     p.add_argument("--deck-only", action="store_true",
                    help="emit the SPICE deck and exit 0 (no simulation)")
-    p.add_argument("--out", metavar="PATH",
+    p.add_argument("-o", "--out", metavar="PATH",
                    help="write the deck here (--deck-only) instead of stdout")
     p.add_argument("--gnd", metavar="NET", default="GND",
                    help="net that becomes SPICE ground node 0 (default: GND)")

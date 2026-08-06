@@ -78,7 +78,9 @@ fix before any check is built on top.
   (KiCad convention). Every reader normalizes *into* this system on ingest (the Altium reader negates Y).
 - **All internal KiCad-writer geometry is integer nanometres** (`1 mil = 25_400 nm`, `1 mm = 1_000_000 nm`);
   convert to string only at serialize time.
-- **Every emitted JSON carries `schema_version`; the op-list carries `protocol_version`.**
+- **Every emitted JSON object carries a version stamp** — `schema_version` for command payloads,
+  or a family field where the document IS the format (`protocol_version` for op-lists,
+  `proposals_version`, `facts_version`); `jlc search --json` is a bare array.
 
 ### 1.2 Coordinate-unit contract (LOCKED — resolves reviewer disagreement)
 
@@ -134,6 +136,7 @@ class Pin:
     x_mil: float                # canonical: mils, origin top-left, +Y down (electrical endpoint/tip)
     y_mil: float
     electrical_type: PinType = PinType.UNSPECIFIED
+    orientation: int = 0        # lib-frame degrees {0,90,180,270}: which way the pin points
     owner_part_id: int = 1      # multi-unit part (Altium OwnerPartId)
     unique_id: str | None = None
 
@@ -147,6 +150,9 @@ class Component:
     mirror: str = "none"        # {none,x,y}
     value: str | None = None
     footprint: str | None = None
+    dnp: bool = False           # KiCad `(dnp yes)` — placed but not populated
+    in_bom: bool = True         # KiCad `(in_bom no)` inverts
+    on_board: bool = True       # KiCad `(on_board no)` inverts
     unique_id: str | None = None
     part_count: int = 1
     sheet: str = ""             # source sheet path (provenance)
@@ -180,6 +186,7 @@ class Schematic:
     no_erc_points: list[tuple[float, float]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)   # passive_pin_ratio, frac_present, unnamed_net_count, ...
+    title_block: dict[str, str] = field(default_factory=dict)  # Title/Revision/Date/... document parameters
     schema_version: str = SCHEMA_VERSION
 
 # --- PCB is a SEPARATE sub-model (footprints/pads/nets, NOT symbol pins) ---
@@ -434,7 +441,7 @@ without an origin), both exit 6.
 |---|---|---|---|---|---|
 | `model.py` | LOCKED dataclasses + `PinType` enum + Altium/KiCad type maps + `NetPrimitives` | (all of §1.3) `to_json(obj)->dict`, `Schematic.export()->dict` | stdlib `dataclasses,enum,hashlib` | `Net.stable_id` = sha1 of sorted membership; `to_json` stamps `schema_version` | `test_model.py` |
 | `ops.py` | op-list vocab constants, `PROTOCOL_VERSION=1`, hand-rolled validator | `PROTOCOL_VERSION:int`; `OP_NAMES:frozenset`; `validate_oplist(doc:dict)->list[OpError]`; `load_oplist(path)->dict`; `Op` typed accessors | `errors`, `schemas/*` (read at import) | Zero-dep structural validator mirroring `ops.schema.json` (`jsonschema` only in dev); rejects free angles, odd wire arrays, unknown ops with `ERROR` codes | `test_ops.py` |
-| `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, ALTIUM_UNSUPPORTED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, KICAD_SEXPR_BAD_NUMBER, KICAD_BAD_ENCODING, INTERNAL, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, PROTOCOL_MISMATCH, TARGET_LOCKED, PATH_OUTSIDE_ROOT, FILE_UNREADABLE, GROUP_UNKNOWN, GROUP_NO_ORIGIN, POWER_PORT_STACKED, SHEET_FILE_MISSING, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, NGSPICE_MISSING, NGSPICE_FAILED, NETWORK, SIM_NO_GROUND, SIM_NODE_COLLISION, SIM_VALUE_INVALID, SIM_OP_ASSERT_UNSUPPORTED, BINFETCH_DOWNLOAD, BINFETCH_CHECKSUM, BAD_CONFIG, BRIDGE_BUSY, BRIDGE_TIMEOUT` (the `BRIDGE_*` pair is reserved/unraised). `TARGET_LOCKED` (→ exit 6) is raised when a `~<name>.lck` GUI lock is present and `--allow-open` was not passed — by the KiCad writer, and by the `relink-symbols`/`library repair` apply paths (`safety.refuse_if_gui_locked`). Exit table: `docs/cli-reference.md` §"Exit codes" | `test_errors.py` |
+| `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, ALTIUM_UNSUPPORTED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, KICAD_SEXPR_BAD_NUMBER, KICAD_BAD_ENCODING, INTERNAL, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, DESIGN_UNSUPPORTED, PROTOCOL_MISMATCH, TARGET_LOCKED, PATH_OUTSIDE_ROOT, FILE_UNREADABLE, GROUP_UNKNOWN, GROUP_NO_ORIGIN, POWER_PORT_STACKED, SHEET_FILE_MISSING, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, NGSPICE_MISSING, NGSPICE_FAILED, NETWORK, SIM_NO_GROUND, SIM_NODE_COLLISION, SIM_NODE_COUNT_MISMATCH, SIM_VALUE_INVALID, SIM_OP_ASSERT_UNSUPPORTED, BINFETCH_DOWNLOAD, BINFETCH_CHECKSUM, BAD_CONFIG, BRIDGE_BUSY, BRIDGE_TIMEOUT` (the `BRIDGE_*` pair is reserved/unraised). `TARGET_LOCKED` (→ exit 6) is raised when a `~<name>.lck` GUI lock is present and `--allow-open` was not passed — by the KiCad writer, and by the `relink-symbols`/`library repair` apply paths (`safety.refuse_if_gui_locked`). Exit table: `docs/cli-reference.md` §"Exit codes" | `test_errors.py` |
 | `safety.py` | hard limits + safe IO helpers used everywhere | `MAX_FILE_BYTES, MAX_SECTORS, MAX_RECORDS, MAX_DIR_ENTRIES, MAX_DECODED_BYTES, MAX_SEXPR_DEPTH, MAX_ATOM_BYTES, MAX_NODES`; `safe_path(base,cand)->Path`; `run_subprocess(argv,timeout,maxout)->CompletedProcess`; `atomic_write_with_backup(path,data,backup_dir)->None`; `refuse_if_gui_locked(paths,*,allow_open,what)->None` | stdlib `os,subprocess,resource,signal,pathlib,shutil` | `read_text_guarded`: the ONE UTF-8 text reader for KiCad documents — strict decode (`KICAD_BAD_ENCODING`), OSError family → `FILE_UNREADABLE`, size cap → `KICAD_SEXPR_TOOBIG`, so a corrupt file gets ONE answer across `read`/`arrange`/`groups`/`check`; `safe_path`: realpath both, reject escapes/symlinks, never expand env from untrusted files; `refuse_if_gui_locked`: the ONE `~<name>.lck` guard shared by `draw`/`arrange`/`undo`/`relink-symbols`/`library repair` apply paths → `TARGET_LOCKED`; `run_subprocess`: `shell=False`, abs exe, `--` before paths, timeout, output cap; `atomic_write`: snapshot→temp-in-same-dir→fsync→`os.replace` | `test_safety.py`, `test_fuzz_safety.py` |
 | `units.py` | all coordinate conversions + grid + tolerance | `ALTIUM_SCH_MIL_PER_UNIT=10.0`; `MIL_PER_MM=1/0.0254`; `NM_PER_MIL=25400`; `NM_PER_MM=1_000_000`; `altium_to_mil(i,frac)->float`; `mil_to_nm(m)->int`; `nm_to_mm_str(nm)->str`; `snap_mil(m,grid=50)->float`; `approx_eq(a,b,tol_nm)->bool` | stdlib | `nm_to_mm_str` strips trailing zeros/dot (KiCad float style); integer-nm math only | `test_units.py` |
 | `classify.py` | shared classification vocabulary: refdes prefixes, rail names, part roles | `refdes_prefix(ref)->str`; `norm/implied_voltage/rail_matches`; `is_power/is_ground/power_root/is_stage_name(name)`; `is_tvs/is_crystal/is_connector(designator,lib_id,…)`; `POWER_NAMES, GROUND_NAMES, SIGNAL_SUFFIXES, STAGE_SUFFIXES, TVS_KEYWORDS, CONNECTOR_PREFIXES, CRYSTAL_PREFIXES, PASSIVE_TIE_PREFIXES` | stdlib only (LEAF — so `checks` and `review` can both depend on it with no cycle) | ONE implementation of the questions `checks/erc.py`, `checks/power.py`, `review/topo.py`, the review detectors and `sim/models.py` used to answer with six diverged copies: prefix strips a synthesized `$U3`; rail names match derived forms (`VBUS_FUSED`) but not signals about a rail (`VBUS_DET`); part roles take library/value evidence over the designator prefix (so `X1` is a crystal, not a connector) | `test_classify.py` |
@@ -484,14 +491,14 @@ without an origin), both exit 6.
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
-| `erc.py` | electrical rule checks | `run(sch:Schematic,cfg:Config)->list[Finding]` | `model`, `report`, `config` | **Net-name-based power/ground detection** (not electrical-type — real boards are 292/298 Passive): nets touching a power port or matching rail-name set = power/ground; "IC has power+ground" tests net identity. Driver-conflict/floating gated behind **type-confidence** (fraction non-Passive) and downgraded when degenerate. Honor No-ERC suppression set (geo-match within grid tol) + config `erc_waivers`. Net-alias conflicts → NOTE (e.g. `STAT==LED1_GPIO_RD`) | `test_erc.py` |
+| `erc.py` | electrical rule checks | `run(sch:Schematic,cfg:Config)->list[Finding]` | `model`, `report`, `config` | **Net-name-based power/ground detection** (not electrical-type — real boards are 292/298 Passive): nets touching a power port or matching rail-name set = power/ground; "IC has power+ground" tests net identity. Driver-conflict/floating gated behind **type-confidence** (fraction non-Passive) and downgraded when degenerate. Honor No-ERC suppression set (geo-match within grid tol) + config `erc_waivers`; the inverse contradiction — a No-ERC-marked pin that IS a member of a ≥2-pin net — is flagged as `NC_PIN_CONNECTED` (WARNING, waiver token `nc_pin_connected`). Net-alias conflicts → NOTE (e.g. `STAT==LED1_GPIO_RD`) | `test_erc.py` |
 | `power.py` | rail enumeration + decoupling heuristic | `run(sch,cfg)->list[Finding]` | `model`, `config` | Enumerate rails from power ports + config `rails`; list consumers; decoupling-cap heuristic per IC power net; optional current budget if BOM annotated; rail voltage sanity vs config | `test_power.py` |
 | `bom.py` | BOM hygiene | `run(sch)->list[Finding]` | `model` | Refdes parsed as `(alpha-prefix, opt-int-suffix)`; gap-detection **only within a numeric-suffixed prefix**; skip compound refs (`J_USB_C`,`X3`); dedup duplicate-designator by UniqueID/part; missing value/footprint | `test_bom.py` |
 | `diff.py` | net-level v1↔v2 diff | `run(a:Schematic,b:Schematic)->DiffReport` | `model` | **Match nets by membership** (Jaccard bipartite), NOT display name; components by **UniqueID** (Altium↔Altium) then `(value,footprint,pin-count)` signature, then refdes; report name-vs-membership changes separately; document low-confidence for cross-revision | `test_diff.py` |
 | `pinmap.py` | MCU pin→net + optional cross-check (GENERIC) | `run(sch,cfg,expected:dict\|None)->list[Finding]` | `model`, `config` | Generic only: emit MCU `pin→net`; cross-check against an **external expected pin→signal table** (CSV/JSON passed in). **No DTS/pinout parsing here** — that lives in `adapters/` (keeps engine reusable). Pin-name `Pn.mm` parser; schematic authoritative, expected-table advisory | `test_pinmap.py` |
 | `intent.py` | design-intent net-membership assertions | `snapshot(sch)->dict`; `run(sch,spec)->list[Finding]` | `model`, `report` | Match declared `REF.PIN` members to actual nets by **pin membership** (not name); `exact`/`subset` modes + `fnmatch` refs; `INTENT_*` findings | `test_checks_intent.py` |
-| `contract.py` | design contracts (topology/semantic policy ERC can't express) | `load(path)->dict`; `run(sch,doc)->list[Finding]` | `model`, `report`, `errors` | TOML `[[contract]]`: `require`/`forbid` pin-net, `require_same_net`/`forbid_same_net` pin pairs, `component`+`value`, `nc`; pin spec resolves number then name; `waived` exceptions w/ owner/expiry; PASS/FAIL/WAIVED all explicit, expired → `CONTRACT_EXCEPTION_EXPIRED` | `test_contract.py` |
-| `schpcb.py` | schematic ↔ PCB equivalence | `run(sch:Schematic,pcb:Pcb)->list[Finding]` | `model`, `report` | Refdes presence + footprint/value assignment + pad-level **net partition** (names untrusted); `SCHPCB_NET_SPLIT`/`_MERGE`/`_PAD_MISSING`/`_FOOTPRINT_MISMATCH`; `#`-prefixed pseudo-components excluded | `test_schpcb.py` |
+| `contract.py` | design contracts (topology/semantic policy ERC can't express) | `load(path)->dict`; `run(sch,doc)->list[Finding]` | `model`, `report`, `errors` | TOML `[[contract]]`: `require`/`forbid` pin-net, `require_same_net`/`forbid_same_net` pin pairs, `component`+`value`, `nc`; pin spec resolves number then name; `waived` exceptions w/ owner/expiry; PASS/FAIL/WAIVED all explicit as codes (`CONTRACT_PASS` info / `CONTRACT_FAIL` at the rule's severity / `CONTRACT_WAIVED` note), expired → `CONTRACT_EXCEPTION_EXPIRED` (warning) | `test_contract.py` |
+| `schpcb.py` | schematic ↔ PCB equivalence | `run(sch:Schematic,pcb:Pcb)->list[Finding]` | `model`, `report` | Refdes presence + footprint/value assignment + pad-level **net partition** (names untrusted); errors `SCHPCB_MISSING_ON_PCB`/`_FOOTPRINT_MISMATCH`/`_PAD_MISSING`/`_NET_SPLIT`/`_NET_MERGE`, warnings `SCHPCB_EXTRA_ON_PCB`/`_VALUE_MISMATCH`/`_UNNETTED_PAD`/`_NO_PAD_DATA`; `#`-prefixed pseudo-components excluded | `test_schpcb.py` |
 
 ### 3.6b Design integrity (`src/akcli/` — library workspace, fab policy, footprint libs)
 
@@ -504,6 +511,7 @@ without an origin), both exit 6.
 | `commands/library.py` | `akcli library audit`/`repair`/`import-altium` | `register(sub,common)` | `libtable`, `readers.footprint_lib`, `writers.footprint_mod`, `safety` | `import-altium` writes `.kicad_mod` + `provenance.json` (source sha256, converter version, declared transforms); repair is atomic w/ `.bak` + re-audit | `test_library_workspace.py` |
 | `commands/fab.py` | `akcli fab check`/`explain` | `register(sub,common)` | `fab`, `readers.kicad` | deep-reads `.kicad_pcb`, runs profile + optional order manifest; lint-style exit | `test_fab.py` |
 | `commands/release.py` | `akcli release preflight` — run all gates, emit manifest | `register(sub,common)` | `checks.*`, `libtable`, `fab`, `readers.kicad`, `safety` | Gates check/intent/contract/library/sch-pcb/fab/order/git; absent input → `skipped` w/ reason; manifest binds input sha256 + git rev + findings; dirty worktree fails unless `--allow-dirty` | `test_release_preflight.py` |
+| `commands/gate.py` | `akcli gate` — iteration-weight 4-check bundle for the GUI edit loop | `register(sub,common)`; `_default_check_names` shared with `commands/checks.py` | `checks.*`, `parts.bom_jlc`, `readers.kicad` | 4 gates: `check` (the FULL default `check` set, not preflight's narrower erc/power/bom/nets four-tuple), `intent` (`[paths].intent`, same key `check --intent` uses), `sch-pcb` (`[paths].pcb`), `bom-lock` (lock-drift via `bom_jlc.diff_lock`, the same call `jlc bom --against-lock` makes — DEFAULT OFFLINE/cache-only, `--live` opts into the network; a cache-degraded "unverified" line is surfaced honestly, never folded into a silent pass). `PATH` falls back to `[paths].schematic`. No release manifest/input-hashing/git-state — that stays `release preflight`'s job | `test_gate.py` |
 
 ### 3.7 Drivers (`src/akcli/drivers/`)
 
@@ -574,7 +582,7 @@ neither copied nor consulted.
 | `SECURITY.md` | untrusted-input threat model + enforced limits | — | — |
 | `CHANGELOG.md` | SemVer + protocol_version policy | — | — |
 | `README.md`, `INSTALL.md` | docs + install UX | — | link-check (optional) |
-| `docs/config-schema.md`, `docs/cli-reference.md`, `docs/op-list-authoring.md`, `docs/op-capability-matrix.md` | contracts | — | — |
+| `docs/cli-reference.md` (config + CLI), `docs/op-list-authoring.md`, `schemas/ops.capabilities.json` (op-capability matrix) | contracts | — | — |
 
 ### 3.11 Config schema (`akcli.toml`)
 
@@ -585,16 +593,18 @@ grid = "50mil"          # schematic pin grid: bare number = mils, or "Nmil"/"Nmm
 backup_depth = 3        # rotated .akcli/backups/ depth, 1..99
 
 [[rail]]
-name = "V3V3"
+name = "RAIL_A"
 voltage = 3.3
 tolerance_pct = 5
 
 [paths]
 schematic = "hardware/main.SchDoc"   # resolved relative to THIS file's dir
-dts       = "firmware/board.dts"
-pinout_md = "docs/pinout.md"
-intent    = "intent.json"            # default for `check --intent` (flag overrides)
-parts_dir = "hardware/libs"          # default library out-dir for `jlc add` / `library import-altium`
+dts       = "firmware/board.dts"     # reserved — not read today; pass via `pinmap --expected`
+pinout_md = "docs/pinout.md"         # reserved — not read today; pass via `pinmap --expected`
+intent    = "intent.json"            # default for `check --intent` / `gate` (flag overrides)
+pcb       = "hardware/main.kicad_pcb" # default sch-pcb-gate input for `gate` (flag overrides)
+bom_lock  = "bom.lock.json"          # default bom-lock-gate input for `gate` (flag overrides)
+parts_dir = "hardware/libs"          # default out-dir for `jlc add` / `library import-altium` / `library new-symbol`
 
 [[erc_waiver]]                       # legacy ERC-only waiver (back-compat alias)
 net    = "LED1_GPIO_RD"
@@ -629,6 +639,9 @@ page_width = 20000                   # 2D side-by-side packing wrap (omit = sing
 ```
 
 `config.load_config` rejects unknown keys → `BAD_CONFIG`; discovery walks up from cwd; `-C/--config` overrides.
+Exception: `[paths]` accepts **arbitrary** keys (values must be strings, resolved against the
+config dir) — any entry whose value ends in `.kicad_sym` is additionally offered to the writer
+as a symbol source, so a project can register its libraries under any names it likes.
 Every top-level config table is asserted present in this block AND in `examples/akcli.toml.example`
 by the config-surface gate in `tests/test_docs_conformance.py`, so a new table cannot ship undocumented.
 
@@ -652,6 +665,8 @@ and in the packaged mirror (`tests/test_schema_exports.py`).
 | `proposals.schema.json` | `review propose --json` fix drafts (op-list/contract/sim) |
 | `sim.schema.json` | `akcli sim` assertion document + result envelope |
 | `doc.schema.json` | `akcli doc --json` pinout book (pin tables + rails + BOM) |
+| `design-intent.schema.json` | `akcli ops from-intent` design document: the `check --intent` nets table + `components` + `layout` hints (a SUPERSET of the intent-assertion format — one file drives generation and stays the assertion baseline) |
+| `symbol-pins.schema.json` | `akcli library new-symbol` INPUT pin table — coordinates are computed, never authored; `side` and `type` are required per pin, and `additionalProperties: false` throughout means a field typo is refused instead of silently defaulted |
 
 ---
 
@@ -793,11 +808,20 @@ exec "$PY" -m akcli "$@"
   within a time/memory budget (stdlib `signal.alarm` + `resource.setrlimit`).
 - **Edge micro-fixtures:** truncated final record; label `Text` containing `|`/`=`; CJK + Ω/µ `%UTF8%` field
   (assert clean BOM round-trip); stream sized exactly 4095 and 4096 (cutoff boundary).
-- **Env-gated real-file test** `test_integration_real.py` (`AKCLI_ALTIUM_SAMPLE` path; **skips** when unset):
-  asserts only **generic invariants** (parses; components>0; every named net ≥1 member; deterministic across
-  two runs; JSON round-trips + validates against `netlist.schema.json`). **No project-specific net/pin
-  names** in the public repo — those expectations live in a project-specific adapter behind `AKCLI_ALTIUM_EXPECT`
-  (project-specific, non-committed JSON). **Never snapshots.**
+- **Schema validation, as it actually exists today:** dev-extra (`pytest.importorskip("jsonschema")`) tests
+  validate rendered payloads against their published schema — `test_output_schemas.py` (`doc`/`diff`/
+  `pinmap`/`draw-result`), `test_cli_json_errors.py` (`draw-result`), `test_schema_exports.py`
+  (`schematic.schema.json` against every `read --json` fixture, `ops.schema.json` against every op/macro
+  template, plus a packaged-mirror byte-identity check over **every** `schemas/*.json` file),
+  `test_findings_schema.py` / `test_review_facts.py` (`findings`/`datasheet-facts`), `test_review_propose.py`
+  (`proposals`), `test_sim_assertions.py` (`sim`), `test_intentgen.py` (`design-intent`, plus a
+  both-directions key/enum census against the loader), `test_symbol_pins_schema.py` (`symbol-pins`,
+  plus schema↔loader reject-parity). `netlist.schema.json` is the one schema with **no**
+  payload-validation test — a contract artifact (documents net-membership/naming-rules shape) that no command's
+  JSON output is checked against; only its packaged-mirror byte-identity is gated. There is no env-gated
+  real-Altium-file integration test in this repo — `test_integration_real.py` / `AKCLI_ALTIUM_SAMPLE` /
+  `AKCLI_ALTIUM_EXPECT` never existed (checked against the full git history), despite the `.gitignore` entry
+  for `AKCLI_ALTIUM_EXPECT*.json` left over from planning it.
 
 ### 6.2 KiCad fixtures
 - Vendored minimal symbol source `tests/fixtures/kicad/symbols/` — `Device` R/C/L + `power` GND/+3V3, incl.
@@ -811,8 +835,9 @@ exec "$PY" -m akcli "$@"
 ### 6.3 Golden/diff hygiene
 - Canonicalize unnamed nets by **smallest member token** before any golden compare; order-invariance test
   (shuffled record order → identical canonical netlist).
-- `.gitattributes` marks fixtures binary, golden/`.kicad_sch` text `eol=lf`; `MANIFEST.sha256` verified in CI
-  to catch Windows-checkout corruption.
+- `.gitattributes` marks fixtures binary, golden/`.kicad_sch` text `eol=lf`; `MANIFEST.sha256` is written by
+  the fixture generator but — as of this writing — verified by no test or CI step (the planned
+  Windows-checkout-corruption gate was never wired).
 
 ### 6.4 CI matrix
 - **Lint/unit/fixture jobs:** OS = {ubuntu, macos, windows} × Python = {3.11, 3.12, 3.13}. Runtime is
@@ -867,7 +892,7 @@ where = ["src"]
 ## 8. Risk register + platform validity
 
 **Exit-code table (`errors.EXIT`):** 0 success/no findings · 1 check findings present · 2 usage/arg error ·
-3 parse error (corrupt OLE2/sexpr) · 4 file not found · 5 unsupported format · 6 op-list/verify failure ·
+3 parse error (corrupt OLE2/sexpr) · 4 file not found or otherwise unusable path (directory-as-file, unreadable bytes) · 5 unsupported format · 6 op-list/verify failure ·
 7 external tool missing · 8 query miss (entity absent from a file that parsed). `check` is lint-style
 (non-zero on findings) with `--fail-on never` for report mode (`--exit-zero` is a deprecated alias).
 

@@ -79,13 +79,14 @@ akcli undo  board.kicad_sch                                      # 直前の書�
 | コマンド | 機能 |
 |---|---|
 | `read` · `net` · `component` · `pins` | KiCad または Altium を単一の正規化 JSON モデルに解析。net（net 全体、またはピン単位の `net --at`／`--same`／`--why`）・部品・ピン座標を照会。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | バージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch`（ルートファイル、または既存階層の子シート）を生成。net-diff の安全ゲートと 1 コマンドの `undo` が保護。シンボルは `--symbols`、設定のパス、最後にプロジェクトとグローバルの `sym-lib-table` から解決。 |
+| `new` · `plan` · `draw` · `ops` · `arrange` | バージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch`（ルートファイル、または既存階層の子シート）を生成。net-diff の安全ゲートと 1 コマンドの `undo` が保護。`ops from-intent` は設計ドキュメント（宣言した nets + 部品）をそのまま op-list にコンパイル。シンボルは `--symbols`、設定のパス、最後にプロジェクトとグローバルの `sym-lib-table` から解決。 |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + ドキュメント整合性 + intent／contract チェック、回路図 ↔ PCB の等価性、net メンバーシップ差分、MCU ピン → net マップ。 |
 | `review` | 6 つの検出器ファミリ（signal／validation／pcb／emc／domain／gerber）にわたる、確信度別のアドバイザリ設計レビュー。DNP 指定の部品はどのルールも満たしません。 |
 | `sim` | SPICE デッキにレンダリングし、KiCad 同梱の ngspice 上でアサート。コーナースイープ。データシートの点からダイオードモデルをフィッティング。部品値は正規化され、確実に解釈できない値は推測せず拒否します。 |
 | `jlc` | JLCPCB/LCSC を検索（在庫・価格・Basic／Extended）。部品をインプロセスで KiCad ライブラリに変換（電気タイプ付きピン、実際の `Value`）。データシートを取得。 |
 | `calc` | **60** 個の規格準拠オフライン計算機（E 系列、IPC-2221、インピーダンス、I²C プルアップ、buck／boost……）。各項目が根拠を明示。 |
-| `library` · `fab` · `release` | ライブラリワークスペースの監査／修復、バージョン管理された fab プロファイルのチェック、追跡可能な manifest を書き出す release preflight。 |
+| `library` · `fab` · `release` | ライブラリワークスペースの監査／修復、ピン表からのシンボル生成（`new-symbol`——ピン表を渡せば akcli が座標を計算）と独立した lint（`lint-symbols`）+ 書き込みを拒否する同一座標ピン検査、バージョン管理された fab プロファイルのチェック、追跡可能な manifest を書き出す release preflight。 |
+| `gate` | GUI 編集のたびに回す反復用の 4 チェックバンドル（フル `check` セット、intent アサーション、回路図 ↔ PCB `verify`、BOM ロックのドリフト——デフォルトはオフライン）。設定済みプロジェクトなら引数ゼロで実行でき、リリース級のゲートは引き続き `release preflight`。 |
 | `export` · `render` · `doc` · `view` | ネットリスト出力（Protel／KiCad／CSV——KiCad 形式は再インポートに必要な UUID sheetpath の同一性を保持）、純標準ライブラリの SVG レンダリング、Markdown のピンアウトブック、localhost の `/calc` + `/live` ダッシュボード。 |
 
 代表的な 2 例——設計レビューと部品検索：
@@ -98,7 +99,7 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 ## AI エージェントと併用する
 
 `akcli` はただの CLI なので、shell を実行できるエージェントなら何でも駆動できます。コマンドは `--json`
-で構造化 JSON（`schema_version` 付き）を出力し、各 op-list は `protocol_version` を持ち、`akcli
+で構造化 JSON（バージョンスタンプ付き——`schema_version`、または `proposals_version`／`facts_version` のようなファミリフィールド）を出力し、各 op-list は `protocol_version` を持ち、`akcli
 capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述します——さらにすべてのエラーコードには
 機械可読な `remediation`（修復ヒント）が付きます。
 

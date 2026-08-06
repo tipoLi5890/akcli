@@ -75,6 +75,16 @@ A JLCPCB PCBA order needs Gerbers + drill + BOM + CPL. The BOM comes straight
 from akcli; the rest from `kicad-cli` (headless, agent-runnable — flags
 verified on KiCad 10; DRC gate first, always):
 
+> **Refill zones before DRC — every time.** Zone fills are stored in the
+> `.kicad_pcb` as saved copper, and pcbnew does **not** refill them
+> automatically after routing edits. Running DRC against a stale fill
+> produces dozens of ghost clearance/unconnected violations (a real board hit
+> 76) — or worse, hides real ones. In the GUI press `B` (Edit -> Fill All
+> Zones) and save before exporting; headless `kicad-cli pcb drc` refills
+> zones itself by default (do NOT pass a refill-skipping option before a
+> gate), but the *saved* file still needs a GUI refill+save before Gerber
+> export, or the copper in the Gerbers is the stale fill.
+
 ```bash
 kicad-cli pcb drc board.kicad_pcb --exit-code-violations
 kicad-cli pcb export gerbers board.kicad_pcb -o fab/ \

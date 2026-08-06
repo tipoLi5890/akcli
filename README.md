@@ -78,13 +78,14 @@ One normalized model behind every command, so each check, diff, and report works
 | Command | What it does |
 |---|---|
 | `read` · `net` · `component` · `pins` | Parse KiCad or Altium into one normalized JSON model; query nets (whole-net or pin-level: `net --at` / `--same` / `--why`), components, and pin coordinates. |
-| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` — a root file or a child sheet of an existing hierarchy — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate and one-command `undo`. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
+| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` — a root file or a child sheet of an existing hierarchy — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate and one-command `undo`; `ops from-intent` compiles a design document (declared nets + components) straight into an op-list. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + document-integrity + intent / contract checks, schematic ↔ PCB equivalence, net-membership diff, MCU pin → net map. |
 | `review` | Advisory, confidence-graded design review across six detector families (signal / validation / pcb / emc / domain / gerber); DNP parts satisfy no rule. |
 | `sim` | Render to a SPICE deck and assert on KiCad's bundled ngspice; sweep corners; fit diode models from datasheet points. Component values are normalized, or refused rather than guessed. |
 | `jlc` | Search JLCPCB/LCSC (stock, price, Basic/Extended), convert a part into a KiCad library in-process (typed pins, real `Value`), fetch datasheets. |
 | `calc` | **60** standards-cited offline calculators (E-series, IPC-2221, impedance, I²C pull-ups, buck/boost…), each citing its reference. |
-| `library` · `fab` · `release` | Library-workspace audit/repair, versioned fab-profile checks, and a release preflight that writes a traceable manifest. |
+| `library` · `fab` · `release` | Library-workspace audit/repair, symbol authoring from a pin table (`new-symbol` — you give the pin table, akcli computes the coordinates) with a standalone lint (`lint-symbols`) and a coincident-pin check that gates the write, versioned fab-profile checks, and a release preflight that writes a traceable manifest. |
+| `gate` | Iteration-weight bundle of the four checks re-run after every GUI edit round (the full `check` set, intent assertions, sch ↔ PCB `verify`, BOM-lock drift — offline by default) — zero-argument in a configured project; `release preflight` stays the release-weight gate. |
 | `export` · `render` · `doc` · `view` | Netlist export (Protel / KiCad / CSV — the KiCad form carries the UUID sheetpath identity a re-import needs), pure-stdlib SVG render, a Markdown pinout book, and a localhost `/calc` + `/live` dashboard. |
 
 Two headline examples — a design review and a part search:
@@ -97,12 +98,13 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 ## Use with AI agents
 
 `akcli` is a plain CLI, so any shell-capable agent can drive it. Commands emit structured JSON with
-`--json` (carrying a `schema_version`), each op-list carries a `protocol_version`, and `akcli
+`--json` (carrying a version stamp — `schema_version`, or a family field like `proposals_version` /
+`facts_version`), each op-list carries a `protocol_version`, and `akcli
 capabilities` self-describes the entire CLI surface in one JSON document — and every error code ships a
 machine-readable `remediation` hint.
 
-- **Claude Code** — install the bundled plugin for eight `/akcli:circuit-*` commands (review, pinmap,
-  draw, diff, parts, sim, datasheet, release) plus twelve skills spanning design, review, authoring, Altium interop, parts
+- **Claude Code** — install the bundled plugin for 8 `/akcli:circuit-*` commands (review, pinmap,
+  draw, diff, parts, sim, datasheet, release) plus 12 skills spanning design, review, authoring, Altium interop, parts
   sourcing, calculators, and release gating.
 - **Codex** — install the bundled plugin, or drop the loose skill folders into `.agents/skills/` for
   auto-discovery. See [docs/codex-plugin.md](docs/codex-plugin.md).
@@ -135,6 +137,7 @@ by the core loop:
 |---|---|---|
 | Advisory ERC second opinion, `view live` SVG | `kicad-cli` (local executable) | Skipped silently — non-fatal, results stay advisory. |
 | `sim` execution (`--deck-only` needs nothing) | libngspice (bundled with KiCad) | `sim` exits with `NGSPICE_MISSING`; everything else unaffected. |
+| Standard symbol nicknames (`Device:R`, `power:*`) | `kicad-cli` install location (derives `${KICAD*_SYMBOL_DIR}`) | Symbols resolve only from explicit `--symbols` / config paths. |
 | `jlc` part search / datasheet fetch | Network | The **only** networked command family; all others are fully offline. |
 
 `akcli doctor` probes each of these and prints per-OS remediation.
@@ -157,8 +160,8 @@ by the core loop:
 and writes into a child sheet of an existing hierarchy, net-diff safety rails, `new` / multi-level
 `undo`), net-preserving `arrange --groups` re-layout, the advisory `akcli review` engine (six
 detector families, now including power-entry protection, plus a datasheet facts store, `propose` /
-`tree` / `validate`), ERC / power / BOM / diff / pinmap / intent / contract checks with waivers and
-SARIF, read-only document `check --integrity`, schematic ↔ PCB `verify`, a project `library`
+`tree` / `validate`), ERC / power / BOM / diff / pinmap / intent / contract checks with waivers
+(SARIF from `check --format sarif` / `review report --format sarif`), read-only document `check --integrity`, schematic ↔ PCB `verify`, a project `library`
 workspace, versioned `fab` profiles, a `release preflight` gate, `akcli sim` on KiCad's bundled
 ngspice, JLCPCB/LCSC sourcing with datasheet fetch, 60 standards-cited calculators, pure-stdlib SVG
 rendering that draws the real symbol artwork from KiCad `lib_symbols`, and version-tolerant

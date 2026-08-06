@@ -148,7 +148,8 @@ def _load_findings_file(path: Path) -> tuple[list, dict]:
 
 def _cmd_review_report(args: argparse.Namespace) -> int:
     path = _require_path(args.path, "findings .json")
-    fmt = getattr(args, "format", None) or "text"
+    fmt = getattr(args, "format", None) or \
+        ("json" if getattr(args, "json", False) else "text")
     if fmt not in _FORMATS:
         raise _ExitWith(EXIT["USAGE"],
                         f"ERROR: unknown format {fmt!r} "
@@ -560,7 +561,7 @@ def register(sub, common) -> None:
     pa.add_argument("--detector", metavar="NAME", action="append",
                     help="run only this detector (repeatable; overrides "
                          "--profile)")
-    pa.add_argument("--out", metavar="FILE",
+    pa.add_argument("-o", "--out", metavar="FILE",
                     help="also write the findings JSON envelope here")
     pa.add_argument("--gerbers", metavar="DIR",
                     help="fab output dir (gerber/drill) for the gerber "
@@ -627,8 +628,9 @@ def register(sub, common) -> None:
         "report", parents=[common],
         help="re-render a findings JSON file (text/json/sarif/junit/markdown)")
     pr.add_argument("path", nargs="?", help="findings .json (from analyze --out)")
-    pr.add_argument("--format", choices=_FORMATS, default="text",
-                    help="output format")
+    pr.add_argument("--format", choices=_FORMATS, default=None,
+                    help="output format (default: text, or json under "
+                         "--json)")
     pr.set_defaults(handler=_cmd_review_report)
 
     pe = rev.add_parser(
@@ -642,7 +644,7 @@ def register(sub, common) -> None:
         help="turn findings into declarative candidate changes (op-list / "
              "contract / sim drafts; never touches design files)")
     pp.add_argument("path", nargs="?", help="findings .json (from analyze --out)")
-    pp.add_argument("--out", metavar="FILE", help="write proposals JSON here")
+    pp.add_argument("-o", "--out", metavar="FILE", help="write proposals JSON here")
     pp.set_defaults(handler=_cmd_review_propose)
 
     pb = rev.add_parser(
@@ -655,7 +657,7 @@ def register(sub, common) -> None:
                          "`review analyze` in-process, standard profile)")
     pb.add_argument("--deck-only", dest="deck_only", action="store_true",
                     help="emit the decks without running ngspice (exit 0)")
-    pb.add_argument("--out", metavar="DIR",
+    pb.add_argument("-o", "--out", metavar="DIR",
                     help="with --deck-only: write <fingerprint>_<kind>.deck "
                          "files here")
     pb.add_argument("--timeout", type=float, metavar="S",
@@ -689,6 +691,6 @@ def register(sub, common) -> None:
     pv.add_argument("sch", nargs="?", help="schematic (.kicad_sch / .SchDoc)")
     pv.add_argument("--facts", metavar="DIR",
                     help="datasheet facts dir for evidence verification")
-    pv.add_argument("--out", metavar="FILE",
+    pv.add_argument("-o", "--out", metavar="FILE",
                     help="write the accepted-findings envelope here")
     pv.set_defaults(handler=_cmd_review_validate)

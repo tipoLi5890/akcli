@@ -9,7 +9,7 @@ real incident (the suggestion engine offering an SMPS IC for a test point).
 
 This module owns the classification; ``checks/bom.py`` (offline) and
 ``parts/bom_jlc.py`` (catalog) both consume it, and the prefix set is
-project-configurable via ``akcli.toml`` ``[bom].no_part_classes``.
+project-configurable via ``akcli.toml`` ``[bom.classes].no_part``.
 """
 
 from __future__ import annotations

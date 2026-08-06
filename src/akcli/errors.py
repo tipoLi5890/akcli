@@ -41,6 +41,10 @@ ERROR_CODES: frozenset[str] = frozenset(
         "VERIFY_FAILED",
         "OP_UNSUPPORTED",
         "HIERARCHICAL_UNSUPPORTED",
+        # design-doc -> op-list generation (`akcli ops from-intent`): the
+        # design document is well-formed but asks for something the generator
+        # cannot honestly draw (pin addressed by name, wildcard members, ...)
+        "DESIGN_UNSUPPORTED",
         "PROTOCOL_MISMATCH",
         "TARGET_LOCKED",
         "GROUP_UNKNOWN",
@@ -60,6 +64,7 @@ ERROR_CODES: frozenset[str] = frozenset(
         # sim deck build / sim.json (raised before ngspice is ever loaded)
         "SIM_NO_GROUND",
         "SIM_NODE_COLLISION",
+        "SIM_NODE_COUNT_MISMATCH",
         "SIM_VALUE_INVALID",
         "SIM_OP_ASSERT_UNSUPPORTED",
         # networked surface (jlc)
@@ -122,6 +127,9 @@ _CODE_EXIT: dict[str, int] = {
     "VERIFY_FAILED": EXIT["OPLIST"],
     "OP_UNSUPPORTED": EXIT["OPLIST"],
     "HIERARCHICAL_UNSUPPORTED": EXIT["OPLIST"],
+    # generation refusals are op-list-class failures: nothing was written and
+    # the document (not the environment) is what must change -> 6
+    "DESIGN_UNSUPPORTED": EXIT["OPLIST"],
     "PROTOCOL_MISMATCH": EXIT["OPLIST"],
     "TARGET_LOCKED": EXIT["OPLIST"],
     "GROUP_UNKNOWN": EXIT["OPLIST"],
@@ -132,6 +140,7 @@ _CODE_EXIT: dict[str, int] = {
     # nothing ran, so this is an op-list-class refusal (6), never a tool error.
     "SIM_NO_GROUND": EXIT["OPLIST"],
     "SIM_NODE_COLLISION": EXIT["OPLIST"],
+    "SIM_NODE_COUNT_MISMATCH": EXIT["OPLIST"],
     "SIM_VALUE_INVALID": EXIT["OPLIST"],
     # the path exists but the process cannot read bytes out of it (a directory
     # passed where a file was expected, mode 000, an IO error) -> 4, the same
@@ -228,12 +237,19 @@ REMEDIATION: dict[str, str] = {
         "see `akcli ops list` for the vocabulary and `akcli ops template <op>` "
         "for the exact field shape; `akcli ops validate <file>` checks the "
         "whole document",
+    "DESIGN_UNSUPPORTED":
+        "fix the design document as the message says (pins are addressed by "
+        "NUMBER, every referenced REF needs a components entry, one pin "
+        "belongs to one net, no wildcards/bus-vector names); "
+        "`akcli pins <lib_id>` lists a symbol's pin numbers",
     "HIERARCHICAL_UNSUPPORTED":
         "this op cannot target a hierarchical sub-sheet; apply it to the "
         "sheet file itself",
     "TARGET_LOCKED":
         "close the file in the KiCad GUI first (or pass --allow-open and "
-        "File>Revert in KiCad afterwards)",
+        "File>Revert in KiCad afterwards); in an agent+GUI editing loop, gate "
+        "every write batch on `akcli library check-lock .` (exit 6 while any "
+        "KiCad file is open) instead of discovering the lock mid-apply",
     "PROTOCOL_MISMATCH":
         "regenerate the op-list against this build: "
         "`akcli ops template <op>` stamps the supported protocol_version",
@@ -295,6 +311,12 @@ REMEDIATION: dict[str, str] = {
         "so the names differ in more than case/punctuation, and give per-sheet "
         "local labels distinct names (MID_A/MID_B) or promote them to global "
         "labels when they really are one net",
+    "SIM_NODE_COUNT_MISMATCH":
+        "the element would be emitted with the wrong number of SPICE nodes "
+        "for its device letter (R/C/L/D/V/I/B take 2, Q takes 3) — usually a "
+        "2-terminal equivalent model on a part with more pads; add "
+        "`\"pin_order\": [\"<pin>\", \"<pin>\"]` to the Sim.Pins field or the "
+        "spec.models entry naming exactly which pads are the SPICE terminals",
     "SIM_VALUE_INVALID":
         "the component value is not a value SPICE can take; write it as a bare "
         "engineering value (10k, 4R7, 100nF) and move ratings/tolerance into "

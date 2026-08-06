@@ -52,6 +52,12 @@
         }
       },
       "default": {}
+    },
+    "acknowledged_unmodeled": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Designators the author explicitly accepts as absent from the deck (e.g. an IC with no vendor SPICE model). Downgrades that part's in-series SIM_PART_SKIPPED escalation from ERROR to WARNING — visible but non-blocking; unlisted parts keep the full ERROR. A stale entry (part modeled or gone) raises SIM_UNMODELED_ACK_UNUSED (NOTE).",
+      "default": []
     }
   },
   "$defs": {

@@ -110,14 +110,25 @@ def _cmd_jlc_search(args: argparse.Namespace) -> int:
     query = getattr(args, "query", None)
     if not query:
         raise _ExitWith(EXIT["USAGE"], "ERROR: missing search query")
+    category = getattr(args, "category", None)
+    user_limit = getattr(args, "limit", None) or 20
+    # jlcsearch has no server-side category parameter, so --category is a
+    # client-side post-filter: over-fetch first (the _MPN_RESOLVE_LIMIT idiom)
+    # so the filtered result is not starved by the API's own truncation.
+    fetch_limit = max(user_limit, _MPN_RESOLVE_LIMIT) if category else user_limit
     from ..parts import search as parts_search  # lazy: keeps network out of offline paths
     try:
-        results = parts_search.search(query, limit=getattr(args, "limit", None) or 20,
+        results = parts_search.search(query, limit=fetch_limit,
                                       cache_dir=parts_search.default_cache_dir())
     except parts_search.JlcNetworkError as exc:
         raise _ExitWith(EXIT["TOOL_MISSING"], f"ERROR: NETWORK: {exc.message}")
+    if category:
+        want = category.strip().lower()
+        results = [p for p in results
+                   if (p.category or "").strip().lower() == want][:user_limit]
     if not results:
-        sys.stderr.write(f"no parts found for {query!r}\n")
+        note = f" in category {category!r}" if category else ""
+        sys.stderr.write(f"no parts found for {query!r}{note}\n")
         if args.json:
             _emit(_dumps([]))
         return EXIT["OK"]
@@ -743,6 +754,11 @@ def register(sub, common) -> None:
     ps.add_argument("query", nargs="?", help="search keywords")
     ps.add_argument("--limit", type=int, default=20, metavar="N",
                     help="max results (default: 20)")
+    ps.add_argument("--category", metavar="NAME",
+                    help="keep only results whose category equals NAME "
+                         "(case-insensitive exact match, e.g. Resistors, "
+                         "Capacitors) — a value/package query like '0402 47K' "
+                         "can otherwise mix in NTC thermistors from Sensors")
     ps.set_defaults(handler=_cmd_jlc_search)
 
     pb = jlc_sub.add_parser(
@@ -810,7 +826,7 @@ def register(sub, common) -> None:
     pds.add_argument("--fetch", action="store_true",
                      help="download the PDF(s); the %%PDF magic is verified "
                           "so an HTML challenge page is never saved")
-    pds.add_argument("--out", metavar="DIR",
+    pds.add_argument("-o", "--out", metavar="DIR",
                      help="download directory (default: AKCLI_DATASHEET_DIR "
                           "or ~/.cache/akcli/datasheets)")
     pds.add_argument("--force", action="store_true",
@@ -837,7 +853,7 @@ def register(sub, common) -> None:
     pa.add_argument("lcsc", nargs="?", help="LCSC part number, e.g. C2040")
     pa.add_argument("--3d", dest="with_3d", action="store_true",
                     help="also download the 3D STEP model")
-    pa.add_argument("--out", metavar="DIR",
+    pa.add_argument("-o", "--out", metavar="DIR",
                     help="output directory (default: <[paths].parts_dir or "
                          "./akcli-parts>/<C-number>/)")
     pa.add_argument("--lib-name", metavar="NAME", default="akcli",

@@ -298,3 +298,37 @@ def test_real_fixture_detects_added_component():
     # different boards -> something must differ and it is flagged low-confidence
     assert rep.low_confidence is True
     assert rep.net_changes  # at minimum the GND vs STAT nets diverge
+
+
+# --------------------------------------------------------------------------- #
+# GUI rotate/mirror pin-swap: the diff must never go silent on it
+# --------------------------------------------------------------------------- #
+def test_rotated_symbol_label_swap_is_loudly_reported():
+    """Rotating a symmetric 2-pin part 180° in the GUI swaps which pin sits
+    under each label: SIG_A={U1.1,R1.1}/SIG_B={U1.2,R2.1} becomes
+    SIG_A={U1.2,R1.1}/SIG_B={U1.1,R2.1}. Both post-edit nets score below the
+    Jaccard match floor against both pre-edit nets (1/3 < 0.34), so the diff
+    presents the swap as two removed + two added nets rather than two
+    membership changes — a known presentation rough edge. This test pins the
+    load-bearing property: every affected net raises a WARNING finding and
+    every affected pin appears in the report; a future matcher refactor must
+    not lose a side of the swap."""
+    comps_a = [comp("U1", uid="u"), comp("R1", uid="r1"), comp("R2", uid="r2")]
+    comps_b = [comp("U1", uid="u"), comp("R1", uid="r1"), comp("R2", uid="r2")]
+    a = sch(comps_a, [net("SIG_A", [("U1", "1"), ("R1", "1")]),
+                      net("SIG_B", [("U1", "2"), ("R2", "1")])])
+    b = sch(comps_b, [net("SIG_A", [("U1", "2"), ("R1", "1")]),
+                      net("SIG_B", [("U1", "1"), ("R2", "1")])])
+    rep = diff.run(a, b)
+
+    # not silent: four WARNING findings name both nets on both sides
+    codes = [f.code for f in rep.findings()]
+    assert codes.count("DIFF_NET_REMOVED") == 2
+    assert codes.count("DIFF_NET_ADDED") == 2
+
+    # every affected pin is visible in the reported membership deltas
+    removed = {m for n in rep.removed_nets for m in n.removed_members}
+    added = {m for n in rep.added_nets for m in n.added_members}
+    swap_pins = {("U1", "1"), ("U1", "2"), ("R1", "1"), ("R2", "1")}
+    assert swap_pins <= removed
+    assert swap_pins <= added

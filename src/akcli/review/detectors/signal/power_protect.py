@@ -121,8 +121,8 @@ def _parse_current(text: str | None) -> float | None:
 
 
 def _entry_names(net) -> bool:
-    from ....checks.power import _net_candidate_names
-    names = _net_candidate_names(net)
+    from ....checks.power import net_candidate_names
+    names = net_candidate_names(net)
     if any(_ENTRY_FULL_RX.match(n or "") for n in names):
         return True
     if any(classify.is_stage_name(n) for n in names):

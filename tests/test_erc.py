@@ -152,6 +152,58 @@ def test_no_erc_marker_elsewhere_does_not_suppress():
 
 
 # ---------------------------------------------------------------------------
+# no-connect marker on a CONNECTED pin (NC_PIN_CONNECTED)
+# ---------------------------------------------------------------------------
+def test_nc_marker_on_connected_pin_is_flagged():
+    # U1.1 carries an NC marker yet sits on a 2-member net -> contradiction.
+    pin = _pin("1", x=1000.0, y=2000.0)
+    sch = _sch(
+        [_comp("U1", [pin]), _comp("R1", [_pin("1")])],
+        [_net("SIG_A", [("U1", "1"), ("R1", "1")])],
+        no_erc_points=[(1000.0, 2000.0)],
+    )
+    hits = _by_code(erc.run(sch, _cfg()), erc.NC_PIN_CONNECTED)
+    assert len(hits) == 1
+    assert hits[0].severity is Severity.WARNING
+    assert hits[0].refs[0] == "U1.1"
+    assert "SIG_A" in hits[0].message
+
+
+def test_nc_marker_on_dangling_pin_not_flagged_as_connected():
+    # Single-member net: the marker is doing its intended job — suppressing
+    # the dangling warning — and must NOT trip NC_PIN_CONNECTED.
+    pin = _pin("1", x=1000.0, y=2000.0)
+    sch = _sch([_comp("U1", [pin])], [_net(None, [("U1", "1")])],
+               no_erc_points=[(1000.0, 2000.0)])
+    findings = erc.run(sch, _cfg())
+    assert _by_code(findings, erc.NC_PIN_CONNECTED) == []
+    assert _by_code(findings, erc.ERC_DANGLING_NET) == []
+
+
+def test_nc_marker_elsewhere_does_not_flag_connected_pin():
+    # Marker far from any pin of the net -> no contradiction reported.
+    pin = _pin("1", x=1000.0, y=2000.0)
+    sch = _sch(
+        [_comp("U1", [pin]), _comp("R1", [_pin("1")])],
+        [_net("SIG_A", [("U1", "1"), ("R1", "1")])],
+        no_erc_points=[(5000.0, 9000.0)],
+    )
+    assert _by_code(erc.run(sch, _cfg()), erc.NC_PIN_CONNECTED) == []
+
+
+def test_nc_pin_connected_waiver_by_net_suppresses():
+    pin = _pin("1", x=1000.0, y=2000.0)
+    sch = _sch(
+        [_comp("U1", [pin]), _comp("R1", [_pin("1")])],
+        [_net("SIG_A", [("U1", "1"), ("R1", "1")])],
+        no_erc_points=[(1000.0, 2000.0)],
+    )
+    cfg = _cfg(waivers=[{"net": "SIG_A", "rule": "nc_pin_connected",
+                         "reason": "legacy marker kept on purpose"}])
+    assert _by_code(erc.run(sch, cfg), erc.NC_PIN_CONNECTED) == []
+
+
+# ---------------------------------------------------------------------------
 # driver conflict (TYPE-gated by confidence)
 # ---------------------------------------------------------------------------
 def test_driver_conflict_high_confidence_is_warning():
@@ -654,6 +706,8 @@ def test_real_fixture_no_erc_suppresses_dangling():
     out = erc.run(sch, _cfg())
     # the lone single-pin net (U1.2) is suppressed by the No-ERC marker
     assert _by_code(out, erc.ERC_DANGLING_NET) == []
+    # ...and a marker on a genuinely-open pin never reads as a contradiction
+    assert _by_code(out, erc.NC_PIN_CONNECTED) == []
 
 
 @pytest.mark.parametrize(
