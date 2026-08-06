@@ -47,7 +47,11 @@ Two ground rules:
 ## 1. Net-connectivity debugging
 
 Symptom classes: a net that should be one is **split** in two; a pin that should be attached is
-**floating**; two unrelated nets got **merged**. Work the same loop every time:
+**floating**; two unrelated nets got **merged**. One silent cause to keep on the suspect list:
+a symbol **rotated or mirrored in the KiCad GUI** slides its pins under the other pin's
+stationary labels — the netlist swaps with nothing visually wrong (see the rotate/mirror
+label-swap entry in [docs/kicad-format-gotchas.md](../../docs/kicad-format-gotchas.md);
+`akcli verify` and `check --intent` catch it after the fact). Work the same loop every time:
 
 ```bash
 # (a) Dump the suspect net: members, aliases, source_names, confidence, merge_reasons
@@ -118,7 +122,8 @@ akcli check board.kicad_sch -C akcli.toml --json
 the same checks `draw --apply` gates on (`DANGLING_ENDPOINT`,
 `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`, `DUPLICATE_DESIGNATOR`,
 `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`, `POWER_PORT_STACKED`,
-`SHEET_FILE_MISSING`, `NO_CONNECT_CONFLICT`) over a file
+`SHEET_FILE_MISSING`; plus `NO_CONNECT_CONFLICT`, reported by the same pass
+at WARNING — visible here, never a write refusal) over a file
 akcli did not write — the fastest way to tell a hand edit / bad merge / moved
 library from an electrical problem, and to confirm a target is clean BEFORE
 blaming an op-list for a refused write.
@@ -177,7 +182,11 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   **6** and refuse the write; `NO_CONNECT_CONFLICT` is a warning. A `DANGLING_ENDPOINT` on a
   wire end that visibly touches another wire means a **T with no `(junction)`** — eeschema
   reads those as two nets, so add `add_junction` at that point (akcli inserts it automatically
-  for wires it draws). Fix the op-list (usually a wire
+  for wires it draws). Read the finding's `; note:` suffix before deleting anything: when the
+  same wire carries a net label along its span, or its other end is genuinely connected, the
+  message says so and tells you to **trim the wire to its last connected point instead** —
+  deleting the whole wire would break that net; the honest repair is usually a shorter
+  `add_wire`, not a `delete_object`. Fix the op-list (usually a wire
   endpoint that misses a pin — prefer `"REF.PIN"` endpoints, which snap exactly) and re-run the
   dry-run until the connectivity block is clean. Run
   `akcli check <target> --integrity --fail-on never` first when the same codes may
@@ -280,18 +289,34 @@ Debugging tactics specific to `sim`:
   `NP`/`OPEN` value, `Sim.Enable=0`, a `models` `skip`, a connector/test point, or
   unmodeled — is reported here, and the finding is an **ERROR** (exit 1) when it
   has ≥2 connected nodes and an assertion measures one of them. A divider that
-  "measures the rail" usually has one leg skipped, not miswired.
+  "measures the rail" usually has one leg skipped, not miswired. When the part
+  genuinely has no obtainable model (a PMIC, a radio module), list its
+  designator in the spec's top-level `acknowledged_unmodeled` array — that one
+  part's escalation downgrades to WARNING (visible, non-blocking) and a stale
+  entry is called out with `SIM_UNMODELED_ACK_UNUSED`.
 - **`SIM_VALUE_INVALID` (exit 6) is a refusal, not a crash.** A value SPICE cannot
   take confidently (`LED red`, `TBD`, an ohms-marked `600R` on an `L`) stops the
   run; `10k 1%`-style trailing tokens are dropped with a `SIM_VALUE_NORMALIZED`
   warning instead. Read those warnings: the normalized value is what was actually
   simulated.
+- **`SIM_NODE_COUNT_MISMATCH` (exit 6) means the model's terminal count and the
+  part's pad count disagree** — the classic case is a 2-terminal lumped
+  equivalent (`{"device": "C", "value": "33n"}`) on a 3-pad part, which would
+  otherwise reach ngspice as a 3-node capacitor and die with a bare `circuit
+  not parsed`. Fix: add `"pin_order": ["1", "3"]` to the `models` entry naming
+  exactly which pads are the SPICE terminals (`pin_order` selects *which* pads
+  reach SPICE, not just their order).
 - **An assert bound to `op` is rejected** (`SIM_OP_ASSERT_UNSUPPORTED`, exit 2) —
   `.meas` needs a plot. Re-declare the analysis as a single-point `dc` sweep
   (`"dc": "Vsupply 3.3 3.3 1"`) to assert an operating point.
 - **A failed measurement (`SIM_MEAS_FAILED`) is a finding, not a crash.** A `WHEN`
   edge that never crosses (e.g. `t_detect` on a detector that never latches)
   comes back as `None`/`failed` — which is frequently the bug you were chasing.
+- **A `SIM_SUSPICIOUS_ZERO` warning means an upper-bound-only assert measured
+  exactly 0** — a dead branch (load component deleted) passes `MAX < bound`
+  vacuously, so that green is unverified. Check the branch is populated, and
+  make critical asserts falsifiable: pair `lt`/`le` with a `gt`/`ge` lower
+  bound, or use `approx`+`tol`.
 - **Bisect with the deck.** Copy the `--deck-only` output, delete stages, and
   re-measure to localize where the behavior diverges from intent.
 - **The IS-1000× trap (model, not circuit).** A diode fit from eyeballed

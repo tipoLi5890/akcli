@@ -35,41 +35,29 @@ from .. import report as _report
 from ._shared import (
     _dumps,
     _emit,
+    _gate,
     _load_cfg,
     _load_schematic,
     _require_path,
+    _skipped,
     _ExitWith,
 )
 
-_ACTIONABLE = {_report.Severity.WARNING, _report.Severity.ERROR,
-               _report.Severity.CRITICAL}
 
-
-def _gate(name: str, findings: list) -> dict:
-    worst = max((_report._SEV_RANK.get(f.severity, 0) for f in findings),
-                default=0)
-    return {
-        "gate": name,
-        "status": "fail" if any(f.severity in _ACTIONABLE for f in findings)
-                  else "pass",
-        "findings": [
-            {"code": f.code, "severity": f.severity.value, "message": f.message}
-            for f in findings
-        ],
-        "worst_rank": worst,
-    }
-
-
-def _skipped(name: str, reason: str) -> dict:
-    return {"gate": name, "status": "skipped", "reason": reason, "findings": []}
-
-
-def _sim_gate(sch, spec_path: Path) -> dict:
+def _sim_gate(sch, spec_path: Path, cfg=None) -> dict:
     """Run a ``sim.json`` assertion spec as a release gate.
 
     An explicitly requested gate that cannot run must FAIL, never skip — a
     PASS manifest may not ship just because the release machine lacked
     libngspice.
+
+    Deck-level ERROR/CRITICAL findings (a part absent from a measured node —
+    ``SIM_PART_SKIPPED``) join the gate: the ``akcli sim`` CLI already refuses
+    such a run, and a release must not pass a sim whose measured values
+    exclude a series element. Deck WARNINGs (routine unmodeled parts off the
+    measured path) stay out of the gate — the any-WARNING-fails posture here
+    would turn them into false reds. Config ``[[waiver]]`` entries apply, so
+    a deliberate acceptance can demote/waive exactly like ``check`` findings.
     """
     from ..errors import AkcliError
     from ..sim import assertions as sim_assertions
@@ -101,7 +89,14 @@ def _sim_gate(sch, spec_path: Path) -> dict:
         msg = exc.msg.removeprefix("ERROR: ")
         code, sep, rest = msg.partition(": ")
         return _fail(code if sep else "NGSPICE_FAILED", rest if sep else msg)
-    return _gate("sim", findings)
+    blocking = {_report.Severity.ERROR, _report.Severity.CRITICAL}
+    merged = [
+        *[f for f in d.warnings if f.severity in blocking],
+        *findings,
+    ]
+    if cfg is not None and getattr(cfg, "waivers", None):
+        merged, _w, _d = _report.apply_waivers(merged, cfg.waivers)
+    return _gate("sim", merged)
 
 
 def _sha256(path: Path) -> str:
@@ -210,7 +205,7 @@ def _cmd_release_preflight(args: argparse.Namespace) -> int:
             raise _ExitWith(EXIT["NOT_FOUND"],
                             f"ERROR: no such sim spec: {sim_path}")
         inputs["sim"] = {"path": str(sim_path), "sha256": _sha256(sim_path)}
-        gates.append(_sim_gate(sch, sim_path))
+        gates.append(_sim_gate(sch, sim_path, cfg))
     else:
         gates.append(_skipped(
             "sim", "no --sim spec given (simulation stays outside the gate)"))
@@ -355,7 +350,7 @@ def register(sub, common) -> None:
                     help="review gate policy TOML: [review] allow = [codes] "
                          "(+ optional profile/fail threshold) — only "
                          "explicitly allowlisted, calibrated rules may block")
-    pp.add_argument("--out", metavar="FILE",
+    pp.add_argument("-o", "--out", metavar="FILE",
                     help="write the release manifest JSON here")
     pp.add_argument("--allow-dirty", dest="allow_dirty", action="store_true",
                     help="do not fail on a dirty worktree; record it instead")

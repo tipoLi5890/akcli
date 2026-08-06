@@ -209,6 +209,61 @@ def _label_points(doc: SNode) -> set[Point]:
     return pts
 
 
+def _label_owners(doc: SNode) -> dict[Point, str]:
+    """Net-label anchor point -> label text (first label wins on a stack).
+
+    Advisory only (used to enrich the dangling-endpoint message with what the
+    wire is carrying); connectivity decisions never read this map.
+    """
+    owners: dict[Point, str] = {}
+    for tag in ("label", "global_label", "hierarchical_label"):
+        for lb in doc.find_all(tag):
+            p = _pt_nm(lb.find("at"), 1)
+            text = _av(lb, 1)
+            if p is not None and text and p not in owners:
+                owners[p] = text
+    return owners
+
+
+def _polylines(doc: SNode, tag: str = "wire") -> list[
+    tuple[Point, Point, list[tuple[Point, Point]]]
+]:
+    """Per-``(wire)`` polyline view: ``(end_a, end_b, segments)``.
+
+    ``_wires`` flattens all polylines into one segment/terminal soup (what the
+    connectivity checks need); this keeps each polyline's identity so the
+    dangling-endpoint report can say what the OTHER end of the same wire is
+    carrying. Read-only companion — never feeds a connectivity decision.
+    """
+    out: list[tuple[Point, Point, list[tuple[Point, Point]]]] = []
+    for w in doc.find_all(tag):
+        pts = w.find("pts")
+        if pts is None:
+            continue
+        verts: list[Point] = []
+        for xy in pts.find_all("xy"):
+            p = _pt_nm(xy, 1)
+            if p is not None:
+                verts.append(p)
+        if not verts:
+            continue
+        segs = [(a, b) for a, b in zip(verts, verts[1:]) if a != b]
+        out.append((verts[0], verts[-1], segs))
+    return out
+
+
+def _on_segment(p: Point, a: Point, b: Point) -> bool:
+    """Exact test: does ``p`` lie on segment ``a``-``b`` (endpoints included)?"""
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    if ax == bx:
+        return px == ax and min(ay, by) <= py <= max(ay, by)
+    if ay == by:
+        return py == ay and min(ax, bx) <= px <= max(ax, bx)
+    return ((bx - ax) * (py - ay) == (by - ay) * (px - ax)
+            and min(ax, bx) <= px <= max(ax, bx)
+            and min(ay, by) <= py <= max(ay, by))
+
+
 def _junction_points(doc: SNode) -> set[Point]:
     pts: set[Point] = set()
     for j in doc.find_all("junction"):
@@ -567,6 +622,45 @@ def verify(doc: SNode, *, tol_nm: int = 0,
         return end_counts.get(p, 0) >= 2
 
     # --- dangling wire endpoints ------------------------------------------- #
+    # Per-polyline view + label texts: advisory context for the message only.
+    # The fix for a dangling end is often "delete the wire" — but when the SAME
+    # wire's other end (or mid-span) carries a label or reaches a pin, deleting
+    # the whole polyline splits a live net (the plan-time net diff catches it,
+    # after the fact); saying so HERE points the edit at trimming instead.
+    polylines = _polylines(doc)
+    label_owners = _label_owners(doc)
+
+    def _load_note(p: Point) -> str:
+        for end_a, end_b, poly_segs in polylines:
+            if p != end_a and p != end_b:
+                continue
+            other = end_b if p == end_a else end_a
+            if other == p:
+                continue
+            # a label anchored on the far end or riding any span of this wire
+            for lp, text in label_owners.items():
+                if lp != p and any(_on_segment(lp, a, b) for a, b in poly_segs):
+                    return (
+                        f"; note: this wire also carries label {text!r} at "
+                        f"{_fmt(lp)} — deleting the whole wire would "
+                        f"disconnect that net; trim the wire to its last "
+                        f"connected point instead"
+                    )
+            other_connected = (
+                _hit(other, pin_points, tol_nm)
+                or _hit(other, junction_points, tol_nm)
+                or _hit(other, entry_points, tol_nm)
+                or _on_other_wire(other)
+            )
+            if other_connected:
+                return (
+                    f"; note: the wire's other end at {_fmt(other)} is "
+                    f"connected — deleting the whole wire would break that "
+                    f"connection; trim the wire to its last connected point "
+                    f"instead"
+                )
+        return ""
+
     reported: set[Point] = set()
     for p in terminals:
         if p in reported:
@@ -586,7 +680,7 @@ def verify(doc: SNode, *, tol_nm: int = 0,
                     DANGLING_ENDPOINT,
                     Severity.ERROR,
                     f"wire endpoint at {_fmt(p)} is not connected to any pin, "
-                    f"label, junction, bus entry or other wire",
+                    f"label, junction, bus entry or other wire" + _load_note(p),
                     refs=[_fmt(p)],
                 )
             )

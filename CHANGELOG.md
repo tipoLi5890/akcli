@@ -31,6 +31,210 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-06
+
+A field-hardening pass driven by a multi-day agent-operated board campaign
+(agent CLI edits interleaved with human GUI edits, sim/BOM/intent gates in
+CI). Every defect below was reproduced from the field notes before it was
+fixed; the behaviors the campaign leaned on hardest gained regression locks.
+
+### Added (checks)
+- **`NC_PIN_CONNECTED` (ERC-lite, WARNING, waiver token `nc_pin_connected`).**
+  A pin carrying a no-connect marker while sitting on a >=2-pin net — KiCad's
+  native ERC catches this contradiction, akcli only ever used markers to
+  *suppress* the dangling-net rule, so the classic agent-flow accident (an
+  op-list edit wires up a pin still carrying a stale marker) sailed through
+  every akcli gate, twice, on a real board. Rides on inferred net membership,
+  so it works on any input format and sees label-only connections — the
+  `--integrity` `NO_CONNECT_CONFLICT` rule covers only the wire-based subset
+  on `.kicad_sch` (the overlap is deliberate defense-in-depth).
+
+### Added (sim)
+- **`SIM_NODE_COUNT_MISMATCH` (exit 6): the deck builder refuses an element
+  whose node count disagrees with its device letter's terminal arity**
+  (R/C/L/D/V/I/B = 2, Q = 3; `X` exempt — port count is model-defined). A
+  2-terminal equivalent model on a 3-pad part used to emit a 3-node capacitor
+  that ngspice rejected with a bare `circuit not parsed` (exit 7); the
+  structured refusal points at `pin_order`, whose pads-selection use case —
+  previously discoverable only by reading the source — is now documented.
+- **`SIM_SUSPICIOUS_ZERO` (WARNING): an upper-bound-only assert that measures
+  exactly 0 is flagged as a vacuous pass.** Delete the load component from a
+  measured branch and `MAX i(...) < 50m` still passes — CI stayed green on a
+  real project while the circuit under test was no longer being verified,
+  caught only by comparing against historical values. A live branch shows
+  float noise, never bit-exact 0, so the warning fires only on the vacuous
+  shape; the PASS verdict and exit code are unchanged. Docs gain the
+  pair-`lt`-with-`gt`/`approx` best practice.
+- **`acknowledged_unmodeled` (sim.json top level): a per-designator, audited
+  escape hatch for the in-series `SIM_PART_SKIPPED` ERROR.** Since 0.17 a
+  measured node touching a part with no obtainable SPICE model (a PMIC, a
+  radio module) was an unconditional ERROR — mass false-reds on a real
+  project, which considered pinning the previous release. Listed designators
+  downgrade to WARNING (visible, never dropped); unlisted parts keep the
+  full ERROR; a stale entry raises `SIM_UNMODELED_ACK_UNUSED` (NOTE) so a
+  blanket list cannot rot silently. Schema mirrors updated in lockstep.
+
+### Fixed (release gating)
+- **`release preflight --sim` never read deck-level findings at all** — a
+  release could PASS its sim gate while a series element was absent from the
+  very measurement being asserted (the standalone `akcli sim` CLI already
+  refused such a run). Deck ERROR/CRITICAL findings now join the gate; deck
+  WARNINGs stay out (the gate's any-WARNING-fails posture would have turned
+  routine unmodeled parts into false reds).
+- **Config `[[waiver]]` entries now apply to sim findings** in both the `sim`
+  CLI and the preflight sim gate — the same reviewed-acceptance governance as
+  `check`, instead of no escape hatch at all.
+
+### Added (CLI ergonomics)
+- **`jlc search --category NAME`** — case-insensitive exact-match post-filter
+  (jlcsearch has no server-side category parameter) with over-fetch so a
+  small `--limit` applies to the *filtered* list. A value/package query like
+  `0402 47K` mixes NTC thermistors (Sensors) into a resistor search; an agent
+  keying on value+stock picked the wrong part in the field.
+- **`-o` short alias on every bare `--out` flag** (`library import-altium`,
+  `review analyze/propose/testbench/validate`, `jlc datasheet/add`,
+  `release preflight`, `sim`) — the output-flag surface had drifted into
+  three conventions and agents kept guessing wrong. A new census test walks
+  the real parser tree: a future `--out` without `-o` fails, and the
+  grandfathered `--output` spelling (`expected`/`render`/`export`) can only
+  shrink.
+- **The dangling-endpoint report names the wire's load-bearing side.**
+  `DANGLING_ENDPOINT` pointed only at the free end; when the same polyline's
+  other end or mid-span carried a label or reached a pin, the obvious "fix" —
+  delete the whole wire — split a live net (caught by the plan-time net diff
+  only after the fact). The message now appends "this wire also carries label
+  X" / "the other end is connected", steering the edit toward trimming.
+  Message-only: firing conditions, severity, refs and the write gate are
+  unchanged.
+- **`TARGET_LOCKED` remediation points agent+GUI interleaved workflows at
+  gating write batches on `library check-lock`** instead of discovering the
+  GUI lock mid-apply.
+
+### Added (regression locks from the field's trusted paths)
+- An all-fixture sweep pins `nets <x>.SchDoc --json` member serialization to
+  the reader's inferred netlist — a field report of "every net name listed,
+  every members array empty" could not be reproduced on current source
+  (plausible causes: a pre-0.17 install, or a bus-fanout schematic — Altium
+  Bus/BusEntry records are a documented unsupported gap that yields
+  single-member nets, not empty ones); the sweep makes any future
+  serialization fork fail loudly.
+- The GUI rotate/mirror label-swap (a symmetric part rotated 180 degrees
+  swaps which pin sits under each label — netlist changes, nothing looks
+  wrong) is now a documented gotcha (`docs/kicad-format-gotchas.md`)
+  prescribing `diff`/`verify`/`--intent` after every GUI session, plus a
+  diff-engine test pinning that the swap is reported loudly (2-pin nets fall
+  below the Jaccard match floor and present as removed+added with every pin
+  listed — a matcher refactor must not lose a side). A single-file heuristic
+  lint was assessed and rejected: without a baseline, a rotated symbol with
+  a label on a pin is indistinguishable from the intended design.
+
+### Changed (docs)
+- `docs/sim.md`: `pin_order` pads-selection use case, `SIM_NODE_COUNT_MISMATCH`
+  / `SIM_SUSPICIOUS_ZERO` / `acknowledged_unmodeled` / `SIM_UNMODELED_ACK_UNUSED`
+  reference rows, upper-bound-assert best practice, `[[waiver]]` applicability.
+- jlcpcb skill: **refill zones before DRC/Gerber export** — a stale saved
+  fill produced dozens of ghost DRC violations on a real board.
+- op-list authoring docs + schematic-authoring skill: vertical `place_array`
+  with label-on-pin auto-orients text across the neighbor below
+  (`LAYOUT_LABEL_OVER_SYMBOL` storm) — prefer `direction: right` or a wider
+  pitch.
+
+An architecture-assessment round followed the field-hardening pass: a
+six-aspect review (module boundaries, CLI surface, schema governance, docs
+governance, test architecture, extensibility) plus a capability push on
+schematic *design*: generating correct-by-construction schematics from a
+declared netlist instead of hand-computed coordinates.
+
+### Added (schematic design capability)
+- **`akcli ops from-intent DESIGN.json`** — compiles a design document (the
+  `check --intent` nets table plus a `components` declaration and an
+  optional `layout` block) into an ordinary op-list: grid placement sized
+  from real symbol geometry (body, pin tips, label text), one net label per
+  listed pin, no-connects on unlisted pins, optional group tagging.
+  Deliberately zero new ops — output flows through the unchanged plan →
+  dry-apply → netdiff → connectivity-verify pipeline. Round-trip acceptance
+  is machine-enforced: the drawn sheet's `nets --intent-snapshot` reproduces
+  the design's nets, `check --intent` over the same design file reports zero
+  findings, and re-apply is byte-identical. Honest refusals
+  (`DESIGN_UNSUPPORTED`): pin-name addressing (the message hands over the
+  correct pin number), a pin number matching neither a symbol's numbers nor
+  names, an undeclared component reference (a net member's `REF` missing a
+  `components` entry), wildcard members, bus-syntax net names (safe under
+  akcli's engine but eeschema would reinterpret them), a pin in two nets,
+  coincident stacked pins on different nets, multi-unit parts with common
+  unit-0 pins. New `schemas/design-intent.schema.json`; one file drives
+  generation and stays the assertion baseline.
+- **`akcli library new-symbol SPEC.json`** — generates a `.kicad_sym` from a
+  pin table (number/name/electrical type/side/group): pins on the 100-mil
+  grid, body sized from pin counts and name lengths, stacked pins only via
+  the explicit same-name/same-type convention, deterministic bytes.
+  Electrical type is required per pin — unset types are the known source of
+  native-ERC pin-matrix noise in imported symbols. Generation refuses a
+  coincident-pin symbol with or without `--apply` (a coincident pin is a
+  connectivity-class defect — the documented exception to "geometry is
+  advisory"). Grammar was verified fixture-first against a real `kicad-cli`
+  before the renderer was written; the probe file is committed ground truth.
+  New `schemas/symbol-pins.schema.json`.
+- **`akcli library lint-symbols LIB.kicad_sym`** — standalone symbol lint:
+  `SYMLIB_PIN_COINCIDENT` (ERROR), `SYMLIB_PIN_TYPE_UNSPECIFIED` (NOTE),
+  `SYMLIB_PIN_OFF_GRID` (WARNING).
+- **`akcli gate`** — the iteration-weight bundle of the four checks a
+  designer re-runs after every GUI edit round: the full default `check`
+  family, intent assertions, sch↔pcb verify, and BOM lock drift
+  (offline/cache-only by default; `--live` opts into the network).
+  Zero-argument in a configured project — the first consumer of the
+  documented `[paths].schematic` config key (plus new `[paths].pcb` /
+  `[paths].bom_lock`); per-gate PASS/FAIL/SKIPPED summary, worst-of exit.
+  Distinct from `release preflight` (release-weight: provenance manifest,
+  git cleanliness, fab/sim/review gates) and unrelated to the CI "ci-green
+  gate" script. `preflight` and `gate` now share one gate-aggregation
+  helper, and bare `check`'s default check-name selection is a single
+  extracted source of truth.
+
+### Fixed (CLI contract)
+- **`review report --json` emitted text.** The subparser's `--format`
+  defaulted to `"text"` and the handler never consulted the global `--json`
+  flag — the one command that broke the "every subcommand accepts `--json`"
+  contract.
+
+### Changed (architecture hygiene)
+- Apply-twice byte-equality is now census-enforced: a parametrized test
+  applies every registered op and macro twice and asserts the second apply
+  is a byte-identical no-op (zero violations found); a future op added
+  without the property fails closed.
+- Exit-code census de-vacuoused: the exit-code table must cover the
+  error-code registry exactly (previously a missing mapping silently fell
+  back to the PARSE exit).
+- Cross-module private-symbol traffic removed: `root_uuid`,
+  `net_candidate_names`, `child_mil`, `quantize`/`on_segment` are public at
+  their single homes; `gui_lock_path` moved into `safety.py` so the leaf
+  module no longer imports the executor (`writers.kicad` re-exports it).
+- `sim`'s local exit-map duplicate deleted; the query miss payload is built
+  by one helper.
+- Docs conformance: the count gate now also guards skills/commands noun
+  claims (eleven stale or format-inconsistent claims normalized); SPEC §6.1
+  describes the real schema-validation coverage (a documented integration
+  test that never existed is gone); CLAUDE.md gains a new-CLI-command
+  checklist; `capabilities`'s `version_stamps` prose no longer lists `net`
+  among the unstamped-array exceptions (stale — `net --json` has stamped
+  since 0.9.0).
+
+### Changed (doc/code consistency sweep)
+- A surface-by-surface sweep of every prose claim against the code it
+  describes: the CLI reference, README (all four locales), INSTALL, SPEC, the
+  op-list / gotchas / releasing / sim / jlc / review / design-integrity guides,
+  the config example, and the skills. Flags, exit semantics, JSON envelopes,
+  worked-example values and behavior claims now match the shipped parser,
+  checks and drivers rather than an earlier surface; the two release-gate
+  finding codes are named where they fire, and `release preflight`'s exit
+  semantics are stated.
+- New machine-code census gates (`tests/test_docs_code_census.py`) fail closed
+  on the drift class the fence gate cannot see: SPEC's error-registry recital
+  and the CLI reference's exit table must match `errors.py` exactly, no doc may
+  name a code the source does not define, the review-rule and sim-code catalogs
+  are two-way censuses against their sources, and the `jlc bom` CSV header and
+  the BOM lock-drift kinds are pinned to their emitters.
+
 ## [0.18.0] - 2026-07-26
 
 A post-0.17.0 audit pass. 0.17.0 hardened 23 points but several of those fixes

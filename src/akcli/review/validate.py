@@ -54,8 +54,8 @@ def _g1_schema(c: dict, reasons: list[str]) -> None:
 def _g2_anchors(c: dict, ctx: topo.ReviewCtx, reasons: list[str]) -> None:
     net_names: set[str] = set()
     for net in ctx.sch.nets:
-        from ..checks.power import _net_candidate_names
-        net_names.update(n for n in _net_candidate_names(net) if n)
+        from ..checks.power import net_candidate_names
+        net_names.update(n for n in net_candidate_names(net) if n)
     for a in c.get("anchors") or []:
         if not isinstance(a, dict):
             reasons.append(f"anchor: malformed {a!r}")

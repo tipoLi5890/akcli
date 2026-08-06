@@ -90,6 +90,53 @@ def test_dangling_endpoint_flagged():
     assert all(f.severity is Severity.ERROR for f in dangling)
 
 
+def test_dangling_endpoint_notes_label_riding_the_same_wire():
+    # A wire with free ends but a net label anchored mid-span: the dangling
+    # report must say the wire is load-bearing, so the fix is a trim, not a
+    # whole-wire delete (which would silently split the labeled net).
+    text = (
+        '(kicad_sch (uuid "%s")\n'
+        '(wire (pts (xy 10 10) (xy 30 10)) (uuid "u-1"))\n'
+        '(label "SIG_A" (at 20 10 0) (uuid "u-2")))' % ROOT_UUID
+    )
+    findings = connectivity.verify(parse(text))
+    dangling = [f for f in findings if f.code == connectivity.DANGLING_ENDPOINT]
+    assert len(dangling) == 2          # both free ends still dangle
+    for f in dangling:
+        assert "'SIG_A'" in f.message
+        assert "trim" in f.message
+        assert f.refs == [f.refs[0]]   # refs unchanged: coordinate only
+
+
+def test_dangling_endpoint_notes_connected_other_end():
+    # An L of two wires: each free end's report notes that the SAME wire's
+    # other end is connected — deleting the whole wire would break that.
+    text = (
+        '(kicad_sch (uuid "%s")\n'
+        '(wire (pts (xy 10 10) (xy 20 10)) (uuid "u-1"))\n'
+        '(wire (pts (xy 20 10) (xy 20 20)) (uuid "u-2")))' % ROOT_UUID
+    )
+    findings = connectivity.verify(parse(text))
+    dangling = [f for f in findings if f.code == connectivity.DANGLING_ENDPOINT]
+    assert len(dangling) == 2
+    for f in dangling:
+        assert "other end" in f.message
+        assert "trim" in f.message
+
+
+def test_dangling_endpoint_fully_stray_wire_has_no_note():
+    # A wire touching nothing at either end: plain message, no advisory note.
+    text = (
+        '(kicad_sch (uuid "%s")\n'
+        '(wire (pts (xy 200 200) (xy 220 200)) (uuid "u-1")))' % ROOT_UUID
+    )
+    findings = connectivity.verify(parse(text))
+    dangling = [f for f in findings if f.code == connectivity.DANGLING_ENDPOINT]
+    assert len(dangling) == 2
+    for f in dangling:
+        assert "note:" not in f.message
+
+
 def test_wire_to_wire_endpoint_is_connected():
     # Two wires meeting end-to-end (an L corner) — neither end dangles.
     text = (

@@ -116,6 +116,33 @@ def test_protel_export_is_deterministic_and_complete(path):
             )
 
 
+@pytest.mark.parametrize("path", GOOD, ids=lambda p: p.name)
+def test_cli_nets_json_members_match_inferred_netlist(path, capsys):
+    """Field regression lock: `nets <x>.SchDoc --json` must serialize the SAME
+    members the reader inferred — a report of "every net name listed, every
+    members array empty" on Altium input could not be reproduced here, so this
+    sweep pins the correct behavior for every committed fixture (text and JSON
+    share one ``Net.members`` source; if serialization ever forks, this
+    fails)."""
+    import json as _json
+
+    from akcli.cli import main as cli_main
+
+    sch = altium_sch.read(path)
+    expected = sorted(
+        sorted(f"{ref}.{pin}" for (ref, pin) in net.members)
+        for net in sch.nets
+    )
+    assert cli_main(["nets", str(path), "--json"]) == 0
+    doc = _json.loads(capsys.readouterr().out)
+    got = sorted(sorted(n["members"]) for n in doc["nets"])
+    assert got == expected, f"{path.name}: JSON members diverge from reader"
+    # the reported symptom shape: names present, pins gone
+    assert any(members for members in got), (
+        f"{path.name}: every members array is empty"
+    )
+
+
 @pytest.mark.parametrize("path", BAD, ids=lambda p: p.name)
 def test_malformed_corpus_fails_loudly(path):
     with pytest.raises(AkcliError):

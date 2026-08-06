@@ -87,7 +87,8 @@ so the mistake surfaces at step 3, not after the Release is public.
 ## Docs conformance gate (contributor note)
 
 `tests/test_docs_conformance.py` runs in CI and guards the docs against drift, so
-keep it in mind when editing any `README*.md`, `docs/*.md`, or `skills/*/SKILL.md`:
+keep it in mind when editing any `README*.md`, `INSTALL.md`, `ROADMAP.md`,
+`docs/*.md`, `skills/*/SKILL.md`, or `commands/*.md`:
 
 - **Every ` ```-fenced `akcli …` line is validated** against a live
   `build_parser()` — an unknown subcommand or an unknown `--flag` fails the test.
@@ -95,9 +96,12 @@ keep it in mind when editing any `README*.md`, `docs/*.md`, or `skills/*/SKILL.m
   automatically). If a fenced line legitimately is **not** a runnable command (a
   usage synopsis, an entry-point string), append a ` # doc-noqa` comment to that
   line to opt it out.
-- **The `N ops` / `N macros` / `N calculators` counts** (and their zh-Hans/zh-Hant
-  forms) are asserted equal to the live registries. When you add an op, macro, or
-  calculator, update every count in the docs in the same change or the gate fails.
+- **The `N ops` / `N macros` / `N calculators` / `N skills` / `N commands`
+  counts** (and their zh-Hant/zh-Hans/ja forms) are asserted equal to the live
+  registries — the op/macro/calc tables, and the `skills/*/SKILL.md` and
+  `commands/*.md` file counts. When you add an op, macro, calculator, skill or
+  plugin command, update every count in the docs in the same change or the
+  gate fails.
 
 Run it locally with `python -m pytest tests/test_docs_conformance.py -q`.
 

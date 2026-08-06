@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/symbol-pins.schema.json",
+  "title": "AkcliSymbolPins",
+  "description": "Input document for `akcli library new-symbol`: a declarative pin table that akcli lays out into a .kicad_sym. Coordinates are NEVER authored here — the generator computes them, because coordinate layout is exactly where hand-written symbols acquire two pins on one point (which KiCad joins into one node, with no ERC violation). Both `side` and `type` are REQUIRED per pin and are never guessed: a symbol whose electrical types were left unset turns KiCad's ERC pin-conflict matrix into a rubber stamp. The loader in src/akcli/symbol_spec.py is the executable copy of this contract; tests/test_symbol_pins_schema.py asserts the two agree.",
+  "type": "object",
+  "required": ["protocol_version", "name", "pins"],
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bumped only on a breaking change to this document shape."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Symbol name; also the Value property. KiCad's {token} escaping is applied on write, so a literal '/' or ':' is fine here."
+    },
+    "reference_prefix": {
+      "type": "string",
+      "minLength": 1,
+      "default": "U",
+      "description": "Reference designator prefix (the Reference property), e.g. 'U', 'J', 'RN'."
+    },
+    "pins": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The pin table, in the order it should read. Pin numbers must be unique. A symbol with no pins connects nothing and is refused.",
+      "items": {
+        "type": "object",
+        "required": ["number", "name", "type", "side"],
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package pad identifier, e.g. '1' or 'A12'. Unique within the symbol."
+          },
+          "name": {
+            "type": "string",
+            "description": "Pin function name. Use \"\" for an unnamed pin (emitted as KiCad's '~')."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "bidirectional",
+              "free",
+              "input",
+              "no_connect",
+              "open_collector",
+              "open_emitter",
+              "output",
+              "passive",
+              "power_in",
+              "power_out",
+              "tri_state",
+              "unspecified"
+            ],
+            "description": "KiCad electrical-type grammar token, emitted verbatim. REQUIRED — never defaulted. 'free'/'unspecified' are accepted but flagged by SYMLIB_PIN_TYPE_UNSPECIFIED."
+          },
+          "side": {
+            "type": "string",
+            "enum": ["left", "right", "top", "bottom"],
+            "description": "Which body edge the pin attaches to. REQUIRED — the generator never infers a side from a pin name."
+          },
+          "group": {
+            "type": ["string", "null"],
+            "default": "",
+            "description": "Optional functional grouping. Within one side, pins are ordered by their group's FIRST APPEARANCE in this array, then by array order — so related pins stay together and the layout is stable."
+          },
+          "hidden": {
+            "type": "boolean",
+            "default": false,
+            "description": "Emit the pin with `(hide yes)`. Usual case: the redundant members of a stacked power-pin group."
+          },
+          "stack_with": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Number of the pin whose coordinate this pin shares — the ONLY sanctioned same-coordinate case. The target must be on the same side, must not itself be stacked, and must carry the SAME name and the SAME type (KiCad's stacked-pin convention). Anything else on one point is an electrical mis-join and is refused."
+          }
+        }
+      }
+    },
+    "body": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Optional geometry overrides. Omit it and the body is sized from the pin counts and name lengths.",
+      "properties": {
+        "width_mil": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0,
+          "description": "Widen the body to at least this many mils (rounded up to a 200-mil multiple so pins stay on the 100-mil grid). It can only WIDEN: shrinking below the computed minimum would push top/bottom pins onto the left/right pin columns."
+        }
+      }
+    }
+  }
+}

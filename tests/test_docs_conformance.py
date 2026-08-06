@@ -174,6 +174,11 @@ def _registry_counts() -> dict[str, int]:
         "ops": len(ops.OP_NAMES),
         "macros": len(ops.MACRO_OPS),
         "calculators": len(CALCS),
+        # not registry tables — these two noun classes are counted straight off
+        # the filesystem (the plugin/skill surface itself), same "count claim
+        # must match reality" contract as the op/macro/calc registries above.
+        "skills": len(list((_ROOT / "skills").glob("*/SKILL.md"))),
+        "commands": len(list((_ROOT / "commands").glob("*.md"))),
     }
 
 
@@ -187,14 +192,23 @@ _COUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("macros", re.compile(r"(?<![\w.])(\d+)[-\s]macros?(?![\w-])")),
     ("calculators", re.compile(r"(?<![\w.])(\d+)\s+(?:[a-z-]+\s+){0,3}calculators?\b")),
     ("calculators", re.compile(r"(?<![\w.])(\d+)\s+design questions\b")),
+    # skills/commands claims are usually "N <optional single `code-span`> noun"
+    # (e.g. "8 `/akcli:circuit-*` commands", "12 `akcli` skills") — the
+    # optional backtick group absorbs that without opening the noun class up.
+    ("skills", re.compile(r"(?<![\w.])(\d+)\s+(?:`[^`\n]*`\s+)?skills?(?![\w-])")),
+    ("commands", re.compile(
+        r"(?<![\w.])(\d+)\s+(?:slash\s+)?(?:`[^`\n]*`\s+)?commands?\b")),
     # zh (Hant/Hans share the CJK forms below)
     ("ops", re.compile(r"(\d+)\s*[種种]\s*op(?![\w-])")),
     ("macros", re.compile(r"(\d+)\s*[種种]\s*(?:巨集|宏)")),
     ("calculators", re.compile(r"(\d+)\s*[個个種种][一-鿿]{0,10}(?:計算|计算)")),
+    ("skills", re.compile(r"(?<![\w.])(\d+)\s*[個个](?:の)?\s*skills\b")),
+    ("commands", re.compile(r"(?<![\w.])(\d+)\s*[個个].{0,40}?(?:指令|命令)")),
     # ja — the katakana/kana forms the zh patterns cannot reach ("10 マクロ",
     # "60 個の規格準拠計算機"; the bare "22 op" is already caught in English).
     ("macros", re.compile(r"(\d+)\s*(?:個\s*の\s*)?マクロ")),
     ("calculators", re.compile(r"(\d+)\s*個の[ぁ-んァ-ヴ一-鿿]{0,12}計算機")),
+    ("commands", re.compile(r"(?<![\w.])(\d+)\s*つの.{0,40}?コマンド")),
 ]
 
 

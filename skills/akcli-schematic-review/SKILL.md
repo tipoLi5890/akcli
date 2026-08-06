@@ -157,7 +157,10 @@ and discovery walks up from the schematic's directory. Interpret the metadata he
 | frac coords present | Altium sub-unit coordinates are in play; purely informational. |
 
 Finding codes you will see: `ERC_FLOATING_INPUT`, `ERC_DRIVER_CONFLICT`, `ERC_DANGLING_NET`,
-`ERC_NO_POWER`, `ERC_NO_GROUND`, `ERC_NET_ALIAS` (NOTE-only by design);
+`ERC_NO_POWER`, `ERC_NO_GROUND`, `ERC_NET_ALIAS` (NOTE-only by design),
+`NC_PIN_CONNECTED` (WARNING — a no-connect marker on a pin that is nevertheless a member of
+a ≥2-pin net; the marker and the wire/label contradict each other, the classic stale marker
+left from an earlier revision; waiver token `nc_pin_connected`);
 `POWER_NO_DECOUPLING`, `POWER_VOLTAGE_MISMATCH`, `POWER_CURRENT_BUDGET`, `POWER_NO_RAILS`,
 `POWER_RAIL_NO_SOURCE` (WARNING — a recognized rail with ≥2 consumers and nothing that
 could feed it: no `power_out`/`output` pin, no `PWR_FLAG`, no connector/battery/test-point
@@ -168,7 +171,8 @@ integrity: `DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`,
 `DUPLICATE_DESIGNATOR`, `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`,
 `POWER_PORT_STACKED` (two net-naming power symbols on one coordinate — the
 rails merge with nothing visible to see), `SHEET_FILE_MISSING`,
-`NO_CONNECT_CONFLICT`;
+`NO_CONNECT_CONFLICT` (WARNING — the wire-based subset of `NC_PIN_CONNECTED`, caught
+pre-netbuild; unlike its ERROR siblings above it never blocks a write);
 `CONTRACT_PASS` (INFO — a contract rule was checked and held), `CONTRACT_WAIVED` (NOTE —
 a rule was demoted/dropped by a waiver), `CONTRACT_EXCEPTION_EXPIRED` (an approved
 exception's expiry has passed — the rule is enforced again; report as a finding, not a pass).

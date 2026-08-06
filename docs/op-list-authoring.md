@@ -24,6 +24,32 @@ placement — the exact points wires, labels, and power ports must land on. It
 mirrors the writer's `geometry.pin_world`, so a coordinate it prints is byte-for-byte
 where `draw` will place that pin. Use it instead of guessing pin offsets.
 
+## Start from the pin→net table: `ops from-intent`
+
+For a NEW block, the recommended starting point is not writing ops by hand but
+**generating** them from a design document — the `check --intent` pin→net
+table plus a `components` map (and optional `layout` hints; see
+`schemas/design-intent.schema.json`):
+
+```bash
+akcli ops from-intent design.json -o ops.json --symbols MyLib.kicad_sym
+akcli plan board.kicad_sch --ops ops.json --symbols MyLib.kicad_sym
+```
+
+The generator owns all geometry (uniform cells sized to body + pins +
+estimated label text, 50-mil grid) and emits only the **ordinary vocabulary**
+— `place_component`, label-on-pin `add_net_label`, `add_no_connect` for every
+unlisted pin (`layout.no_connect_unlisted: false` opts out; the other
+`layout` keys are `origin`, `columns`, `margin_mil` and per-component
+`group`) — so the output is a normal op-list: edit it, re-run it through
+`plan`/`draw`, `arrange --groups` it later. Round trip: the SAME design file
+is the assertion baseline, so after `draw --apply`,
+`akcli check board.kicad_sch --intent design.json` must report zero findings.
+It refuses (exit 6, `DESIGN_UNSUPPORTED`) instead of guessing: pins addressed
+by name instead of number (the message hands over the correct number),
+wildcard members, a REF with no `components` entry, one pin in two nets,
+coincident stacked pins on different nets, and bus-syntax net names.
+
 ## Envelope
 
 ```json
@@ -38,7 +64,9 @@ where `draw` will place that pin. Use it instead of guessing pin offsets.
 
 - `protocol_version` is checked first; an executor rejects a higher major with
   `PROTOCOL_MISMATCH` rather than guessing.
-- `target_file` may be overridden by the CLI's positional target.
+- `target_file` is documentation only — `plan`/`draw` always act on the CLI's
+  positional target, which is REQUIRED; the field is never read (generators
+  emit it so an op-list records what it was authored against).
 - `groups` (optional) declares functional modules — see
   [Modular design with functional groups](#modular-design-with-functional-groups).
 
@@ -59,6 +87,16 @@ where `draw` will place that pin. Use it instead of guessing pin offsets.
   pins without touching either pin.
 - Wire `vertices` must form orthogonal segments; dogleg through an
   intermediate `[x, y]` when two pins don't share an axis.
+
+Refusals you will hit while authoring (all exit `6`, nothing written):
+`OFF_GRID` (coordinate not on the 50-mil grid), `BAD_ANGLE` (rotation outside
+`{0,90,180,270}`), `NON_ORTHOGONAL_WIRE` (diagonal segment — route it as an
+L), `OVERLAP` (another object already at that position), `SYMBOL_NOT_FOUND`
+(pass the defining library via `--symbols`), `OP_UNSUPPORTED` (unknown op or
+field), `PROTOCOL_MISMATCH`, `GROUP_UNKNOWN` / `GROUP_NO_ORIGIN`,
+`HIERARCHICAL_UNSUPPORTED`, `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`,
+`VERIFY_FAILED` (connectivity gate), `TARGET_LOCKED` (KiCad holds the file
+open — `--allow-open` overrides). `akcli ops template <op>` prevents most.
 
 ## The vocabulary
 
@@ -86,14 +124,15 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 | `rename_net` | `from, to` | rewrites matching label texts (`label`/`global_label`/`hierarchical_label`) **and** power-port net Values; optional `scope` restricts to one label kind (power Values only rewritten when unscoped); 0 matches = replay-safe note; the match count is reported. KiCad only (`altium: false`) |
 | `delete_component` | `designator` | removes ALL instances; attached wires are left for the connectivity gate to flag — delete them explicitly, or set `"cascade": true` to also delete wires ending on any deleted pin's coordinate plus labels/no-connects anchored there; an anchored junction is removed only when fewer than two surviving wires still pass through it (a pure-X crossing of untouched wires keeps its junction — deleting it would silently split their net). Cascaded uuids are reported; absent target = replay-safe no-op |
 | `delete_object` | `uuid` **or** `match` | remove ONE top-level object (wire/label/junction/text/...). `match: {kind, name?, at?}` addresses it without a uuid — exactly-one semantics (0 matches = replay-safe note, >1 = error listing the candidate uuids); `match.at` is exact mils, NOT grid-snapped |
-| `move_component` | `designator` + position | destination is `x_mil`+`y_mil` OR `anchor` (+`offset_mil`), like `place_component`. One instance (optional `unit`); its properties travel along; wires do NOT stretch unless `carry_labels`/`carry_wires` |
+| `move_component` | `designator` + position | destination is `x_mil`+`y_mil` OR `anchor` (+`offset_mil`), like `place_component`. One instance (optional `unit`); its properties travel along; wires do NOT stretch unless `carry_wires`, and labels anchored on the moved pins are left behind unless `carry_labels` (the two flags are independent) |
 | `add_sheet` | `name, file, at, size` | hierarchical sheet: `(sheet …)` with `Sheetname`/`Sheetfile`, deterministic uuids, and edge-computed sheet pins from optional `pins:[{name, type, side, offset_mil}]` (`type: input\|output\|bidirectional\|tri_state\|passive`, `side: left\|right\|top\|bottom`). `at`=TOP-LEFT corner, mils. Wires attach to a sheet pin **by coordinate** (`at`+`offset_mil` along the side, grid-snapped) — there is NO `Sheet.Pin` endpoint. KiCad only (`altium: false`); the child `.kicad_sch` must ALREADY exist (`akcli new <child>` first) or the op is refused with `SHEET_FILE_MISSING` |
 
-### Macro ops (expanded before validation)
+### Macro ops (validated, then expanded)
 
-Compound placements that expand into the core ops above **before** the
-validator, the schema, or any executor sees them — `protocol_version` is
-untouched. The `place_*` block macros use the collision-proof label-on-pin
+Compound placements that the validator checks **first** — a macro with a
+bogus field must never be expanded, or the expander would ignore the field
+and manufacture a plausible-looking circuit — then expands into the core ops
+above before any executor sees them; `protocol_version` is untouched. The `place_*` block macros use the collision-proof label-on-pin
 pattern (labels anchored at `"REF.PIN"`, no wires emitted); netbuild merges a
 same-name local label into the sheet's power/global net exactly like KiCad.
 `connect_and_label` is the exception: it emits one wire plus one mid-wire
@@ -126,8 +165,10 @@ fixed part: `place_led_indicator` is `[R, D]`, `place_rc_filter` is `[R, C]`,
 Writing them in the "reading order" you had in mind (`["D1", "R3"]`) would
 otherwise name the resistor D1 and the LED R3 — electrically identical, BOM
 wrong, no finding anywhere — so a refdes prefix that contradicts its slot is an
-`OP_UNSUPPORTED` error naming the slot. Overriding `lib_id` to a different part
-class hands the convention back to you and lifts the check.
+`OP_UNSUPPORTED` error naming the slot. Only `place_divider` /
+`place_decoupling` / `place_pullup` accept a `lib_id`: overriding it there to
+a different part class hands the convention back to you and lifts the check.
+The other macros hard-code their parts and reject a `lib_id` field outright.
 `terminate_unused_unit` and `place_array` choose no part, so their designators
 are unconstrained.
 
@@ -157,7 +198,9 @@ authoring model:
 
 - **Group-local coordinates.** Any op may carry `"group": "<NAME>"`; its
   `[x, y]` coordinates are then relative to that group's `origin`
-  (`absolute = local + origin`). Design each module around its own `(0, 0)`;
+  (`absolute = local + origin`) — with ONE exception: `delete_object`'s
+  `match.at` never translates, so a grouped delete must name world mils.
+  Design each module around its own `(0, 0)`;
   **moving a whole module is a one-line origin edit** (on a NOT-yet-applied
   list — see the idempotency rules below for applied files). Pin anchors
   (`"REF.PIN"`, `"mid()"`, relative-placement `anchor`) are
@@ -222,9 +265,13 @@ silently place nothing:
 
 ## Execution pipeline (what happens to your ops)
 
-Macros expand first (each child inherits its macro's `group` tag), THEN
-group-local coordinates resolve to absolute, THEN the validator runs — so a
-structurally bad group reference fails before anything touches the target.
+The validator runs FIRST, over the ops exactly as you wrote them (so a
+macro's own field typo is caught before any expander could drop it). Macros
+then expand (each child inherits its macro's `group` tag), group-local
+coordinates resolve to absolute, and the expanded list is validated again —
+every error index mapped back to the op YOU wrote. A structurally bad group
+reference therefore fails after per-op validation but still before anything
+touches the target.
 `plan`/`draw --render OUT.svg` additionally renders the would-be sheet from
 the same temp dry-apply the net diff uses (grid overlay included), so you can
 LOOK at the result before `--apply`.
@@ -240,8 +287,10 @@ LOOK at the result before `--apply`.
    connectivity ERROR
    (`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `DUPLICATE_UUID`,
    `DUPLICATE_DESIGNATOR`, `UNRESOLVED_LIB_ID`, `INVALID_INSTANCES_PATH`,
-   `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`,
-   `NO_CONNECT_CONFLICT`) refuses the write (exit 6) — the same set
+   `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`) refuses the write (exit 6).
+   The same pass also reports `NO_CONNECT_CONFLICT` (an NC flag on a pin that
+   also has a live connection) at WARNING — visible, but not on its own a
+   refusal. It is the same set
    `akcli check <file> --integrity` runs read-only on any `.kicad_sch`, so an
    imported or hand-edited file can be screened before you author against it.
    Add `--strict-nets`
@@ -309,7 +358,8 @@ downstream of the edit:
   on one sheet is legal topology, so nothing can tell "the port moved" from "a
   second port was added": change the `at` of an already-applied
   `place_power_port` and you get two. Delete the old one explicitly
-  (`delete_object` with `{"kind": "symbol", "at": [x_mil, y_mil]}`) or `akcli
+  (`delete_component` with the port's auto-allocated reference — e.g.
+  `{"designator": "#PWR03"}`, found via `akcli component <sheet>`) or `akcli
   undo` and re-apply the edited list from the reverted file.
 - **Group origins.** Editing a group's `origin` and re-running an
   ALREADY-applied list moves the member parts in place (designator seeds), but
@@ -358,8 +408,17 @@ unedited list once, or roll back with `akcli undo`, before editing the list.
   you (`auto_junctions`) on every wire IT draws. In an imported or hand-drawn
   file a junction-less T therefore reads as `DANGLING_ENDPOINT`, which is the
   honest answer: KiCad calls those two nets too.
-- **The only hard connectivity write-gates are `DANGLING_ENDPOINT` and
-  `DANGLING_BUS_ENTRY`.** Non-orthogonal and overlapping/collinear wires are
+  The finding's message is enriched when deleting the wire would be the wrong
+  fix: if the same wire carries a net label further along its span, or if its
+  other end is genuinely connected, the message appends a
+  `; note: …deleting the whole wire would…; trim the wire to its last
+  connected point instead` suffix. Read that suffix before authoring a
+  `delete_object` — the honest repair is usually a shorter `add_wire`, not a
+  deletion.
+- **Of the wire-GEOMETRY rules, the only hard write-gates are
+  `DANGLING_ENDPOINT` and `DANGLING_BUS_ENTRY`** (the other ERROR-severity
+  document findings listed under `--apply` above gate too, but they are not
+  about wire shape). Non-orthogonal and overlapping/collinear wires are
   *tolerated*, so two stubs that overlap or a wire that T-junctions another net
   can silently **merge** nets — a passing `--apply` proves the write landed, not
   that the netlist is right. Three rails catch the silent cases: the **Net
@@ -513,6 +572,14 @@ its own section below.
   `place_vcc` / `place_power_port at "REF.PIN"` belongs ON the pin (rung 1
   above) and the lint stays quiet — it only fires there if the port's *body*
   actually lands on the part (a port rotated back over the symbol).
+- **Vertical `place_array` + label-on-pin = label-over-neighbor collisions.**
+  A `direction: down` array stacks parts at `pitch_mil` while a label on a
+  side-facing pin auto-orients horizontally — on a tight pitch the text runs
+  across the next part's body and `check --layout` fills with
+  `LAYOUT_LABEL_OVER_SYMBOL`. Prefer `direction: right` (labels extend up/
+  down into free space) for arrays whose every element gets a label-on-pin,
+  or widen `pitch_mil` until the layout lint is quiet — the lint is the
+  arbiter, not the eye.
 - **Deleting labels can split nets — the Net-changes block catches it.** When
   a net's fragments are held together only by same-name labels, deleting
   "redundant" labels silently splits it (deleting both THR labels split THR
@@ -543,8 +610,8 @@ its own section below.
       "x_mil": 2000, "y_mil": 1000, "value": "10k" },
     { "op": "place_gnd", "at": [2000, 1200] },
     { "op": "add_wire", "vertices": ["R1.2", [2000, 1200]] },
-    { "op": "add_net_label", "name": "SENSE", "at": [2000, 850], "scope": "global" },
-    { "op": "add_wire", "vertices": ["R1.1", [2000, 850]] }
+    { "op": "add_net_label", "name": "SENSE", "at": [2000, 700], "scope": "global" },
+    { "op": "add_wire", "vertices": ["R1.1", [2000, 700]] }
   ] }
 ```
 

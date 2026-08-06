@@ -35,6 +35,33 @@ def _base_doc(**overrides) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# load(): acknowledged_unmodeled
+# --------------------------------------------------------------------------- #
+def test_load_acknowledged_unmodeled_ok(tmp_path):
+    doc = _base_doc(acknowledged_unmodeled=["U1", " U2 "])
+    spec = sa.load(_write(tmp_path, doc))
+    assert spec.acknowledged_unmodeled == ["U1", "U2"]  # whitespace-stripped
+
+
+def test_load_acknowledged_unmodeled_defaults_empty(tmp_path):
+    spec = sa.load(_write(tmp_path, _base_doc()))
+    assert spec.acknowledged_unmodeled == []
+
+
+def test_load_acknowledged_unmodeled_rejects_non_list(tmp_path):
+    with pytest.raises(AkcliError) as ei:
+        sa.load(_write(tmp_path, _base_doc(acknowledged_unmodeled="U1")))
+    assert ei.value.code == "BAD_CONFIG"
+    assert "acknowledged_unmodeled" in ei.value.message
+
+
+def test_load_acknowledged_unmodeled_rejects_blank_entry(tmp_path):
+    with pytest.raises(AkcliError) as ei:
+        sa.load(_write(tmp_path, _base_doc(acknowledged_unmodeled=["U1", " "])))
+    assert ei.value.code == "BAD_CONFIG"
+
+
+# --------------------------------------------------------------------------- #
 # load(): golden table
 # --------------------------------------------------------------------------- #
 def test_load_minimal_ok(tmp_path):
@@ -505,6 +532,61 @@ def test_evaluate_multiple_asserts_report_order():
     findings, measured = sa.evaluate(spec, {"a": 2, "b": 0.5})
     assert findings == []
     assert list(measured.keys()) == ["a", "b"]
+
+
+# --------------------------------------------------------------------------- #
+# evaluate(): suspicious exact-zero against upper-bound-only asserts
+# --------------------------------------------------------------------------- #
+def test_exact_zero_on_upper_bound_only_warns():
+    # An open circuit (load removed) measures exactly 0 and "passes" MAX < 50m
+    # vacuously — the pass stands, but a WARNING flags it as unverified.
+    spec = sa.SimSpec(asserts=[{"name": "ipeak", "meas": "MAX i(v1)", "lt": 0.05}])
+    findings, measured = sa.evaluate(spec, {"ipeak": 0.0})
+    assert [f.code for f in findings] == ["SIM_SUSPICIOUS_ZERO"]
+    assert findings[0].severity.value == "warning"
+    assert "open circuit" in findings[0].message
+    assert measured == {"ipeak": 0.0}
+
+
+def test_exact_zero_on_le_bound_warns_too():
+    spec = sa.SimSpec(asserts=[{"name": "x", "meas": "m", "le": 1.0}])
+    findings, _ = sa.evaluate(spec, {"x": 0.0})
+    assert [f.code for f in findings] == ["SIM_SUSPICIOUS_ZERO"]
+
+
+def test_exact_zero_with_lower_bound_fails_without_suspicion():
+    # A gt/ge lower bound makes 0 an honest FAIL, not a vacuous pass.
+    spec = sa.SimSpec(asserts=[{"name": "x", "meas": "m", "gt": 0.01}])
+    findings, _ = sa.evaluate(spec, {"x": 0.0})
+    assert [f.code for f in findings] == ["SIM_ASSERT_FAIL"]
+
+
+def test_exact_zero_on_two_sided_window_no_suspicion():
+    # ge+le window: the lower side already fails honestly at 0.
+    spec = sa.SimSpec(asserts=[{"name": "x", "meas": "m", "ge": 0.5, "le": 1.5}])
+    findings, _ = sa.evaluate(spec, {"x": 0.0})
+    assert [f.code for f in findings] == ["SIM_ASSERT_FAIL"]
+
+
+def test_exact_zero_on_approx_no_suspicion():
+    spec = sa.SimSpec(asserts=[{"name": "x", "meas": "m", "approx": 1.0}])
+    findings, _ = sa.evaluate(spec, {"x": 0.0})
+    assert [f.code for f in findings] == ["SIM_ASSERT_FAIL"]
+
+
+def test_tiny_nonzero_value_no_suspicion():
+    # Float noise from a live branch is never bit-exact 0 — no warning.
+    spec = sa.SimSpec(asserts=[{"name": "x", "meas": "m", "lt": 0.05}])
+    findings, _ = sa.evaluate(spec, {"x": 1.2e-13})
+    assert findings == []
+
+
+def test_zero_warning_does_not_flip_bound_verdict():
+    # The vacuous pass still counts as a pass (no SIM_ASSERT_FAIL) — the
+    # warning rides alongside, it does not override the bound check.
+    spec = sa.SimSpec(asserts=[{"name": "x", "meas": "m", "lt": 0.05}])
+    findings, _ = sa.evaluate(spec, {"x": 0.0})
+    assert all(f.code != "SIM_ASSERT_FAIL" for f in findings)
 
 
 # --------------------------------------------------------------------------- #

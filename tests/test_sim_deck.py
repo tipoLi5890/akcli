@@ -550,3 +550,66 @@ def test_golden_mini_deck():
         ".end",
     ]) + "\n"
     assert d.text == expected
+
+
+# --------------------------------------------------------------------------- #
+# node-count vs device letter (SIM_NODE_COUNT_MISMATCH)
+# --------------------------------------------------------------------------- #
+def _three_pad_sch():
+    """A generic 3-pad part J1 spanning three nets (one of them ground)."""
+    return _sch(
+        [_comp("J1", ["1", "2", "3"], library_ref="Connector:Conn_01x03")],
+        [
+            _net("IN_A", [("J1", "1")]),
+            _net("MID_A", [("J1", "2")]),
+            _net("GND", [("J1", "3")]),
+        ],
+    )
+
+
+def test_two_terminal_model_on_three_pads_raises(monkeypatch):
+    # A {"device": "C"} equivalent on a 3-pad part with no pin_order would
+    # emit a 3-node capacitor; refuse with a structured error instead of
+    # letting ngspice fail with a bare 'circuit not parsed'.
+    monkeypatch.setattr(
+        _stub, "resolve", lambda comp, spec: _Card(letter="C", value="33n")
+    )
+    with pytest.raises(AkcliError) as ei:
+        deck.build(_three_pad_sch(), _Spec())
+    assert ei.value.code == "SIM_NODE_COUNT_MISMATCH"
+    assert "pin_order" in ei.value.message
+    assert "J1" in ei.value.message
+
+
+def test_pin_order_reduces_three_pads_to_two_nodes(monkeypatch):
+    # The documented escape hatch: pin_order names exactly which pads are the
+    # SPICE terminals — the deck builds cleanly with 2 nodes.
+    monkeypatch.setattr(
+        _stub,
+        "resolve",
+        lambda comp, spec: _Card(letter="C", value="33n", pin_order=["1", "3"]),
+    )
+    d = deck.build(_three_pad_sch(), _Spec())
+    assert "CJ1 IN_A 0 33n" in d.text
+
+
+def test_wrong_length_pin_order_raises(monkeypatch):
+    # An explicit pin_order that still has the wrong arity is refused too.
+    monkeypatch.setattr(
+        _stub,
+        "resolve",
+        lambda comp, spec: _Card(
+            letter="C", value="33n", pin_order=["1", "2", "3"]
+        ),
+    )
+    with pytest.raises(AkcliError) as ei:
+        deck.build(_three_pad_sch(), _Spec())
+    assert ei.value.code == "SIM_NODE_COUNT_MISMATCH"
+    assert "pin_order" in ei.value.message
+
+
+def test_two_pin_passives_unaffected_by_arity_gate():
+    # Every well-formed 2-pin passive still builds exactly as before.
+    d = deck.build(_rc_sch(), _Spec())
+    assert "R1 VIN OUT 10k" in d.text
+    assert "C1 OUT 0 100n" in d.text

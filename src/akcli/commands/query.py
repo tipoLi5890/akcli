@@ -254,6 +254,13 @@ def _pin_spec(spec: str) -> tuple[str, str]:
     return ref, pin
 
 
+def _emit_miss(query: str, kind: str, source: str) -> None:
+    """Emit the standard ``--json`` "not found" envelope (net/component/pin
+    lookups all share this shape: ``found: false`` + what was queried)."""
+    _emit(_dumps(_stamp({"found": False, "query": query, "kind": kind,
+                         "source": source})))
+
+
 def _pin_or_miss(args: argparse.Namespace, path: Path, sch,
                  spec: str) -> tuple[str, str] | None:
     """Resolve ``REF.PIN`` against the schematic; on a miss, emit the standard
@@ -262,8 +269,7 @@ def _pin_or_miss(args: argparse.Namespace, path: Path, sch,
 
     def miss(stderr_line: str) -> None:
         if args.json:
-            _emit(_dumps(_stamp({"found": False, "query": spec, "kind": "pin",
-                                 "source": path.as_posix()})))
+            _emit_miss(spec, "pin", path.as_posix())
         sys.stderr.write(stderr_line + "\n")
 
     comp = next((c for c in sch.components if c.designator == ref), None)
@@ -372,7 +378,7 @@ def _net_why(args: argparse.Namespace, path: Path, sch, spec: str) -> int:
                         "off_grid_50mil": None, "hints": hints})
         return _emit_why(args, payload, net)
 
-    q, on_seg = netbuild._q, netbuild._on_seg
+    q, on_seg = netbuild.quantize, netbuild.on_segment
     qp = q(ph.at)
     segs = [(w.a, w.b) for w in prims.wires if w.sheet == ph.sheet]
     qsegs = [(q(a), q(b)) for a, b in segs]
@@ -496,8 +502,7 @@ def _cmd_net(args: argparse.Namespace) -> int:
         ]
         if not matches:
             if args.json:
-                _emit(_dumps(_stamp({"found": False, "query": name,
-                                     "kind": "net", "source": str(path)})))
+                _emit_miss(name, "net", str(path))
             hint = _did_you_mean(name, (n.name for n in sch.nets if n.name))
             sys.stderr.write(f"no net named {name!r}{hint}\n")
             return EXIT["QUERY_MISS"]
@@ -612,8 +617,7 @@ def _cmd_component(args: argparse.Namespace) -> int:
     comp = next((c for c in sch.components if c.designator == ref), None)
     if comp is None:
         if args.json:
-            _emit(_dumps(_stamp({"found": False, "query": ref,
-                                 "kind": "component", "source": str(path)})))
+            _emit_miss(ref, "component", str(path))
         hint = _did_you_mean(ref, (c.designator for c in sch.components))
         sys.stderr.write(f"no component {ref!r}{hint}\n")
         return EXIT["QUERY_MISS"]

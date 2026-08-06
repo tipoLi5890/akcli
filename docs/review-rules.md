@@ -15,20 +15,33 @@ akcli review report review.findings.json --format markdown
 akcli review explain REVIEW_XTAL_LOAD
 ```
 
+## Findings envelope
+
+`review analyze --json` (like `check --json`) emits the shared findings
+envelope validated by `schemas/findings.schema.json`:
+`{schema_version, metadata, findings: [...]}` — each finding carries `code`,
+`severity` (`info`/`note`/`warning`/`error`/`critical`), `confidence`
+(`deterministic`/`heuristic`/`datasheet_backed`/`llm_reviewed`), `message`,
+`refs`, optional `evidence` (with a typed `source`), `remediation`, and a
+`status` (`reported`/`waived`/`accepted_risk`/`quarantined`/
+`insufficient_evidence`). Review metadata adds the trust summary (finding
+counts by confidence), `detectors_skipped`, and — when the EMC family ran —
+the advisory `emc` block described below.
+
 ## Rule table
 
 **Signal family (M2):**
 
 | code | severity | confidence | reference |
 |---|---|---|---|
-| `REVIEW_FB_DIVIDER` | info | heuristic | Vout = Vref·(1 + Rt/Rb) |
+| `REVIEW_FB_DIVIDER` | info | heuristic / datasheet_backed / deterministic | Vout = Vref·(1 + Rt/Rb) — datasheet_backed with a matched `vref` fact; deterministic (+`status: insufficient_evidence`) when values are unreadable |
 | `REVIEW_FB_DIVIDER_VREF` | warning | heuristic | typical bandgap references 0.5–1.25 V (≤2.5 V shunt) |
 | `REVIEW_DIVIDER_TAP_MISMATCH` | warning | heuristic | — |
 | `REVIEW_DIVIDER_UNVALUED` | note | deterministic | — (insufficient-evidence discipline) |
 | `REVIEW_RC_CUTOFF` | info | deterministic | Horowitz & Hill, *AoE* (via `akcli calc rc`) |
 | `REVIEW_XTAL_NO_LOADCAPS` | warning | heuristic | ST AN2867 §3 |
 | `REVIEW_XTAL_ASYMMETRIC` | warning | heuristic | ST AN2867 §3 |
-| `REVIEW_XTAL_LOAD` | info | heuristic | ST AN2867 §3 |
+| `REVIEW_XTAL_LOAD` | info | heuristic / datasheet_backed | ST AN2867 §3 — datasheet_backed when a `load_capacitance` fact matches within 10 % |
 | `REVIEW_CONN_UNPROTECTED` | warning | heuristic | IEC 61000-4-2 |
 | `REVIEW_FUSE_MISSING` | warning | heuristic | IEC 60127 / Littelfuse Fuseology |
 | `REVIEW_FUSE_UNRATED` | note | deterministic | — (insufficient-evidence discipline) |
@@ -37,8 +50,17 @@ akcli review explain REVIEW_XTAL_LOAD
 | `REVIEW_REVPOL_SHUNT_NO_FUSE` | warning | heuristic | TI SLVA139 |
 | `REVIEW_OPAMP_GAIN` | info | heuristic | ideal op-amp: G = 1 + Rf/Rg; G = −Rf/Rin |
 | `REVIEW_OPAMP_NO_FEEDBACK` | warning | heuristic | — |
-| `REVIEW_DETECTOR_ERROR` | warning | deterministic | — (engine containment; quarantined) |
-| `REVIEW_FACTS_UNMATCHED` | note | deterministic | — (engine bookkeeping: audited facts files whose MPN matches no component — they upgrade nothing until the component carries the MPN) |
+
+**Engine-level codes (no family, no `explain` page, no fingerprint):**
+
+| code | severity | confidence | meaning |
+|---|---|---|---|
+| `REVIEW_DETECTOR_ERROR` | warning | deterministic | engine containment: a detector crashed and was quarantined; the `detector` field carries the *failing detector's own name* |
+| `REVIEW_FACTS_UNMATCHED` | note | deterministic | engine bookkeeping: audited facts files whose MPN matches no component — they upgrade nothing until the component carries the MPN |
+
+Both are emitted by the engine itself, not a registered rule: they carry no
+`rule_version` and no `fingerprint`, so `review diff` — which aligns findings
+by fingerprint — cannot track them across runs.
 
 **Validation family (M3):**
 
@@ -113,13 +135,20 @@ families remain demand-ordered backlog.
 **Facts-store audit codes (`review facts verify`):** `FACTS_SCHEMA_INVALID`
 (error), `FACTS_PDF_MISSING` (warning), `FACTS_STALE` (error — the PDF's
 sha256 no longer matches), `FACTS_QUOTE_MISMATCH` (warning),
-`FACTS_QUOTE_UNVERIFIED` (note — pdftotext absent), `FACTS_EMPTY` (note).
+`FACTS_QUOTE_UNVERIFIED` (note — pdftotext absent, or that fact's page could
+not be read), `FACTS_EMPTY` (note). All six are stamped
+`detector: review.facts`, `confidence: deterministic`.
 
-**BOM (M3, lives in `check --bom`):** `BOM_MPN_COVERAGE` (warning,
-deterministic) — MPN/distributor-field coverage below 50 % on a ≥10-part
-sheet: the BOM cannot be ordered as-is.
+**BOM (M3, lives in `check --bom`, stamped `detector: check.bom`):**
+`BOM_MPN_COVERAGE` (warning, deterministic) — MPN/distributor-field coverage
+below the floor on a big-enough sheet: the BOM cannot be ordered as-is.
+Both thresholds are config-overridable: `[bom] coverage_floor` (default
+`0.5`) and `[bom] coverage_min_parts` (default `10`). The population is
+**fitted** BOM groups only — the one deliberate exception to the "BOM rules
+keep seeing DNP parts" policy below, because coverage measures orderability
+and nothing is ordered for a DNP line.
 
-`akcli review explain <CODE>` prints the full specification of any registered detector rule (the `REVIEW_DETECTOR_ERROR` / `REVIEW_FACTS_UNMATCHED` engine codes are internal — no `explain` page).
+`akcli review explain <CODE>` prints the full specification of any registered detector rule. Codes emitted outside the detector registry have no `explain` page and exit with a usage error: the `REVIEW_DETECTOR_ERROR` / `REVIEW_FACTS_UNMATCHED` engine codes, the six `FACTS_*` audit codes, and `BOM_MPN_COVERAGE`.
 
 ## DNP parts satisfy nothing
 
@@ -208,7 +237,9 @@ for this rule.
 ### signal.power_protect
 
 **Topology.** Power-entry nets seed a series chain walk. A net seeds when an
-entry token (`VBAT/VIN/VBUS/DCIN/PWR_IN/VSUPPLY/VEXT`) is its WHOLE name
+entry token (`VBAT`/`BATT`/`BAT` — the battery token is the regex `V?BATT?` —
+`VIN`/`VBUS`/`VDC`/`DCIN`/`PWR_IN`/`PWRIN`/`VSUPPLY`/`VEXT`, matched
+case-insensitively) is its WHOLE name
 (optional `+/-` prefix, trailing digits), or when a token-carrying name is
 power-classified by the shared rail heuristics — a token buried in a longer
 signal name (`VBUS_SENSE`) is a derived signal, not an entry, and a rail
@@ -312,25 +343,40 @@ continuous ampacity (1 oz, ΔT 10 °C external — both stated). The
 only: the rail's real current is not on the board; the automated comparison
 arrives with the power tree (M7).
 
-### emc.* (batches)
+### emc.planes / emc.stitching / emc.edge / emc.diffpair / emc.protection
 
-**Batch 1 — geometric:** ground-pour presence (multilayer without a GND
-zone) + bbox coverage note; ground-via stitching (no vias = warning; largest
-nearest-neighbour gap over λ/20 at the assumed 1 GHz/ε_eff 4.3 ≈ 7.2 mm =
-note); board-edge tracks (0.5 mm margin against the Edge.Cuts bbox —
-rectangular approximation stated; **no outline → silent, not a pass**);
-TVS-to-connector distance (10 mm clamp radius).
+Five separate detectors — `--detector` takes these exact registry ids
+(`emc.*` is not a valid selector).
 
-**Batch 2 — analytical:** differential-pair intra-pair skew — pairs found
-by name convention (`_P/_N`, `+/-`, `_DP/_DM`), per-net summed track length,
->25 ps at 6.6 ps/mm warns with the short side named in `fix_params`; an
-unrouted side belongs to `REVIEW_PCB_UNROUTED`, not this rule. Clock-named
-nets (CLK/SCK/MCLK/XTAL/OSC… tokens) at the board edge warn.
+- **`emc.planes`** (`REVIEW_EMC_NO_GND_PLANE`, `REVIEW_EMC_PLANE_COVERAGE`,
+  `REVIEW_EMC_STACKUP_ADJACENT`): ground-pour presence (multilayer without a
+  GND zone) + bbox coverage note; consecutive copper layers both typed
+  `signal` in the declared stack order. Deeper PDN work (anti-resonance,
+  impedance) needs zone polygons / SPICE and stays on the backlog — the
+  honest boundary is stated rather than approximated.
+- **`emc.stitching`** (`REVIEW_EMC_VIA_STITCH`): ground-via stitching — no
+  ground vias on a multilayer board = warning; otherwise the largest
+  nearest-neighbour gap over λ/20 at the assumed 1 GHz/ε_eff 4.3 ≈ 7.2 mm =
+  note. Silent early-outs: fewer than 2 copper layers, and exactly ONE
+  ground via.
+- **`emc.edge`** (`REVIEW_EMC_EDGE_TRACK`, `REVIEW_EMC_CLOCK_EDGE`):
+  board-edge tracks (0.5 mm margin against the Edge.Cuts bbox — rectangular
+  approximation stated; **no outline → silent, not a pass**); clock-named
+  nets (CLK/SCK/MCLK/XTAL/OSC… tokens) at the board edge warn.
+- **`emc.diffpair`** (`REVIEW_EMC_DIFFPAIR_SKEW`): intra-pair skew — pairs
+  found by name convention (`_P/_N`, `+/-`, `_DP/_DM`), per-net summed track
+  length, >25 ps at 6.6 ps/mm warns with the short side named in
+  `fix_params`; an unrouted side belongs to `REVIEW_PCB_UNROUTED`, not this
+  rule.
+- **`emc.protection`** (`REVIEW_EMC_TVS_FAR`): TVS-to-connector distance
+  (10 mm clamp radius).
 
-**Batch 3 — stackup:** consecutive copper layers both typed `signal` in the
-declared stack order. Deeper PDN work (anti-resonance, impedance) needs
-zone polygons / SPICE and stays on the backlog — the honest boundary is
-stated rather than approximated.
+### domain.usb
+
+USB-C CC-pin termination (`REVIEW_USB_CC_MISSING`, `REVIEW_USB_CC_VALUE`):
+CC nets found by name; a sink-side CC pin needs its Rd = 5.1 kΩ ±10 % to
+ground (USB Type-C §4.5.1.2). A CC net reaching any IC is assumed handled by
+a USB-C controller (integrated Rd) and skipped — stated on the finding.
 
 ## Closed loop (M7): propose / testbench / diff / tree
 
@@ -386,7 +432,8 @@ tools/holes/extents. Honesty rule: an Excellon file with bare-integer
 (implied-decimal) coordinates gets a warning and **no bbox — never a
 guessed one**. Checks: minimum fab set (copper×2, masks, outline, plated
 drill; silk is a note), copper-file count vs the board's declared stackup,
-bbox registration across copper/outline (+drill hits inside the outline),
+bbox registration across copper/outline (+drill hits inside the outline;
+2 mm alignment tolerance),
 **staleness** — the outline gerber's size vs the `.kicad_pcb` Edge.Cuts
 extent (>1 mm = the export predates the last edit, the classic
 "ordered the old rev" failure), and mixed units. Also a `release preflight
@@ -402,13 +449,15 @@ akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --gerbers fa
 **`review validate candidates.json board.kicad_sch`** — the deterministic
 gate for LLM deep-review output. Four gates; a failure lands in
 `metadata.quarantined` with its reasons (nothing silently dropped or
-accepted): **G1 schema** (fields legal; a candidate may not claim any
+accepted): **G1 schema** (fields legal; the candidate's `code` must start
+with `REVIEW_`; a candidate may not claim any
 confidence but `llm_reviewed`, may not pre-set status, must be anchored),
 **G2 anchors** (every component/net/pin anchor resolves against the model),
 **G3 datasheet evidence** (a cited sha256+page must match the facts store;
 quotes checked via `pdftotext` when available), **G4 masquerade** (the code
 may not collide with a registered deterministic rule). Accepted candidates
-are `llm_reviewed` observations — they never block, never override a
+are `llm_reviewed` observations, stamped `detector: review.validate` and
+`status: reported` — they never block, never override a
 deterministic finding, never auto-create a contract.
 
 **`release preflight --review-policy policy.toml`** — the only path by which
@@ -420,7 +469,12 @@ profile = "standard"
 allow = ["REVIEW_PCB_UNROUTED", "REVIEW_FB_DIVIDER_VREF_MISMATCH"]
 ```
 
-Only explicitly allowlisted codes gate; everything else stays advisory. The
+Only explicitly allowlisted codes gate; everything else stays advisory. Two
+carve-outs to know: the separate `gerber` preflight gate runs unconditionally
+(no allowlist — it fails on any WARNING+ gerber finding), and the `review`
+gate analyzes without gerbers, so a `REVIEW_GERBER_*` entry in `allow` can
+never match. Gates trip at WARNING and above, so allowlisting an info/note
+code cannot flip one. The
 intended promotion path: replay a corpus (`tools/corpus_replay.py`,
 dev-only) → measure the false-positive rate → then allowlist. The policy
 file's sha256 and allow list are recorded in the release manifest.
@@ -451,7 +505,9 @@ akcli review analyze board.kicad_sch --facts datasheets
 `review analyze` auto-discovers `<sch dir>/datasheets` when it holds an
 `extracted/` store. Standard fact keys consumed today: `vref` (regulator
 feedback reference), `load_capacitance` (crystal CL), `abs_max_io` (pin
-absolute maximum). Detectors with a fact upgrade to `datasheet_backed`;
+absolute maximum), `i_load` (fuse continuous current), and the junction
+trio `theta_ja` / `power_dissipation` / `t_j_max` (pcb.thermal). Detectors
+with a fact upgrade to `datasheet_backed`;
 without one they fall back to their heuristics — never to a guess.
 
 ### validation.enable_pin

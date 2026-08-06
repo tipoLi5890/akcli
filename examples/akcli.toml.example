@@ -15,19 +15,29 @@ backup_depth = 3
 # One [[rail]] table per power rail. `akcli power` enumerates rails and sanity-checks voltages;
 # `akcli check` uses rail names for net-name-based power/ground detection.
 [[rail]]
-name = "V3V3"
+name = "RAIL_A"
 voltage = 3.3
 tolerance_pct = 5
 
 # Input file locations, resolved relative to this file's directory.
+# [paths] accepts arbitrary keys (string values); an entry ending in .kicad_sym
+# is additionally offered to the writer as a symbol source.
 [paths]
 schematic = "hardware/altium/main.SchDoc"
+# dts / pinout_md are reserved — nothing reads them today; feed pin tables to
+# `akcli pinmap --expected` (via `akcli expected`) instead.
 dts       = "firmware/boards/mcu/board.dts"
 pinout_md = "hardware/docs/pinout.md"
-# Design-intent snapshot `akcli check --intent` falls back to when the flag has no value.
+# Design-intent snapshot `akcli check --intent` / `akcli gate` fall back to when no value/flag is given.
 intent    = "intent.json"
-# Where `jlc add` / `library import-altium` place converted libraries when --out
-# is not given (a committed asset dir; default without this key: ./akcli-parts).
+# `akcli gate`'s sch-pcb-gate board, when --pcb is not given.
+pcb       = "hardware/altium/main.kicad_pcb"
+# `akcli gate`'s bom-lock-gate lockfile (`jlc bom --lock`), when --lock is not given.
+bom_lock  = "bom.lock.json"
+# Where `jlc add`, `library import-altium` and `library new-symbol` place
+# converted libraries when --out is not given (a committed asset dir). Without
+# this key, only `jlc add` defaults to ./akcli-parts; the `library` commands
+# write into the current directory.
 parts_dir = "hardware/libs"
 
 # ERC waivers suppress a specific rule on a specific net, with a recorded reason. Each waiver is a

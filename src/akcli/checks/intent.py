@@ -55,6 +55,11 @@ per-net mode overrides — those are authored by hand).
 
 ``load`` raises ``BAD_CONFIG`` naming the offending entry for shape errors and
 ``PROTOCOL_MISMATCH`` for a wrong ``protocol_version`` (mirrors ops.py).
+
+A DESIGN document (``akcli ops from-intent``, :mod:`akcli.intentgen`) is a
+superset of this format: the extra top-level ``components``/``layout`` keys
+are tolerated and ignored here, so one file can drive generation AND stay the
+assertion baseline for ``check --intent``.
 """
 
 from __future__ import annotations
@@ -77,7 +82,11 @@ INTENT_MISSING_MEMBER = "INTENT_MISSING_MEMBER"
 INTENT_EXTRA_MEMBER = "INTENT_EXTRA_MEMBER"
 INTENT_NETS_SHORTED = "INTENT_NETS_SHORTED"
 
-_TOP_KEYS = frozenset({"protocol_version", "mode", "nets"})
+# "components"/"layout" are the DESIGN-document superset (`akcli ops
+# from-intent`, see intentgen.py): the same file drives both generation and
+# assertion, so the assertion loader tolerates (and ignores) the extra keys.
+_TOP_KEYS = frozenset({"protocol_version", "mode", "nets",
+                       "components", "layout"})
 _NET_OBJECT_KEYS = frozenset({"members", "mode"})
 _WILDCARD_CHARS = frozenset("*?[")
 
@@ -154,8 +163,16 @@ def load(path: str | Path) -> IntentSpec:
         doc = json.loads(text)
     except json.JSONDecodeError as exc:
         raise AkcliError("BAD_CONFIG", f"invalid intent JSON in {p}: {exc}") from exc
+    return load_doc(doc, str(p))
 
-    where = str(p)
+
+def load_doc(doc: object, where: str) -> IntentSpec:
+    """Validate an already-parsed intent document (the body of :func:`load`).
+
+    Public seam for the design-document loader (``intentgen.load_design``),
+    which parses the file once and validates the intent half through the SAME
+    code path ``check --intent`` uses — the two can never drift.
+    """
     if not isinstance(doc, dict):
         fail("BAD_CONFIG", f"{where}: intent root must be a JSON object")
     extra = set(doc) - _TOP_KEYS

@@ -90,6 +90,38 @@ CI enforces all of these together; change them in ONE commit:
 5. New error codes need `errors.py` `ERROR_CODES` + `_CODE_EXIT` +
    `REMEDIATION` (1:1, enforced) + the census in `tests/test_errors.py`.
 
+## New top-level CLI command checklist (adding an `akcli <verb>`)
+
+Less mechanically enforced than the op lockstep above, but skipping a step
+ships a command that is undiscoverable or untested:
+
+1. `src/akcli/commands/<name>.py` with a `register(sub, common) -> None`
+   (mirror an existing module) + lazy-imported handlers; wire the import AND
+   the `_xxx_cmd.register(sub, common)` call into `build_parser()` in
+   `cli.py`. `akcli capabilities` covers it for free — introspected from the
+   live parser, asserted by `test_manifest_covers_every_subcommand`
+   (`tests/test_capabilities.py`) — no manual registry to update.
+2. `docs/cli-reference.md`: a new `### akcli <verb> ...` section with AT
+   LEAST one fenced ```` ```bash ```` example line. `test_fenced_commands_are_valid`
+   (`tests/test_docs_conformance.py`) shlex-splits every fenced `akcli …`
+   line in the docs against the live parser, so an unknown flag fails CI —
+   but only once the example exists to be checked.
+3. Add a row to the README `| Command | What it does |` table if the verb
+   joins the primary workflow surface (not test-gated — a discoverability
+   courtesy).
+4. Decide whether the command also needs a companion slash command
+   (`commands/<verb>.md`) and/or a teaching skill
+   (`skills/akcli-*/SKILL.md`). If you add either, the skills/commands doc
+   count gate (`tests/test_docs_conformance.py`) checks every "N
+   skills"/"N commands" claim against the live `skills/*/SKILL.md` /
+   `commands/*.md` glob counts — update every claim (README×3, INSTALL,
+   ROADMAP, docs/codex-plugin.md) in the SAME commit.
+5. Tests: exercise the handler in `tests/test_cli.py` (or a dedicated
+   `tests/test_<name>.py`) for exit code + stdout/stderr split, and
+   `--json` output — a hand-built `_dumps({...})` payload must carry a
+   version stamp or be wrapped in `_stamp(...)`, enforced by the AST gate in
+   `tests/test_json_version_stamps.py`.
+
 ## Invariants (verified by tests — don't regress)
 
 - **Byte-identical re-apply**: deterministic UUIDv5 seeded from root uuid +

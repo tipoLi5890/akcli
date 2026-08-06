@@ -16,8 +16,9 @@ description: >-
 
 `release preflight` runs every applicable gate and writes a manifest binding
 input hashes, tool versions, git state and each gate's findings. PASS means
-every gate passed; skipped gates are recorded WITH their reason — a skipped
-gate is visible, never silent.
+every gate passed **or was skipped-with-reason** (a skipped gate is visible,
+never silent — and never a blocker; only a `fail` exits non-zero), so read
+the skip reasons before calling a PASS complete.
 
 ```bash
 akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile fab.toml --gerbers fab/ --contract contract.toml --review-policy policy.toml --out release.manifest.json
@@ -30,10 +31,17 @@ quantitative SPICE assertions) → **`review`** (policy-gated) → **`gerber`**
 failing).
 
 - **The sim gate is opt-in and strict**: give `--sim <sim.json>` and the
-  assertion violations become gate findings in the manifest. A requested sim
-  gate that cannot run (no libngspice, deck build failure) **FAILS, never
-  skips** — a PASS manifest may not ship because the release machine lacked
-  the engine. No `--sim` = skipped-with-reason, like every other gate.
+  assertion violations become gate findings in the manifest, alongside any
+  deck-level ERROR (a part absent from a measured node, `SIM_PART_SKIPPED` —
+  numbers that exclude a series element must not ship as a PASS). Deck
+  WARNINGs (routine unmodeled parts off the measured path) stay out of the
+  gate. A requested sim gate that cannot run (no libngspice, deck build
+  failure) **FAILS, never skips** — a PASS manifest may not ship because the
+  release machine lacked the engine. No `--sim` = skipped-with-reason, like
+  every other gate. Escape hatches are explicit and audited: the spec's
+  `acknowledged_unmodeled` array downgrades a named designator's escalation
+  to WARNING, and config `[[waiver]]` entries apply to sim-gate findings the
+  same way they apply to `check`.
 
 Two things preflight does **not** cover — say so in the release summary
 instead of implying they were checked:
@@ -120,6 +128,28 @@ Close with a verdict backed by the manifest:
   for a dirty worktree).
 - Never present "PASS with `--allow-dirty`" as a clean release — the
   manifest records the dirty worktree; your summary must too.
+
+## Between releases: `akcli gate` — the iteration-weight sibling
+
+Re-running full preflight after every GUI edit round is the wrong weight.
+`akcli gate` bundles the four per-edit checks with none of the manifest /
+input-hashing / git machinery:
+
+```bash
+akcli gate                                     # zero-argument in a configured project
+akcli gate board.kicad_sch --pcb board.kicad_pcb --intent intent.json --lock bom.lock.json
+```
+
+Gates: the **full default** `check` set (wider than preflight's fixed
+erc/power/bom/nets four-tuple — layout/integrity/pairs included for a
+`.kicad_sch`), `intent`, `sch-pcb`, and `bom-lock` drift — each falling back
+to its `[paths]` config key (`schematic`/`pcb`/`intent`/`bom_lock`), each
+skipped-with-reason when absent. **Offline by default**: the bom-lock gate
+answers from the HTTP cache (`--live` opts one run into a fresh fetch), and a
+cache miss degrades the line to `unverified` — always counted, so a cold
+cache never reads as a fully-verified PASS. Exit is worst-of across the four
+(`--fail-on`/`--exit-zero` re-tune it). Run `gate` per edit round; run
+`release preflight` when a release decision needs a manifest.
 
 ## When NOT to use this skill
 

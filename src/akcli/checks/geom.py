@@ -63,8 +63,8 @@ def run(path: str | Path) -> list[Finding]:
 
 def run_prims(prims: NetPrimitives) -> list[Finding]:
     """Run the attachment checks over raw :class:`model.NetPrimitives`."""
-    q = netbuild._q          # netbuild's own quantizer / point-on-segment —
-    on_seg = netbuild._on_seg  # shared so the lint mirrors the engine exactly
+    q = netbuild.quantize          # netbuild's own quantizer / point-on-segment —
+    on_seg = netbuild.on_segment  # shared so the lint mirrors the engine exactly
 
     segs: dict[str, list[tuple[tuple[int, int], tuple[int, int]]]] = defaultdict(list)
     for w in prims.wires:

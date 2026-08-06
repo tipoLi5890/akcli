@@ -1,0 +1,246 @@
+(kicad_symbol_lib
+	(version 20231120)
+	(generator "kicad_symbol_editor")
+	(generator_version "8.0")
+	(symbol "REG3"
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "U"
+			(at 0 6.35 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "REG3"
+			(at 0 -6.35 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Generic 3-pin adjustable regulator (test fixture)"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "REG3_0_1"
+			(rectangle
+				(start -5.08 -5.08)
+				(end 5.08 5.08)
+				(stroke (width 0.254) (type default))
+				(fill (type background))))
+		(symbol "REG3_1_1"
+			(pin power_in line
+				(at -7.62 2.54 0)
+				(length 2.54)
+				(name "IN" (effects (font (size 1.27 1.27))))
+				(number "3" (effects (font (size 1.27 1.27)))))
+			(pin power_out line
+				(at 7.62 2.54 180)
+				(length 2.54)
+				(name "OUT" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))
+			(pin input line
+				(at 0 -7.62 90)
+				(length 2.54)
+				(name "ADJ" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))))
+	(symbol "CONN_1x4"
+		(pin_names (offset 1.016))
+		(exclude_from_sim yes)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "J"
+			(at 0 6.35 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "CONN_1x4"
+			(at 0 -7.62 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Generic 1x4 header (test fixture)"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "CONN_1x4_0_1"
+			(rectangle
+				(start -2.54 -5.08)
+				(end 2.54 5.08)
+				(stroke (width 0.254) (type default))
+				(fill (type background))))
+		(symbol "CONN_1x4_1_1"
+			(pin passive line
+				(at -7.62 3.81 0)
+				(length 5.08)
+				(name "P1" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at -7.62 1.27 0)
+				(length 5.08)
+				(name "P2" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at -7.62 -1.27 0)
+				(length 5.08)
+				(name "P3" (effects (font (size 1.27 1.27))))
+				(number "3" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at -7.62 -3.81 0)
+				(length 5.08)
+				(name "P4" (effects (font (size 1.27 1.27))))
+				(number "4" (effects (font (size 1.27 1.27)))))))
+	(symbol "DUAL_BUF"
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "U"
+			(at 0 5.08 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "DUAL_BUF"
+			(at 0 -5.08 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Generic dual buffer, two units (test fixture)"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "DUAL_BUF_1_1"
+			(polyline
+				(pts (xy -2.54 2.54) (xy 2.54 0) (xy -2.54 -2.54) (xy -2.54 2.54))
+				(stroke (width 0.254) (type default))
+				(fill (type none)))
+			(pin input line
+				(at -5.08 0 0)
+				(length 2.54)
+				(name "A" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin output line
+				(at 5.08 0 180)
+				(length 2.54)
+				(name "Y" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))
+		(symbol "DUAL_BUF_2_1"
+			(polyline
+				(pts (xy -2.54 2.54) (xy 2.54 0) (xy -2.54 -2.54) (xy -2.54 2.54))
+				(stroke (width 0.254) (type default))
+				(fill (type none)))
+			(pin input line
+				(at -5.08 0 0)
+				(length 2.54)
+				(name "A" (effects (font (size 1.27 1.27))))
+				(number "3" (effects (font (size 1.27 1.27)))))
+			(pin output line
+				(at 5.08 0 180)
+				(length 2.54)
+				(name "Y" (effects (font (size 1.27 1.27))))
+				(number "4" (effects (font (size 1.27 1.27)))))))
+	(symbol "DUAL_BUF_PWR"
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "U"
+			(at 0 5.08 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "DUAL_BUF_PWR"
+			(at 0 -5.08 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Dual buffer with COMMON unit-0 power pins (test fixture)"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "DUAL_BUF_PWR_0_1"
+			(pin power_in line
+				(at 0 7.62 270)
+				(length 2.54)
+				(name "VDD" (effects (font (size 1.27 1.27))))
+				(number "5" (effects (font (size 1.27 1.27)))))
+			(pin power_in line
+				(at 0 -7.62 90)
+				(length 2.54)
+				(name "GND" (effects (font (size 1.27 1.27))))
+				(number "6" (effects (font (size 1.27 1.27))))))
+		(symbol "DUAL_BUF_PWR_1_1"
+			(polyline
+				(pts (xy -2.54 2.54) (xy 2.54 0) (xy -2.54 -2.54) (xy -2.54 2.54))
+				(stroke (width 0.254) (type default))
+				(fill (type none)))
+			(pin input line
+				(at -5.08 0 0)
+				(length 2.54)
+				(name "A" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin output line
+				(at 5.08 0 180)
+				(length 2.54)
+				(name "Y" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))
+		(symbol "DUAL_BUF_PWR_2_1"
+			(polyline
+				(pts (xy -2.54 2.54) (xy 2.54 0) (xy -2.54 -2.54) (xy -2.54 2.54))
+				(stroke (width 0.254) (type default))
+				(fill (type none)))
+			(pin input line
+				(at -5.08 0 0)
+				(length 2.54)
+				(name "A" (effects (font (size 1.27 1.27))))
+				(number "3" (effects (font (size 1.27 1.27)))))
+			(pin output line
+				(at 5.08 0 180)
+				(length 2.54)
+				(name "Y" (effects (font (size 1.27 1.27))))
+				(number "4" (effects (font (size 1.27 1.27)))))))
+	(symbol "STACK2"
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "U"
+			(at 0 6.35 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "STACK2"
+			(at 0 -6.35 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Two stacked (coincident) ground pins + one top pin (test fixture)"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "STACK2_0_1"
+			(rectangle
+				(start -2.54 -5.08)
+				(end 2.54 5.08)
+				(stroke (width 0.254) (type default))
+				(fill (type background))))
+		(symbol "STACK2_1_1"
+			(pin power_in line
+				(at 0 -7.62 90)
+				(length 2.54)
+				(name "GNDA" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin power_in line
+				(at 0 -7.62 90)
+				(length 2.54)
+				(name "GNDB" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))
+			(pin power_in line
+				(at 0 7.62 270)
+				(length 2.54)
+				(name "VDD" (effects (font (size 1.27 1.27))))
+				(number "3" (effects (font (size 1.27 1.27))))))))

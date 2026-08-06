@@ -80,7 +80,7 @@ _SHEET_SCOPED_SCOPES = frozenset({"local"})
 _MULTI_NAME_CONFIDENCE = 0.8
 
 
-def _q(pt: tuple[float, float]) -> tuple[int, int]:
+def quantize(pt: tuple[float, float]) -> tuple[int, int]:
     """Quantize a float point to an exact integer key."""
     return (round(pt[0] * _QUANT), round(pt[1] * _QUANT))
 
@@ -112,7 +112,7 @@ class _DSU:
         return ra
 
 
-def _on_seg(p: tuple[int, int], a: tuple[int, int], b: tuple[int, int]) -> bool:
+def on_segment(p: tuple[int, int], a: tuple[int, int], b: tuple[int, int]) -> bool:
     """Exact integer test: does point ``p`` lie on segment ``a``→``b`` (inclusive)."""
     cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
     if cross != 0:
@@ -156,7 +156,7 @@ class SegmentIndex:
     with the exact integer on-segment test.
 
     Every coordinate is an integer, so the index reproduces the linear
-    ``_on_seg`` / ``_on_seg_interior`` scans it replaces bit-for-bit — a hit is
+    ``on_segment`` / ``_on_seg_interior`` scans it replaces bit-for-bit — a hit is
     an exact geometric coincidence, never a tolerance match.
 
     ``segments_through`` / ``interior_hits`` yield the stored ``(a, b)`` pairs
@@ -216,7 +216,7 @@ class SegmentIndex:
                 if hi >= py:
                     yield a, b
         for a, b in self._diag:
-            if _on_seg(p, a, b):
+            if on_segment(p, a, b):
                 yield a, b
 
     def interior_hits(
@@ -345,7 +345,7 @@ def build_nets(
 
     # (1) wire segments — union each segment's two endpoints (same sheet).
     for w in prims.wires:
-        qa, qb = _q(w.a), _q(w.b)
+        qa, qb = quantize(w.a), quantize(w.b)
         na, nb = _node(w.sheet, qa), _node(w.sheet, qb)
         dsu.add(na)
         dsu.add(nb)
@@ -363,7 +363,7 @@ def build_nets(
     # (2) junctions(29) — union a junction onto every same-sheet segment it lies on.
     junctions_by_sheet: dict[str, set[tuple[int, int]]] = defaultdict(set)
     for j in prims.junctions:
-        qj = _q(j.at)
+        qj = quantize(j.at)
         nj = _node(j.sheet, qj)
         dsu.add(nj)
         junctions_by_sheet[j.sheet].add(qj)
@@ -392,7 +392,7 @@ def build_nets(
     # diverging from it made `akcli net` claim connectivity KiCad rejects.
     pin_nodes: list[tuple[model.PinRef, tuple]] = []
     for ph in prims.pins:
-        qp = _q(ph.at)
+        qp = quantize(ph.at)
         np_ = _node(ph.sheet, qp)
         dsu.add(np_)
         has_junction = qp in junctions_by_sheet.get(ph.sheet, ())
@@ -406,7 +406,7 @@ def build_nets(
     # (4b) labels / power ports on segments (same sheet).
     label_nodes: list[tuple[str, str, str, tuple]] = []
     for lb in prims.labels:
-        ql = _q(lb.at)
+        ql = quantize(lb.at)
         nl = _node(lb.sheet, ql)
         dsu.add(nl)
         idx = index_by_sheet.get(lb.sheet)
@@ -435,7 +435,7 @@ def build_nets(
         defaultdict(list)
     )
     for bs in prims.buses:
-        qa, qb = _q(bs.a), _q(bs.b)
+        qa, qb = quantize(bs.a), quantize(bs.b)
         bus_dsu.union(_node(bs.sheet, qa), _node(bs.sheet, qb))
         bus_segs_by_sheet[bs.sheet].append((qa, qb))
     bus_index_by_sheet: dict[str, SegmentIndex] = {
@@ -446,7 +446,7 @@ def build_nets(
         for j in prims.junctions:
             bidx = bus_index_by_sheet.get(j.sheet)
             if bidx is not None:
-                qj = _q(j.at)
+                qj = quantize(j.at)
                 for qa, _qb in bidx.segments_through(qj):
                     bus_dsu.union(_node(j.sheet, qj), _node(j.sheet, qa))
         if t_midspan_connects:
@@ -460,7 +460,7 @@ def build_nets(
             bidx = bus_index_by_sheet.get(lb.sheet)
             if bidx is None:
                 continue
-            ql = _q(lb.at)
+            ql = quantize(lb.at)
             for qa, _qb in bidx.segments_through(ql):
                 bus_dsu.union(_node(lb.sheet, ql), _node(lb.sheet, qa))
                 bus_label_atts.append(
@@ -481,7 +481,7 @@ def build_nets(
     # cluster(s) each entry taps for the member merge below.
     entry_taps: list[tuple[tuple, set]] = []
     for be in prims.bus_entries:
-        q1, q2 = _q(be.a), _q(be.b)
+        q1, q2 = quantize(be.a), quantize(be.b)
         n1, n2 = _node(be.sheet, q1), _node(be.sheet, q2)
         dsu.add(n1)
         dsu.add(n2)

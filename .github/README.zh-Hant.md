@@ -77,13 +77,14 @@ akcli undo  board.kicad_sch                                      # 回復上一�
 | 指令 | 功能 |
 |---|---|
 | `read` · `net` · `component` · `pins` | 把 KiCad 或 Altium 解析成同一套正規化 JSON 模型；查詢 net（整條 net，或腳位層級的 `net --at`／`--same`／`--why`）、元件與腳位座標。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | 從帶版本的 **22 種 op + 10 種巨集** JSON op-list 繪製 `.kicad_sch`（根檔案，或既有階層中的子圖頁），並由 net-diff 安全閘門與一鍵 `undo` 把關。符號來源依序為 `--symbols`、設定檔路徑，最後是專案與全域的 `sym-lib-table`。 |
+| `new` · `plan` · `draw` · `ops` · `arrange` | 從帶版本的 **22 種 op + 10 種巨集** JSON op-list 繪製 `.kicad_sch`（根檔案，或既有階層中的子圖頁），並由 net-diff 安全閘門與一鍵 `undo` 把關；`ops from-intent` 可把設計文件（宣告的 nets + 元件）直接編譯成 op-list。符號來源依序為 `--symbols`、設定檔路徑，最後是專案與全域的 `sym-lib-table`。 |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + 文件完整性 + intent／contract 檢查、原理圖 ↔ PCB 等價、net 成員關係比對、MCU pin → net 對照。 |
 | `review` | 建議性（advisory）、依信心分級的設計審查，橫跨六大偵測家族（signal／validation／pcb／emc／domain／gerber）；標記 DNP 的零件不會滿足任何規則。 |
 | `sim` | 轉成 SPICE deck，在 KiCad 自帶 ngspice 上斷言；角點掃描；用 datasheet 點擬合二極體模型。元件值會先正規化，無法確定解讀的一律拒絕而不猜測。 |
 | `jlc` | 搜尋 JLCPCB/LCSC（庫存、價格、Basic／Extended），行程內把零件轉成 KiCad 庫（帶電氣型別的腳位、真實 `Value`），抓取規格書。 |
 | `calc` | **60** 個附標準引用的離線計算器（E 系列、IPC-2221、阻抗、I²C 上拉、buck／boost……），每筆都附引用。 |
-| `library` · `fab` · `release` | 零件庫工作區稽核／修復、版本化 fab profile 檢查，以及寫出可追溯 manifest 的 release preflight。 |
+| `library` · `fab` · `release` | 零件庫工作區稽核／修復、從腳位表產生零件符號（`new-symbol`——提供腳位表，akcli 計算座標）並附獨立 lint（`lint-symbols`）與把關寫入的共點腳位檢查、版本化 fab profile 檢查，以及寫出可追溯 manifest 的 release preflight。 |
+| `gate` | 迭代級的四項檢查組合，供每輪 GUI 編輯後重跑（完整 `check` 集、intent 斷言、原理圖 ↔ PCB `verify`、BOM lock 漂移——預設離線）；已配置的專案零參數即可執行，出貨級閘門仍是 `release preflight`。 |
 | `export` · `render` · `doc` · `view` | netlist 匯出（Protel／KiCad／CSV——KiCad 格式帶有重新匯入所需的 UUID sheetpath 身分）、純標準庫 SVG 渲染、Markdown pinout book，以及 localhost 的 `/calc` + `/live` 儀表板。 |
 
 兩個代表性範例——一次設計審查與一次料件搜尋：
@@ -96,11 +97,11 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 ## 搭配 AI 代理使用
 
 `akcli` 就是一個普通 CLI，只要它在 PATH 上，任何能執行 shell 指令的代理都能驅動它。指令以 `--json`
-輸出結構化 JSON（帶有 `schema_version`），op-list 帶有 `protocol_version`，`akcli capabilities`
+輸出結構化 JSON（帶版本戳——`schema_version`，或 `proposals_version`／`facts_version` 這類家族欄位），op-list 帶有 `protocol_version`，`akcli capabilities`
 會在單一 JSON 文件中自我描述整套 CLI 介面——而且每一個錯誤碼都帶有機器可讀的 `remediation` 修復提示。
 
-- **Claude Code** — 安裝隨附外掛，即可取得八個 `/akcli:circuit-*` 指令（review、pinmap、draw、
-  diff、parts、sim、datasheet、release）與十二個 skills，涵蓋設計、審查、電路撰寫、Altium 互通、料件選型、計算器與 release
+- **Claude Code** — 安裝隨附外掛，即可取得 8 個 `/akcli:circuit-*` 指令（review、pinmap、draw、
+  diff、parts、sim、datasheet、release）與 12 個 skills，涵蓋設計、審查、電路撰寫、Altium 互通、料件選型、計算器與 release
   把關。
 - **Codex** — 安裝隨附外掛，或把 skills 資料夾放進 `.agents/skills/` 讓其自動探索。見
   [docs/codex-plugin.md](../docs/codex-plugin.md)。

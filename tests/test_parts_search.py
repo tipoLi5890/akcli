@@ -62,7 +62,23 @@ _CAP = {
     "is_preferred": False,
 }
 
+_NTC = {
+    "lcsc": 123456,
+    "mfr": "NTCG103JF103FT1",
+    "package": "0402",
+    "description": "",
+    "stock": 50000,
+    "price": json.dumps([{"qFrom": 1, "qTo": None, "price": 0.0105}]),
+    "category": "Sensors",
+    "subcategory": "NTC Thermistors",
+    "is_basic": False,
+    "is_preferred": False,
+}
+
 SEARCH_RESULT = {"components": [_NE555, _SOP8, _CAP]}
+# a value/package query mixing categories — the thermistor sorts FIRST so a
+# naive fetch-then-truncate would starve a category filter (see the CLI tests)
+MIXED_RESULT = {"components": [_NTC, _NE555, _SOP8, _CAP]}
 EMPTY_RESULT = {"components": []}
 
 
@@ -389,6 +405,50 @@ def test_cli_jlc_search_json_and_limit(patch_opener, capsys):
     assert len(data) == 1
     assert data[0]["lcsc"] == "C7593"
     assert data[0]["mpn"] == "NE555DR"
+
+
+def test_cli_jlc_search_category_filters_mixed_results(patch_opener, capsys):
+    # "0402 47K"-style queries mix NTC thermistors (Sensors) into resistor/
+    # capacitor searches; --category keeps only the asked-for category.
+    patch_opener(MIXED_RESULT)
+    rc = main(["jlc", "search", "0402 10k", "--category", "Capacitors",
+               "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc == EXIT["OK"]
+    assert [d["lcsc"] for d in data] == ["C14663"]
+    assert all(d["category"] == "Capacitors" for d in data)
+
+
+def test_cli_jlc_search_category_case_insensitive_exact(patch_opener, capsys):
+    patch_opener(MIXED_RESULT)
+    rc = main(["jlc", "search", "ne555", "--category", "clock and timing",
+               "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc == EXIT["OK"]
+    assert [d["lcsc"] for d in data] == ["C7593", "C695838"]
+
+
+def test_cli_jlc_search_category_overfetches_before_filtering(patch_opener,
+                                                              capsys):
+    # --limit 1 + --category: a naive fetch of 1 would return only the
+    # thermistor (which sorts first) and filter down to nothing. The command
+    # over-fetches, filters, THEN applies the user's limit.
+    opener = patch_opener(MIXED_RESULT)
+    rc = main(["jlc", "search", "x", "--limit", "1",
+               "--category", "Clock and Timing", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc == EXIT["OK"]
+    assert [d["lcsc"] for d in data] == ["C7593"]   # user limit honored
+    assert "limit=100" in opener.calls[0]            # over-fetch on the wire
+
+
+def test_cli_jlc_search_category_no_match_exit_zero(patch_opener, capsys):
+    patch_opener(MIXED_RESULT)
+    rc = main(["jlc", "search", "x", "--category", "Diodes", "--json"])
+    captured = capsys.readouterr()
+    assert rc == EXIT["OK"]
+    assert json.loads(captured.out) == []
+    assert "Diodes" in captured.err
 
 
 def test_cli_jlc_show_json(patch_opener, capsys):

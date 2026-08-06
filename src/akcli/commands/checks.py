@@ -29,6 +29,24 @@ from ._shared import (
 )
 
 
+def _default_check_names(path, cfg) -> list[str]:
+    """The check set ``akcli check PATH`` runs with no explicit selector.
+
+    ``erc``/``power``/``bom``/``nets`` always; ``layout``/``integrity`` are
+    KiCad-only so they're added for a ``.kicad_sch`` input; ``pairs`` runs
+    unless ``[check].pairs = false`` opts out. Shared with ``akcli gate``'s
+    check gate so both commands run the exact same set — a narrower ad hoc
+    list (like ``release preflight``'s fixed erc/power/bom/nets four-tuple)
+    is a DIFFERENT, intentionally lighter selection, not this one.
+    """
+    which = ["erc", "power", "bom", "nets"]
+    if str(path).lower().endswith(".kicad_sch"):
+        which.extend(["layout", "integrity"])
+    if cfg.check.get("pairs", True):
+        which.append("pairs")
+    return which
+
+
 def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
     """Run one check by name, importing lazily; missing ERC degrades gracefully."""
     if name == "erc":
@@ -113,12 +131,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
     contract_file = getattr(args, "contract", None)
     if not which and not intent_file and not contract_file:
         # --intent/--contract alone are pure assertions, like any other selector.
-        which = ["erc", "power", "bom", "nets"]
-        if str(path).lower().endswith(".kicad_sch"):
-            which.extend(["layout", "integrity"])
-        # name-level pair/bus continuity; [check].pairs = false opts out
-        if cfg.check.get("pairs", True):
-            which.append("pairs")
+        which = _default_check_names(path, cfg)
 
     findings: list = []
     for name in which:

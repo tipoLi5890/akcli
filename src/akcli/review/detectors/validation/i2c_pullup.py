@@ -124,8 +124,8 @@ def _line_of_name(name: str | None) -> tuple[str, str, bool] | None:
 
 def _line_of_net(net) -> tuple[str, str, bool] | None:
     """First bus-line classification among every name the net answers to."""
-    from ....checks.power import _net_candidate_names
-    for name in _net_candidate_names(net):
+    from ....checks.power import net_candidate_names
+    for name in net_candidate_names(net):
         hit = _line_of_name(name)
         if hit is not None:
             return hit

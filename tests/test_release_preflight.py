@@ -191,6 +191,79 @@ def test_preflight_sim_gate_fails_when_engine_missing(proj, capsys,
     assert doc["inputs"]["sim"]["sha256"]      # the spec is manifest-bound
 
 
+def _stub_sim_run(monkeypatch, deck_warnings):
+    """Pretend the engine exists, the deck built, and every assert passed."""
+    import types
+
+    import akcli.commands.sim as sim_cmd
+    import akcli.sim.deck as sim_deck
+    import akcli.sim.engine as sim_engine
+
+    monkeypatch.setattr(sim_engine, "available", lambda: "libngspice")
+    d = types.SimpleNamespace(text="* deck\n.end\n", warnings=deck_warnings,
+                              unmodeled=[], skipped=[])
+    monkeypatch.setattr(sim_deck, "build", lambda sch, spec, **kw: d)
+    monkeypatch.setattr(sim_cmd, "_measure",
+                        lambda *a, **kw: ([], {}, True))
+
+
+def _spec_file(proj) -> str:
+    spec = proj / "sim.json"
+    spec.write_text(json.dumps({
+        "protocol_version": 1, "analyses": {"tran": "1u 1m"},
+        "assert": [{"name": "vmid", "meas": "MAX v(MID)", "lt": "5"}],
+    }), encoding="utf-8")
+    return str(spec)
+
+
+def test_preflight_sim_gate_blocks_on_deck_error(proj, capsys, monkeypatch):
+    # A part absent from a measured node (deck ERROR) must fail the release
+    # gate even when every assertion numerically passed — the numbers exclude
+    # a series element. Deck WARNINGs stay out of the gate (any-WARNING-fails
+    # here would make routine unmodeled parts a false red).
+    from akcli.report import Finding, Severity
+    _stub_sim_run(monkeypatch, [
+        Finding("SIM_PART_SKIPPED", Severity.ERROR,
+                "U1 is not in the deck but connects measured node(s) MID",
+                refs=["U1", "MID"]),
+        Finding("SIM_UNMODELED", Severity.WARNING,
+                "U2: no SPICE model — omitted from deck", refs=["U2"]),
+    ])
+    code = main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
+                 "--sim", _spec_file(proj), "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 1
+    by = {g["gate"]: g for g in doc["gates"]}
+    assert by["sim"]["status"] == "fail"
+    codes = [f["code"] for f in by["sim"]["findings"]]
+    assert "SIM_PART_SKIPPED" in codes
+    assert "SIM_UNMODELED" not in codes    # WARNING-level deck noise stays out
+
+
+def test_preflight_sim_gate_waiver_demotes_deck_error(proj, capsys,
+                                                      monkeypatch):
+    # A config [[waiver]] can accept the known gap: the ERROR demotes to note
+    # and the gate passes — same governance as check-gate waivers.
+    from akcli.report import Finding, Severity
+    _stub_sim_run(monkeypatch, [
+        Finding("SIM_PART_SKIPPED", Severity.ERROR,
+                "U1 is not in the deck but connects measured node(s) MID",
+                refs=["U1", "MID"]),
+    ])
+    (proj / "akcli.toml").write_text(
+        '[[waiver]]\ncode = "SIM_PART_SKIPPED"\nrefs = "U1"\n'
+        'severity = "note"\nreason = "no vendor model; accepted"\n',
+        encoding="utf-8")
+    code = main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
+                 "--sim", _spec_file(proj), "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    by = {g["gate"]: g for g in doc["gates"]}
+    assert by["sim"]["status"] == "pass"
+    # visible-but-demoted, never silently dropped
+    assert [f["code"] for f in by["sim"]["findings"]] == ["SIM_PART_SKIPPED"]
+    assert code == 0
+
+
 def test_preflight_sim_spec_missing_file_is_not_found(proj, capsys):
     code = main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
                  "--sim", str(proj / "nope.json")])

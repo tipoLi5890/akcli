@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from akcli.errors import (
+    _CODE_EXIT,
     ERROR_CODES,
     EXIT,
     REMEDIATION,
@@ -28,6 +29,8 @@ def test_required_codes_present():
         "OVERLAP", "VERIFY_FAILED", "OP_UNSUPPORTED", "HIERARCHICAL_UNSUPPORTED",
         "PROTOCOL_MISMATCH", "TARGET_LOCKED", "PATH_OUTSIDE_ROOT",
         "FILE_UNREADABLE",
+        # design-doc -> op-list generation (`akcli ops from-intent`)
+        "DESIGN_UNSUPPORTED",
         # functional groups (envelope `groups` + per-op `group` tag)
         "GROUP_UNKNOWN", "GROUP_NO_ORIGIN",
         # document integrity shared by the writer and connectivity.verify:
@@ -37,8 +40,8 @@ def test_required_codes_present():
         # ngspice engine + the jlc networked surface
         "NGSPICE_MISSING", "NGSPICE_FAILED", "NETWORK",
         # sim deck build / sim.json (raised before the engine is ever loaded)
-        "SIM_NO_GROUND", "SIM_NODE_COLLISION", "SIM_VALUE_INVALID",
-        "SIM_OP_ASSERT_UNSUPPORTED",
+        "SIM_NO_GROUND", "SIM_NODE_COLLISION", "SIM_NODE_COUNT_MISMATCH",
+        "SIM_VALUE_INVALID", "SIM_OP_ASSERT_UNSUPPORTED",
         # binary-fetch integrity codes
         "BINFETCH_DOWNLOAD", "BINFETCH_CHECKSUM",
         # reserved transport codes (the Altium live driver was deleted; nothing
@@ -78,6 +81,7 @@ def test_exit_mapping_categories():
     assert exit_for_code("ALTIUM_FAT_CYCLE") == EXIT["PARSE"]
     assert exit_for_code("KICAD_SEXPR_DEPTH") == EXIT["PARSE"]
     assert exit_for_code("OP_UNSUPPORTED") == EXIT["OPLIST"]
+    assert exit_for_code("DESIGN_UNSUPPORTED") == EXIT["OPLIST"]
     assert exit_for_code("PROTOCOL_MISMATCH") == EXIT["OPLIST"]
     assert exit_for_code("BAD_CONFIG") == EXIT["USAGE"]
     assert exit_for_code("PATH_OUTSIDE_ROOT") == EXIT["USAGE"]
@@ -97,6 +101,15 @@ def test_exit_mapping_categories():
 
 
 def test_every_code_has_exit_mapping():
+    """Every ERROR code must have its OWN ``_CODE_EXIT`` entry (exact 1:1,
+    mirroring the REMEDIATION census below) — ``exit_for_code`` silently
+    falls back to ``EXIT["PARSE"]`` for an unmapped code, so merely asserting
+    the return value is an int (the previous version of this test) can never
+    catch a new error code that ships without its exit-code mapping."""
+    missing = sorted(ERROR_CODES - set(_CODE_EXIT))
+    assert not missing, f"ERROR codes without a _CODE_EXIT mapping: {missing}"
+    stale = sorted(set(_CODE_EXIT) - ERROR_CODES)
+    assert not stale, f"_CODE_EXIT entries for unknown codes: {stale}"
     for code in ERROR_CODES:
         assert isinstance(exit_for_code(code), int)
 

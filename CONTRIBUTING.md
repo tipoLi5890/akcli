@@ -49,7 +49,9 @@ python tools/sync_version.py --check      # version-sync drift (manifests vs pyp
 - Keep changes focused; match the surrounding code style.
 - New CLI subcommands/flags must be reflected in `docs/cli-reference.md`. New ops or macros touch
   several files in lockstep (vocabulary tables, `schemas/`, the writer handler, doc count gates) —
-  see [docs/op-list-authoring.md](docs/op-list-authoring.md) before adding one.
+  see [docs/op-list-authoring.md](docs/op-list-authoring.md) before adding one. Adding a whole new
+  top-level `akcli <verb>` command? Follow the checklist in
+  [CLAUDE.md](CLAUDE.md#new-top-level-cli-command-checklist-adding-an-akcli-verb).
 
 ## Pull request process
 
