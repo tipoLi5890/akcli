@@ -69,6 +69,10 @@ coincident stacked pins on different nets, and bus-syntax net names.
   emit it so an op-list records what it was authored against).
 - `groups` (optional) declares functional modules — see
   [Modular design with functional groups](#modular-design-with-functional-groups).
+- `sheets` (optional) declares child `.kicad_sch` files an op can route onto
+  via a per-op `"sheet"` tag, so one op-list edits the root and its children
+  in a single atomic transaction (with a `run_id` for `akcli undo --run`) —
+  see [Multi-sheet op-lists](#multi-sheet-op-lists-sheets-map--per-op-sheet-020).
 
 ## Coordinate contract (memorize this)
 
@@ -105,9 +109,9 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 
 | Op | Required | Notes |
 |---|---|---|
-| `place_component` | `lib_id, designator` + position | position is exactly ONE of `x_mil`+`y_mil` (absolute) or `anchor` (+`offset_mil`): `"anchor": "U1.3"` is that pin's world tip, bare `"U1"` the component origin — resolved at execution time, so the anchor may be placed earlier in the SAME list; `offset_mil` is a world-frame `[dx, dy]`, the result grid-snaps. Optional `unit` places ONE unit of a multi-unit part; `value`/`footprint` set the properties; the symbol must resolve from `--symbols`/config/`symbol_source` |
+| `place_component` | `lib_id, designator` + position | position is exactly ONE of `x_mil`+`y_mil` (absolute) or `anchor` (+`offset_mil`): `"anchor": "U1.3"` is that pin's world tip, bare `"U1"` the component origin — resolved at execution time, so the anchor may be placed earlier in the SAME list; `offset_mil` is a world-frame `[dx, dy]`, the result grid-snaps. Optional `unit` places ONE unit of a multi-unit part; `value`/`footprint` set the properties; the symbol must resolve from `--symbols`/config/`symbol_source`; optional `instance_designators` supplies per-instance references on a reused sheet (see [Multi-sheet op-lists](#multi-sheet-op-lists-sheets-map--per-op-sheet-020)) |
 | `set_component_transform` | `designator` | rotation/mirror of an existing instance |
-| `set_component_parameters` | `designator` | `reference`, `value`, `footprint`, free-form `parameters` map |
+| `set_component_parameters` | `designator` | `reference`, `value`, `footprint`, free-form `parameters` map; optional `instance_references` renames per instance on a reused sheet (mirrors `place_component`'s `instance_designators`) |
 | `add_wire` | `vertices` | even, orthogonal list of `[x,y]` / `"REF.PIN"`; one segment per consecutive pair |
 | `route_net` | `from, to` | deterministic orthogonal auto-route between two endpoints: coaxial -> straight; else an L whose corner provably avoids every placed pin tip (a coincident corner silently merges nets), falling back to a 3-segment z. `style: auto\|hv\|vh\|z`; optional `label` names the net ONCE at the longest segment's midpoint — the non-coaxial `connect_and_label` |
 | `add_bus` | `vertices` | as `add_wire`, bus graphics |
@@ -327,7 +331,9 @@ per-node seed. **Replaying the same op-list file converges byte-identically
 after one apply.** No seed contains the op's INDEX, so inserting, reordering or
 deleting ops never re-identifies an untouched node — a re-apply after an
 op-list edit rewrites nodes in place instead of duplicating everything
-downstream of the edit:
+downstream of the edit. In a multi-sheet transaction each routed file keeps
+its OWN uuid namespace (seeded from that file's own root uuid, not the
+target's), so the same op-list replays byte-identically per file:
 
 - **Parts are seeded from the designator alone** — `place_component`, and the
   power symbols behind `place_power_port`/`place_gnd`/`place_vcc`. An
@@ -485,17 +491,72 @@ is byte-identical even after an op-list edit; the instances page
 number is `op_index + 2` (root is page 1) and may be non-contiguous when
 non-sheet ops interleave (KiCad tolerates it).
 
-**One op-list per FILE.** A child `.kicad_sch` is a normal draw target: point
+**A child sheet is a normal draw target** (and since 0.20 one op-list may also
+edit several files at once — see [Multi-sheet op-lists](#multi-sheet-op-lists-sheets-map--per-op-sheet-020)
+below). Point
 `target_file` at the child and its ops apply there, even though its existing
 symbols carry a `/<top-root>/<sheet>` parent-hierarchy instance path (the
 connectivity gate accepts those). A part placed into a child JOINS its
 siblings' sheet path(s) — including both entries when the child is
 instantiated twice — because a child file cannot derive its parents' uuids on
-its own; give it a designator KiCad's annotator would accept for every
-instance. What is still unsupported is reaching into a
-sub-sheet *from the parent's* op-list — an op that names a sub-sheet path fails
-`HIERARCHICAL_UNSUPPORTED`. Author the parent and each child as their own draw
-targets.
+its own. What is still unsupported is reaching into a
+sub-sheet *from the parent's* op-list by naming its instance PATH — that fails
+`HIERARCHICAL_UNSUPPORTED`. Route by the `sheets` envelope instead (below).
+
+## Multi-sheet op-lists (`sheets` map + per-op `sheet`, 0.20)
+
+One op-list can edit the root AND its children in **one atomic transaction**:
+
+```json
+{
+  "protocol_version": 1,
+  "target_format": "kicad",
+  "sheets": { "amp": { "file": "amp.kicad_sch" } },
+  "ops": [
+    { "op": "add_sheet", "name": "Amp", "file": "amp.kicad_sch",
+      "at": [5000, 2000], "size": [1000, 800],
+      "pins": [{ "name": "OUT", "type": "output", "side": "left", "offset_mil": 200 }] },
+    { "op": "place_component", "sheet": "amp", "lib_id": "Device:R",
+      "designator": "R101", "x_mil": 2000, "y_mil": 2000, "value": "10k" },
+    { "op": "add_net_label", "sheet": "amp", "at": "R101.1", "name": "OUT",
+      "scope": "hierarchical" }
+  ]
+}
+```
+
+- `sheets` declares the child files (relative to the draw target's directory;
+  each must already exist — `akcli new` it first, or `SHEET_UNKNOWN`). A
+  per-op `"sheet": "<key>"` routes that op onto the declared file; no tag =
+  the target itself. An undeclared tag is `SHEET_UNKNOWN` at validate time
+  (with did-you-mean). A `sheet`-tagged macro expands with the tag riding
+  onto every child op.
+- Each routed file keeps its OWN uuid namespace (seeded from that file's root
+  uuid), so a multi-sheet op-list replays byte-identically per file.
+- **The write is a transaction**: every dirty file is staged (temp + fsync +
+  verify) before the first `os.replace`; the pre-write bytes of every file
+  land in `.akcli/backups/runs/<run_id>/` with a manifest; a partial commit
+  rolls back automatically, and `akcli undo <target> --run <run_id> --apply`
+  restores (or redoes) ALL files of the transaction together.
+- The net diff evaluates the whole WOULD-BE tree, so the `add_sheet` +
+  populate-the-child pattern above reports the real cross-sheet nets before
+  anything is written.
+
+**Sheet reuse (a child instantiated more than once)**: each instance is its
+own annotation scope, so a scalar `designator` would write the SAME refdes
+onto every instance — refused with `INSTANCE_REFS_REQUIRED` (the message
+lists the instance paths). Pass per-instance references instead:
+
+```json
+{ "op": "place_component", "sheet": "stage", "lib_id": "Device:R",
+  "designator": "R101",
+  "instance_designators": { "/<root-uuid>/<sheet1-uuid>": "R101",
+                             "/<root-uuid>/<sheet2-uuid>": "R201" } }
+```
+
+(`designator` must be one of the map's values — it seeds the symbol's uuid
+and is the displayed Reference. `set_component_parameters` renames per
+instance with the mirror field `instance_references`; power ports need no
+map — the writer auto-allocates one `#PWR0n` per instance.)
 
 ## Bus authoring (stage 2 semantics — labeled rips)
 

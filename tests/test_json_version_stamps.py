@@ -182,11 +182,14 @@ def test_capabilities_constraints_and_altium_honesty():
     assert cons["grid_mil"] == 50
     # Hand-maintained prose (no constant to derive from): if the writer's
     # hierarchy rule changes (writers/instances.instances_path,
-    # writers/connectivity's INVALID_INSTANCES_PATH), update the manifest
-    # strings in commands/capabilities.py AND this pin together.
-    assert cons["hierarchy"] == "hierarchical_write_v1"
+    # writers/connectivity's INVALID_INSTANCES_PATH, writers/txn), update the
+    # manifest strings in commands/capabilities.py AND this pin together.
+    assert cons["hierarchy"] == "hierarchical_write_v2"
+    assert cons["sheet_reuse"] is True
     assert "child .kicad_sch" in cons["hierarchy_note"]
     assert "HIERARCHICAL_UNSUPPORTED" in cons["hierarchy_note"]
+    assert "INSTANCE_REFS_REQUIRED" in cons["hierarchy_note"]
+    assert "'sheets' map" in cons["hierarchy_note"]
 
 
 def test_dumps_object_literals_carry_version_stamp():

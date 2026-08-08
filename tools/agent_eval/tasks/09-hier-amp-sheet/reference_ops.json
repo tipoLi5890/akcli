@@ -1,0 +1,20 @@
+{
+ "protocol_version": 1,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "sheets": {"amp": {"file": "amp.kicad_sch"}},
+ "ops": [
+  {"op": "add_sheet", "name": "Amp", "file": "amp.kicad_sch", "at": [5000, 2000],
+   "size": [1000, 800],
+   "pins": [{"name": "OUT", "type": "output", "side": "left", "offset_mil": 200}]},
+  {"op": "place_component", "sheet": "amp", "lib_id": "Device:R", "designator": "R101",
+   "x_mil": 2000, "y_mil": 2000, "value": "10k"},
+  {"op": "add_net_label", "sheet": "amp", "at": "R101.1", "name": "OUT",
+   "scope": "hierarchical"},
+  {"op": "add_net_label", "sheet": "amp", "at": "R101.2", "name": "GND", "scope": "global"},
+  {"op": "place_component", "lib_id": "Device:R", "designator": "R2",
+   "x_mil": 8000, "y_mil": 2000, "value": "1k"},
+  {"op": "add_net_label", "at": "R2.1", "name": "VIN", "scope": "global"},
+  {"op": "add_net_label", "at": "R2.2", "name": "GND", "scope": "global"}
+ ]
+}

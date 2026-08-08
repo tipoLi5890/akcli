@@ -1,0 +1,21 @@
+{
+ "protocol_version": 1,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
+   "x_mil": 1000, "y_mil": 1500, "value": "33"},
+  {"op": "place_component", "lib_id": "Device:R", "designator": "R2",
+   "x_mil": 1500, "y_mil": 1500, "value": "33"},
+  {"op": "add_bus", "vertices": [[800, 800], [2000, 800]]},
+  {"op": "add_net_label", "at": [900, 800], "name": "D[0..1]", "scope": "local"},
+  {"op": "add_bus_entry", "at": [1000, 800]},
+  {"op": "add_bus_entry", "at": [1500, 800]},
+  {"op": "add_wire", "vertices": [[1100, 900], [1100, 1200], [1000, 1200], "R1.1"]},
+  {"op": "add_wire", "vertices": [[1600, 900], [1600, 1200], [1500, 1200], "R2.1"]},
+  {"op": "add_net_label", "at": [1100, 1000], "name": "D0", "scope": "local"},
+  {"op": "add_net_label", "at": [1600, 1000], "name": "D1", "scope": "local"},
+  {"op": "add_net_label", "at": "R1.2", "name": "GND", "scope": "global"},
+  {"op": "add_net_label", "at": "R2.2", "name": "GND", "scope": "global"}
+ ]
+}

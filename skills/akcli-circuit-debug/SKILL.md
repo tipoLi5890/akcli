@@ -195,8 +195,23 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
 - **`INVALID_INSTANCES_PATH` on a hierarchical child file is no longer expected.**
   A child `.kicad_sch` of an existing hierarchy accepts ops (its `/<top-root>/<sheet>`
   instance paths are valid); a single-segment path must still name the file's own
-  root uuid. What is still unsupported is placing *into* a sub-sheet path from the
-  parent — target the child file directly.
+  root uuid. What is still unsupported is naming a sub-sheet PATH from the
+  parent — route the op onto the child with the envelope's `sheets` map + a
+  per-op `"sheet"` tag instead (or target the child file directly).
+- **Hierarchy-era codes (0.20), each with a precise fix:** `SHEET_UNKNOWN` —
+  a `"sheet"` tag names no `sheets` entry (did-you-mean rides along), or the
+  declared child file does not exist (`akcli new` it first).
+  `INSTANCE_REFS_REQUIRED` — the target sheet is instantiated more than once,
+  so a scalar designator would annotate every instance with one refdes; the
+  error lists the instance paths — copy them into
+  `instance_designators`/`instance_references` maps. `PROJECT_ROOT_AMBIGUOUS`
+  — several roots instantiate the target and the net gate refuses to guess
+  the tree: pass `--root FILE` (or `--flat` to accept the truncated
+  single-file view). `PROJECT_ROOT_MISMATCH` (exit 2) — your `--root`'s tree
+  does not contain the target. On a child target the "Net changes" block is
+  evaluated over the WHOLE sheet tree — a diff that looks bigger than your
+  edit usually means the tree view is showing members the single-file view
+  never could.
 - Per-op failures name the culprit: `SYMBOL_NOT_FOUND` → add `--symbols`, but when it hits
   EVERY `lib_id` including `Device:R` the op-list is fine and the environment is not —
   `akcli doctor --require symbols` resolves `Device:R` down the real path and says where it
@@ -216,6 +231,13 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   (or copy the `.bak` over the target). If the target changed on
   disk between akcli's read and write, apply aborts with `VERIFY_FAILED` and touches nothing —
   re-run from a fresh dry-run.
+- **Multi-sheet rollback (`sheets`-routed op-lists):** the transaction copies every
+  pre-write file into `.akcli/backups/runs/<run_id>/` (the `run_id` is in the draw's
+  status line, `--json` payload, and `akcli log`). `akcli undo <target> --run <run_id>
+  --apply` restores ALL files of that run together — same command again is a redo.
+  It refuses when any file changed after the run (a swap would discard that later
+  edit). A partial commit rolls itself back automatically; `TXN_ROLLBACK_FAILED`
+  means even that failed — the backup set is intact, run the `undo --run` above.
 - **Re-read-after-apply discipline:** an exit-0 apply proves the write landed, not that intent
   was met. Immediately `akcli net board.kicad_sch <NET>` / `akcli component board.kicad_sch <REF>`
   the touched objects and compare against the op-list. Replaying the same op-list is idempotent

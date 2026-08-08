@@ -83,11 +83,13 @@ _OP_OPTIONAL: dict[str, dict] = {
     "place_component": {"x_mil": 0, "y_mil": 0,
                         "rotation": 0, "mirror": "none", "unit": 1,
                         "value": "<value>", "footprint": "<Lib:Footprint>",
-                        "symbol_source": "<extra.kicad_sym>"},
+                        "symbol_source": "<extra.kicad_sym>",
+                        "instance_designators": {"<instance path>": "<REF>"}},
     "set_component_transform": {"rotation": 0, "mirror": "none"},
     "set_component_parameters": {"reference": "<REF>", "value": "<value>",
                                  "footprint": "<Lib:Footprint>",
-                                 "parameters": {"<KEY>": "<VALUE>"}},
+                                 "parameters": {"<KEY>": "<VALUE>"},
+                                 "instance_references": {"<instance path>": "<REF>"}},
     "add_wire": {},
     "route_net": {"style": "auto", "label": "<NET_NAME>", "scope": "local"},
     "add_bus": {},
@@ -831,10 +833,14 @@ def expand_macros(doc: dict, *, origins: list[int] | None = None) -> dict:
             expanded = _MACRO_EXPANDERS[op["op"]](idx, op)
             # A grouped macro stays group-local through expansion: the tag
             # rides onto every child so resolve_groups translates the children
-            # (and the writer persists their membership).
+            # (and the writer persists their membership). A sheet-routed
+            # macro rides the same way: every child lands on the same file.
             if isinstance(op.get("group"), str):
                 for child in expanded:
                     child.setdefault("group", op["group"])
+            if isinstance(op.get("sheet"), str):
+                for child in expanded:
+                    child.setdefault("sheet", op["sheet"])
             out.extend(expanded)
             src.extend([idx] * len(expanded))
         else:
@@ -1010,12 +1016,14 @@ _OP_FIELDS: dict[str, dict[str, str]] = {
                         "y_mil": "num", "anchor": "anchor_ref",
                         "offset_mil": "point", "rotation": "rotation",
                         "mirror": "mirror", "unit": "posint", "value": "str",
-                        "footprint": "str", "symbol_source": "str"},
+                        "footprint": "str", "symbol_source": "str",
+                        "instance_designators": "dict"},
     "set_component_transform": {"designator": "str", "rotation": "rotation",
                                 "mirror": "mirror"},
     "set_component_parameters": {"designator": "str", "reference": "str",
                                  "value": "str", "footprint": "str",
-                                 "parameters": "dict"},
+                                 "parameters": "dict",
+                                 "instance_references": "dict"},
     "add_wire": {"vertices": "vertices"},
     "route_net": {"from": "endpoint", "to": "endpoint", "style": "route_style",
                   "label": "str", "scope": "scope"},
@@ -1255,13 +1263,19 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
         out.append(OpError(idx, None, "OP_UNSUPPORTED", "op must be a JSON object"))
         return out
     name = op.get("op")
-    # "group" is a universally-allowed optional tag (see resolve_groups) —
-    # validated here once instead of polluting every per-op field table.
+    # "group" and "sheet" are universally-allowed optional tags (see
+    # resolve_groups / the multi-sheet envelope) — validated here once
+    # instead of polluting every per-op field table.
     if "group" in op and not isinstance(op["group"], str):
         out.append(OpError(idx, name if isinstance(name, str) else None,
                            "OP_UNSUPPORTED",
                            "group must be a string (a key of the envelope "
                            "'groups' map)"))
+    if "sheet" in op and not isinstance(op["sheet"], str):
+        out.append(OpError(idx, name if isinstance(name, str) else None,
+                           "OP_UNSUPPORTED",
+                           "sheet must be a string (a key of the envelope "
+                           "'sheets' map)"))
     if _in(name, MACRO_OPS):
         # macros are part of the document vocabulary: a not-yet-expanded
         # op-list must validate; plan/draw expand them before execution
@@ -1271,7 +1285,7 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
                                    f"missing required field {req!r}"))
         known = set(MACRO_REQUIRED.get(name, [])) | set(MACRO_OPTIONAL.get(name, {}))
         for field in op:
-            if field in ("op", "group") or field in known or field.startswith("_"):
+            if field in ("op", "group", "sheet") or field in known or field.startswith("_"):
                 continue
             _unknown_field(idx, name, field, known, out)
         _check_macro_designator_roles(idx, str(name), op, out)
@@ -1321,7 +1335,7 @@ def _validate_op(idx: int, op: object) -> list[OpError]:
     # Keys starting with "_" are ignored (annotation escape, schema-compatible).
     fields = _OP_FIELDS.get(name, {})
     for field, value in op.items():
-        if field in ("op", "group") or field.startswith("_"):
+        if field in ("op", "group", "sheet") or field.startswith("_"):
             continue
         kind = fields.get(field)
         if kind is None:
@@ -1414,10 +1428,44 @@ def validate_oplist(doc: dict) -> list[OpError]:
                                             f"groups[{gname!r}]: unknown field "
                                             f"{k!r}{suggestion}"))
 
+    sheets = doc.get("sheets")
+    if sheets is not None:
+        if not isinstance(sheets, dict):
+            errs.append(OpError(-1, None, "OP_UNSUPPORTED",
+                                "'sheets' must be an object of "
+                                "{name: {file: '<child.kicad_sch>'}}"))
+            sheets = None
+        else:
+            for sname, meta in sheets.items():
+                if not isinstance(meta, dict) or not isinstance(
+                        meta.get("file"), str) or not meta.get("file"):
+                    errs.append(OpError(-1, None, "SHEET_UNKNOWN",
+                                        f"sheets[{sname!r}] needs a 'file': "
+                                        "'<child.kicad_sch>'"))
+                    continue
+                for k in meta:
+                    if k != "file" and not k.startswith("_"):
+                        errs.append(OpError(-1, None, "OP_UNSUPPORTED",
+                                            f"sheets[{sname!r}]: unknown "
+                                            f"field {k!r}"))
+
     ops = doc.get("ops")
     if not isinstance(ops, list):
         errs.append(OpError(-1, None, "OP_UNSUPPORTED", "ops must be an array"))
         return errs
+
+    # Every 'sheet'-tagged op must reference a declared sheets entry (the tag
+    # is validated per-op for type; the MAP membership is a document check).
+    declared = set(sheets or ())
+    for idx, op in enumerate(ops):
+        tag = op.get("sheet") if isinstance(op, dict) else None
+        if isinstance(tag, str) and tag not in declared:
+            hint = difflib.get_close_matches(tag, declared, n=1) if declared else []
+            suggestion = f" (did you mean {hint[0]!r}?)" if hint else ""
+            errs.append(OpError(idx, op.get("op") if isinstance(op, dict) else None,
+                                "SHEET_UNKNOWN",
+                                f"op's sheet {tag!r} is not declared in the "
+                                f"envelope 'sheets' map{suggestion}"))
 
     for i, op in enumerate(ops):
         errs.extend(_validate_op(i, op))

@@ -36,6 +36,10 @@ def test_required_codes_present():
         # document integrity shared by the writer and connectivity.verify:
         # two power ports on one coordinate, a (sheet) with no child file
         "POWER_PORT_STACKED", "SHEET_FILE_MISSING",
+        # sheet-tree root resolution (hierarchy-aware net-diff scope)
+        "PROJECT_ROOT_AMBIGUOUS", "PROJECT_ROOT_MISMATCH",
+        # multi-sheet op-list envelope + write transaction
+        "SHEET_UNKNOWN", "INSTANCE_REFS_REQUIRED", "TXN_ROLLBACK_FAILED",
         "KICAD_CLI_TIMEOUT", "KICAD_CLI_MISSING", "BAD_CONFIG",
         # ngspice engine + the jlc networked surface
         "NGSPICE_MISSING", "NGSPICE_FAILED", "NETWORK",

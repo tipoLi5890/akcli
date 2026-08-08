@@ -9,9 +9,12 @@ description: >-
   .kicad_sch via op-list JSON; picking real parts with JLC/LCSC sourcing before drawing;
   simulating the drawn circuit with the bundled ngspice ("模擬", simulate, run a SPICE
   sim, operating point, transient, DC sweep, assert node voltages);
-  or safely re-running / editing a previously drawn sheet. Triggers on keywords:
+  building or editing a hierarchical design (parent + child sheets, add_sheet,
+  multi-sheet op-list, sheet reuse); or safely re-running / editing a previously
+  drawn sheet. Triggers on keywords:
   new schematic, draw circuit, op-list, place_component, add_wire, net label,
-  power port, decoupling, LDO block, connector fanout, akcli plan, akcli draw,
+  power port, decoupling, LDO block, connector fanout, hierarchical sheet,
+  multi-sheet, child sheet, akcli plan, akcli draw,
   akcli sim, ngspice, SPICE deck, sim.json, JLC part selection, kicad_sch authoring.
 ---
 
@@ -19,11 +22,14 @@ description: >-
 
 This skill covers *creating* circuits with the `akcli` op-list writer. For basic
 read/analyze/draw mechanics, exit codes, error format, and the Altium (read-only)
-path, **see the akcli-circuit-design skill** — do not re-derive them here. KiCad is the
-only writable target. Authoring targets ONE sheet file per run: a child
-`.kicad_sch` of an existing hierarchy is a valid target (its ops apply
-normally), but you cannot place *into* a sub-sheet path from the parent — run
-`draw` against the child file itself.
+path, **see the akcli-circuit-design skill** — do not re-derive them here. KiCad is
+the only writable target. An op-list edits one sheet file — or **several in one
+atomic transaction**: declare the children in the envelope's `sheets` map and tag
+ops with `"sheet"` (see the hierarchy bullets in §4). A child `.kicad_sch` of an
+existing hierarchy is also still a valid direct target; what never works is naming
+a sub-sheet *path* from the parent (`HIERARCHICAL_UNSUPPORTED` — route by `sheet`
+tag instead). Copy-paste-ready starter op-lists live in `examples/circuits/`
+(CI-locked, so they cannot drift from the tool).
 
 **The authoring loop (never skip a stage):**
 requirements → block plan (groups + intent) → part selection → op-list
@@ -323,6 +329,24 @@ Rules the validator and executor enforce:
   design fail. A part drawn INTO a child file joins its siblings' sheet paths
   automatically. KiCad only. Full flow + pin fields: the "Hierarchical sheets"
   section of `docs/op-list-authoring.md`.
+- **Multi-sheet op-lists — the `sheets` envelope (0.20)**: declare children
+  once (`"sheets": {"amp": {"file": "amp.kicad_sch"}}`) and tag ops with
+  `"sheet": "amp"` to route them onto that file — so `add_sheet` + populate
+  the child is ONE op-list, ONE net-diff over the whole would-be tree, ONE
+  atomic write (all files staged + verified before the first replace;
+  pre-write bytes in `.akcli/backups/runs/<run_id>/`; `akcli undo <target>
+  --run <run_id> --apply` restores every file together, and again = redo).
+  An undeclared tag is `SHEET_UNKNOWN` with a did-you-mean; a tagged macro
+  expands with the tag on every child op. Each routed file keeps its own
+  uuid namespace, so replay stays byte-identical per file.
+- **Sheet reuse — per-instance references**: a child instantiated N times is
+  N annotation scopes, so a scalar `designator` there is refused with
+  `INSTANCE_REFS_REQUIRED` (the message lists the instance paths to use —
+  copy them into `"instance_designators": {"<path>": "R101", "<path2>":
+  "R201"}`; `designator` must be one of the values). Renames use
+  `set_component_parameters.instance_references`; power ports need no map
+  (one `#PWR0n` is auto-allocated per instance). Addressing a part by ANY
+  instance's refdes works (`R201.1` finds the same symbol `R101.1` does).
 - **Bus rips — label the WIRE, not the bus**: draw the bus (`add_bus`), name it
   with a vector label (`add_net_label "K[3..0]"` on the bus — inclusive both
   ends, either order), add the diagonal `add_bus_entry`, then label the
@@ -394,7 +418,10 @@ akcli draw board.kicad_sch --ops ldo.json --symbols "$SYMS/Regulator_Linear.kica
 ```
 
 Exit 6 means an op errored or connectivity found an ERROR/CRITICAL
-(`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `UNRESOLVED_LIB_ID`, ...): on
+(`DANGLING_ENDPOINT`, `DANGLING_BUS_ENTRY`, `UNRESOLVED_LIB_ID`, ...), or a
+hierarchy gate refused (`SHEET_UNKNOWN`, `INSTANCE_REFS_REQUIRED`,
+`PROJECT_ROOT_AMBIGUOUS` — each remediation names the exact fix; see the
+akcli-circuit-debug skill): on
 `--apply` nothing was written. Another exit-6 cause is `TARGET_LOCKED`:
 `draw`/`arrange`/`undo --apply` refuse to write while the KiCad GUI holds the
 file open (a `~<name>.lck` lock file). After confirming it is safe, use
@@ -433,6 +460,19 @@ Net changes:
 existing sheet, apply with `--strict-nets`: any `!` line touching a named net
 refuses the write (exit 6). An intended merge/rename? Re-run without
 `--strict-nets` after confirming the lines are exactly the intended ones.
+
+**The diff's scope is the sheet TREE, not the file (0.20).** Editing a child
+of a hierarchy evaluates before/after nets from the resolved ROOT (the
+`--json` payload then carries `project_root` + `evaluation_scope: "tree"`),
+so a global label's member count includes what the sibling sheets contribute
+— the truncated single-file view silently under-reported exactly the
+splits/merges `--strict-nets` exists to catch. The root is auto-discovered;
+several candidate roots refuse with `PROJECT_ROOT_AMBIGUOUS` (pass `--root
+FILE`; `--flat` is the explicit opt-out back to the single-file view — under
+`--strict-nets` an unresolvable root fails CLOSED). Multi-sheet
+(`sheets`-routed) runs report per-file results (`run_id` + `files[]`) and
+their status line names the `undo --run` command that reverts the whole
+transaction.
 
 ## (6) Idempotency and safe re-runs
 

@@ -51,10 +51,10 @@ def test_tables_match_schema():
         assert sorted(req_table.get(name, [])) == sorted(required), (
             f"{name}: required fields drifted from schema"
         )
-        # "group" is universal (accepted on every op; see resolve_groups) and
-        # lives in every branch for additionalProperties:false, not in the
-        # per-op field tables.
-        schema_fields = set(branch.get("properties", {})) - {"op", "group"}
+        # "group" and "sheet" are universal (accepted on every op; see
+        # resolve_groups / the multi-sheet envelope) and live in every branch
+        # for additionalProperties:false, not in the per-op field tables.
+        schema_fields = set(branch.get("properties", {})) - {"op", "group", "sheet"}
         known = set(req_table.get(name, [])) | set(opt_table.get(name, {}))
         unknown = known - schema_fields
         assert not unknown, f"{name}: kit fields {unknown} not in schema"

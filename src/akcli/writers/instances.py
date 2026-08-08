@@ -11,8 +11,14 @@ If the second is missing or out of sync the netlist KiCad generates is *empty* o
 shows ``R?`` — the failure mode called out in SPEC risk #8.  :func:`write_instance`
 therefore always writes **both**, derived from the same ``ref``/``unit``.
 
-Scope (v1): **flat schematics only**.  A request to write an instance onto a
-*sub-sheet* path raises ``HIERARCHICAL_UNSUPPORTED`` (:func:`instances_path`).
+Scope: a file edited as its own top sheet writes the flat ``/<own-root>``
+form; a CHILD sheet's new symbols join their siblings' parent-hierarchy path
+set (:func:`_effective_paths`), one ``(path ...)`` entry per instantiation —
+with a **per-path reference** each (0.20): a multiply-instantiated sheet
+refuses a single scalar ref (``INSTANCE_REFS_REQUIRED``) and takes a
+``{path: ref}`` map instead. Naming a sub-sheet path from the PARENT's
+op-list still raises ``HIERARCHICAL_UNSUPPORTED`` (:func:`instances_path`) —
+route the op to the child file itself (per-op ``sheet`` tag).
 
 Idempotency: writing the same component twice must converge.  The ``(instances)``
 block is rebuilt deterministically from its inputs and replaces any prior one, and
@@ -29,6 +35,7 @@ from __future__ import annotations
 
 import re
 import uuid as _uuid
+from collections.abc import Mapping
 
 from ..errors import fail
 from ..readers.sexpr import SNode
@@ -36,6 +43,9 @@ from ..readers.sexpr import SNode
 __all__ = [
     "write_instance",
     "alloc_pwr_ref",
+    "alloc_pwr_refs",
+    "symbol_references",
+    "primary_reference",
     "instances_path",
     "sibling_paths",
     "project_name",
@@ -230,12 +240,64 @@ def alloc_pwr_ref(doc: SNode) -> str:
     past the current maximum (``#PWR01`` on an empty sheet).  Deterministic given
     the document, so re-running an op-list keeps allocations stable.
     """
+    return alloc_pwr_refs(doc, 1)[0]
+
+
+def alloc_pwr_refs(doc: SNode, count: int) -> list[str]:
+    """``count`` consecutive unused ``#PWR0<n>`` references (doc-deterministic).
+
+    The batch form serves a power port placed on a sheet file that is
+    instantiated more than once: each instance needs its own reference, and
+    the ops interface stays unchanged (the writer allocates one per path).
+    """
     maxn = 0
     for ref in _all_references(doc):
         m = _PWR_RE.match(ref)
         if m:
             maxn = max(maxn, int(m.group(1)))
-    return f"#PWR0{maxn + 1}"
+    return [f"#PWR0{maxn + 1 + i}" for i in range(max(1, int(count)))]
+
+
+# --------------------------------------------------------------------------- #
+# reading a symbol's per-path references
+# --------------------------------------------------------------------------- #
+def symbol_references(sym: SNode) -> dict[str, str]:
+    """``instance path -> reference`` for every ``(path ...)`` entry on ``sym``.
+
+    Empty when the symbol carries no ``(instances)`` block. The SINGLE source
+    of truth for "what refdes does this symbol answer to" — a sheet file
+    instantiated twice carries one reference PER path, and any code matching
+    a symbol by refdes must accept every entry, not just the first.
+    """
+    out: dict[str, str] = {}
+    inst = sym.find("instances")
+    if inst is None:
+        return out
+    for proj in inst.find_all("project"):
+        for path in proj.find_all("path"):
+            kids = path.children or []
+            pval = kids[1].value if len(kids) >= 2 and kids[1].is_atom else None
+            ref = path.find("reference")
+            rval = (ref.children[1].value
+                    if ref is not None and len(ref.children or []) >= 2 else None)
+            if pval and rval and pval not in out:
+                out[pval] = rval
+    return out
+
+
+def primary_reference(sym: SNode) -> str | None:
+    """The first path entry's reference, else the ``Reference`` property.
+
+    The historical single-answer form — display/property semantics. Callers
+    that LOCATE symbols by refdes must use :func:`symbol_references` instead.
+    """
+    for ref in symbol_references(sym).values():
+        return ref
+    for prop in sym.find_all("property"):
+        kids = prop.children or []
+        if len(kids) >= 3 and kids[1].value == "Reference":
+            return kids[2].value
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -277,17 +339,20 @@ def _set_reference_property(sym: SNode, ref: str) -> None:
     _append_child(sym, prop, _child_indent(sym))
 
 
-def _build_instances(project: str, paths: list[str], ref: str, unit: int) -> SNode:
+def _build_instances(project: str, path_refs: list[tuple[str, str]],
+                     unit: int) -> SNode:
     """Construct a complete ``(instances (project ... (path ...)+))`` node.
 
-    One ``(path ...)`` entry per sheet path the symbol lives on — a child sheet
-    instantiated twice contributes two, and KiCad expects an entry for each.
+    One ``(path ...)`` entry per ``(sheet path, reference)`` pair — a child
+    sheet instantiated twice contributes two entries, and each carries its
+    OWN reference (identical refs on two paths is a duplicate-refdes design;
+    the caller gates that, this builder just writes what it is given).
     """
     path_nodes = [
         _list(_atom("path"), _atom(_q(path)),
               _list(_atom("reference"), _atom(_q(ref))),
               _list(_atom("unit"), _atom(str(int(unit)))))
-        for path in paths
+        for path, ref in path_refs
     ]
     project_node = _list(_atom("project"), _atom(_q(project)), *path_nodes)
     return _list(_atom("instances"), project_node)
@@ -316,7 +381,7 @@ def _effective_paths(doc: SNode, sym: SNode, path: str) -> list[str]:
 def write_instance(
     doc: SNode,
     sym: SNode,
-    ref: str,
+    ref: str | Mapping[str, str],
     path: str,
     *,
     project: str | None = None,
@@ -334,15 +399,57 @@ def write_instance(
     (one per instantiation of that child).  :func:`_effective_paths` copies them
     off a sibling; see its docstring for when the flat form is kept.
 
+    ``ref`` may be:
+
+    * a **string** — legal only when the symbol sits on exactly ONE sheet
+      path. On a multiply-instantiated sheet a single string would annotate
+      every instance with the same reference (a duplicate-refdes design), so
+      the call refuses with ``INSTANCE_REFS_REQUIRED`` and the error message
+      lists the instance paths a per-path map must cover.
+    * a **mapping** ``{instance path: reference}`` — authoritative: the map's
+      pairs (insertion order preserved) become the ``(path ...)`` entries.
+      Values must be non-empty and pairwise distinct. The ``Reference``
+      property displays the FIRST pair's reference.
+
     Idempotent: the instances block is rebuilt deterministically and replaces any
     existing one, so a repeated call leaves ``sym`` byte-identical.
     """
     proj = project if project is not None else project_name(doc)
     unit = _symbol_unit(sym)
 
-    _set_reference_property(sym, ref)
+    if isinstance(ref, Mapping):
+        if not ref:
+            fail("INSTANCE_REFS_REQUIRED",
+                 "an empty per-instance reference map names no instance")
+        refs = list(ref.values())
+        if any(not isinstance(r, str) or not r for r in refs):
+            fail("INSTANCE_REFS_REQUIRED",
+                 "every per-instance reference must be a non-empty string")
+        if len(set(refs)) != len(refs):
+            fail("INSTANCE_REFS_REQUIRED",
+                 "per-instance references must be pairwise distinct — the "
+                 "same reference on two instance paths is exactly the "
+                 "duplicate-refdes design the map exists to prevent")
+        path_refs = [(p, r) for p, r in ref.items()]
+        display = path_refs[0][1]
+    else:
+        # An EXISTING symbol's own path set is the truth (a rename must not
+        # re-derive paths from siblings); a fresh symbol has no instances yet
+        # and derives its set from them.
+        paths = list(symbol_references(sym)) or _effective_paths(doc, sym, path)
+        if len(paths) > 1:
+            listing = ", ".join(f'"{p}"' for p in paths)
+            fail("INSTANCE_REFS_REQUIRED",
+                 "this sheet file is instantiated more than once; a single "
+                 f"designator would annotate every instance {ref!r} — pass a "
+                 "per-instance map covering these instance paths: "
+                 f"{{{listing}}}")
+        path_refs = [(paths[0], ref)]
+        display = ref
 
-    new_inst = _build_instances(proj, _effective_paths(doc, sym, path), ref, unit)
+    _set_reference_property(sym, display)
+
+    new_inst = _build_instances(proj, path_refs, unit)
     existing = sym.find("instances")
     if existing is None:
         _append_child(sym, new_inst, _child_indent(sym))

@@ -17,8 +17,12 @@ Arguments: `$ARGUMENTS`
   and config `[paths]` do not cover falls back to the project/global `sym-lib-table`, so
   `Device:R` resolves against an installed KiCad — still pass `--symbols` when the run must be
   reproducible elsewhere, or for a freshly converted symbol no table registers yet.
-- A child `.kicad_sch` of an existing hierarchy is a valid target; placing *into* a sub-sheet
-  path from the parent is not supported — run `draw` against the child file itself.
+- A child `.kicad_sch` of an existing hierarchy is a valid target, and one op-list can edit
+  the target AND its children in one atomic transaction: declare them in the envelope's
+  `sheets` map and tag ops with `"sheet"` (naming a sub-sheet *path* from the parent is still
+  not supported — route by tag). The net diff on any hierarchical target is evaluated over the
+  **whole sheet tree** (`--root FILE` disambiguates several roots, `--flat` opts back into the
+  single-file view).
 
 Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m akcli`):
 
@@ -42,7 +46,12 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    to reserve space before placing. An `add_text`/`add_text_box`/`add_rectangle` `key` must be
    unique within the op-list — the validator refuses duplicates (both ops would seed one uuid).
    `add_sheet`'s child `.kicad_sch` must already exist — `akcli new <child>.kicad_sch` first, or
-   the op is refused with `SHEET_FILE_MISSING`. Macro ops are validated too, before expansion:
+   the op is refused with `SHEET_FILE_MISSING`. For a multi-sheet edit, add
+   `"sheets": {"<key>": {"file": "<child>.kicad_sch"}}` to the envelope and tag ops with
+   `"sheet": "<key>"` — an undeclared tag is `SHEET_UNKNOWN`. A sheet instantiated more than
+   once refuses a scalar designator (`INSTANCE_REFS_REQUIRED` — the error lists the instance
+   paths; pass `"instance_designators": {"<path>": "<REF>", ...}`, or `instance_references`
+   on a rename). Macro ops are validated too, before expansion:
    an unknown field is an error with a did-you-mean, and `designators` is **positional** with a
    fixed part role per slot (`place_led_indicator` is `[R, D]`, not reading order), so check
    `akcli ops template <macro>` before filling it in.
@@ -75,7 +84,11 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    net refuses the write) and pass `--note "<why>"` so the workspace journal (`akcli log .`)
    records the design intent. The write is atomic (snapshot → temp → verify-on-temp → `os.replace`) and writes a rotated
    `<target>.bak` copy under the workspace's `.akcli/backups/` (walked by `akcli undo`), and is
-   rejected if connectivity verification fails — so the original is never corrupted.
+   rejected if connectivity verification fails — so the original is never corrupted. A
+   `sheets`-routed op-list commits every file as one transaction (all staged + verified before
+   the first replace; pre-write copies under `.akcli/backups/runs/<run_id>/`; a partial commit
+   rolls back automatically) and `akcli undo <target> --run <run_id> --apply` reverts the whole
+   run together.
 
 5. **Verify after writing:** re-read with `akcli read <board.kicad_sch>` / `akcli net ...` to
    confirm the result matches intent; `akcli check` covers the group layout lints

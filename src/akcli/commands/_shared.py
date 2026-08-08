@@ -521,15 +521,29 @@ def _draw_symbol_sources(args: argparse.Namespace, cfg, *,
     return sources
 
 
+# The sugar power ops carry NO explicit lib_id — the writer injects it at
+# execution time (writers/kicad._SUGAR_POWER), which is AFTER this scan. The
+# lib-table fallback must still learn the implied nickname, or the documented
+# rail-port pattern fails SYMBOL_NOT_FOUND on a stock install with no project
+# sym-lib-table (the fallback only resolves lib_ids it was told about).
+_SUGAR_LIB_IDS = {"place_gnd": "power:GND", "place_vcc": "power:VCC"}
+
+
 def _oplist_lib_ids(oplist) -> list[str]:
-    """Every ``lib_id`` an op-list references, in first-seen order."""
+    """Every ``lib_id`` an op-list references — explicit field or implied by a
+    sugar power op — in first-seen order."""
     out: list[str] = []
     seen: set[str] = set()
-    for op in (oplist or {}).get("ops") or ():
-        lib_id = op.get("lib_id") if isinstance(op, dict) else None
+
+    def add(lib_id: object) -> None:
         if isinstance(lib_id, str) and lib_id and lib_id not in seen:
             seen.add(lib_id)
             out.append(lib_id)
+
+    for op in (oplist or {}).get("ops") or ():
+        if not isinstance(op, dict):
+            continue
+        add(op.get("lib_id") or _SUGAR_LIB_IDS.get(op.get("op")))
     return out
 
 

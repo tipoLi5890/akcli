@@ -322,6 +322,21 @@ def _symbol_reference(sym: SNode) -> str | None:
     return None
 
 
+def _symbol_path_references(sym: SNode) -> list[str]:
+    """One reference per ``(path ...)`` entry (a twice-instantiated sheet's
+    symbol carries two — each its own annotation scope)."""
+    out: list[str] = []
+    inst = sym.find("instances")
+    if inst is None:
+        return out
+    for proj in inst.find_all("project"):
+        for path in proj.find_all("path"):
+            rv = _av(path.find("reference"), 1)
+            if rv:
+                out.append(rv)
+    return out
+
+
 def _pin_points(
     doc: SNode, library: model.Library
 ) -> tuple[set[Point], dict[Point, tuple[str, str]], list[Finding]]:
@@ -484,31 +499,38 @@ def verify(doc: SNode, *, tol_nm: int = 0,
     findings.extend(lib_findings)
 
     # --- duplicate designators ---------------------------------------------- #
-    # Two symbol nodes carrying the same (reference, unit) means the document
-    # holds the same part twice — the classic symptom of a uuid-seed mismatch
-    # on re-apply. Distinct UNITS of one part legitimately share a reference.
+    # The same (reference, unit) appearing twice means the document annotates
+    # one refdes onto two distinct things — the classic symptom of a uuid-seed
+    # mismatch on re-apply, AND (0.20) of a scalar ref written across a
+    # multiply-instantiated sheet's path entries (each path is its own
+    # annotation scope, so it counts per PATH ENTRY, not per symbol node: one
+    # symbol carrying the same ref on two paths is two placements of that ref).
+    # Distinct UNITS of one part legitimately share a reference.
     ref_units: Counter[tuple[str, str]] = Counter()
     for sym in _placed_symbols(doc):
-        ref = _symbol_reference(sym)
-        if not ref:
-            continue
-        if "?" in ref:
-            # An UNANNOTATED symbol ("R?", "#PWR?"): KiCad writes the same
-            # placeholder on every unannotated part, so N of them are N
-            # placeholders, not N duplicates of one part. Counting them refused
-            # every write to an unannotated sheet (even an add_text).
-            continue
         unit_node = sym.find("unit")
         unit = _av(unit_node, 1) or "1" if unit_node is not None else "1"
-        ref_units[(ref, unit)] += 1
+        path_refs = _symbol_path_references(sym)
+        refs_here = path_refs if path_refs else (
+            [_symbol_reference(sym)] if _symbol_reference(sym) else [])
+        for ref in refs_here:
+            if not ref or "?" in ref:
+                # An UNANNOTATED symbol ("R?", "#PWR?"): KiCad writes the same
+                # placeholder on every unannotated part, so N of them are N
+                # placeholders, not N duplicates of one part. Counting them
+                # refused every write to an unannotated sheet.
+                continue
+            ref_units[(ref, unit)] += 1
     for (ref, unit), count in ref_units.items():
         if count > 1:
             findings.append(
                 Finding(
                     DUPLICATE_DESIGNATOR,
                     Severity.ERROR,
-                    f"designator {ref!r} unit {unit} appears on {count} symbol "
-                    f"nodes (each part+unit must be placed exactly once)",
+                    f"designator {ref!r} unit {unit} appears on {count} "
+                    f"placement(s) (each part+unit must be annotated exactly "
+                    f"once; a sheet instantiated twice needs per-instance "
+                    f"references)",
                     refs=[ref],
                 )
             )

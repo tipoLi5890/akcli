@@ -585,6 +585,25 @@ def read_primitives(path: os.PathLike | str) -> NetPrimitives:
     return prims
 
 
+def sheet_refs(path: os.PathLike | str) -> tuple[str, list[tuple[str, str, str]]]:
+    """Lightweight single-file scan: ``(root_uuid, [(uuid, name, sheetfile), …])``.
+
+    The project layer's topology probe — no recursion, no component or net
+    reading, no existence check on the referenced child files. ``sheetfile``
+    is the raw ``Sheetfile`` property (relative to this file's directory) and
+    may be ``""`` for a sheet node that names no file.
+    """
+    root = _parse_root(path, "kicad_sch")
+    refs: list[tuple[str, str, str]] = []
+    for sh in root.find_all("sheet"):
+        props = _props(sh)
+        suuid = _av(sh.find("uuid"), 1) or ""
+        sname = props.get("Sheetname") or props.get("Sheet name") or suuid
+        sfile = props.get("Sheetfile") or props.get("Sheet file") or ""
+        refs.append((suuid, sname, sfile))
+    return _av(root.find("uuid"), 1) or "", refs
+
+
 def read_embedded_library(path: os.PathLike | str) -> model.Library | None:
     """The file's ``(lib_symbols ...)`` as a :class:`model.Library`, or None.
 

@@ -591,17 +591,23 @@ def _undo_summary(cur, old) -> str:
 
 
 def _refuse_if_gui_open(args: argparse.Namespace, target) -> None:
-    """Refuse a file swap while the KiCad GUI holds ``target`` open (no --allow-open)."""
+    """Refuse a file swap while the KiCad GUI holds any target open (no --allow-open).
+
+    ``target`` may be one path or a list (a multi-file ``undo --run`` checks
+    every file BEFORE the first swap).
+    """
     from ..writers import kicad as kwriter
     if getattr(args, "allow_open", False):
         return
-    lck = kwriter.gui_lock_path(target)
-    if lck.exists():
-        raise _ExitWith(
-            EXIT["OPLIST"],
-            f"ERROR: TARGET_LOCKED: {target.name} appears open in the KiCad GUI "
-            f"(found {lck.name}); close it first, or pass --allow-open and "
-            "File>Revert in KiCad afterwards")
+    targets = target if isinstance(target, (list, tuple)) else [target]
+    for t in targets:
+        lck = kwriter.gui_lock_path(t)
+        if lck.exists():
+            raise _ExitWith(
+                EXIT["OPLIST"],
+                f"ERROR: TARGET_LOCKED: {t.name} appears open in the KiCad GUI "
+                f"(found {lck.name}); close it first, or pass --allow-open and "
+                "File>Revert in KiCad afterwards")
 
 
 def _cmd_undo(args: argparse.Namespace) -> int:
@@ -617,6 +623,8 @@ def _cmd_undo(args: argparse.Namespace) -> int:
     Dry-run by default (like draw).
     """
     target = _require_path(args.path, "target .kicad_sch")
+    if getattr(args, "run", None):
+        return _undo_run(args, target, args.run)
     if getattr(args, "list", False):
         return _undo_list(args, target)
     steps = getattr(args, "steps", None)
@@ -627,6 +635,106 @@ def _cmd_undo(args: argparse.Namespace) -> int:
     if steps == 1:
         return _undo_swap(args, target)
     return _undo_walk(args, target, steps)
+
+
+def _undo_run(args: argparse.Namespace, target, run_id: str) -> int:
+    """``undo <target> --run <id>`` — all-or-nothing multi-file restore.
+
+    A multi-sheet draw commits several files in one transaction and copies
+    every pre-write file into ``.akcli/backups/runs/<run_id>/`` with a
+    manifest. This restores ALL of them by three-way swap (file <-> backup),
+    so running the same ``--run`` again is a redo. Refuses when any file was
+    modified since the transaction (its sha no longer matches the manifest's
+    ``sha_after``) — a swap would silently discard that later edit.
+    Dry-run by default (like draw).
+    """
+    import hashlib as _hashlib
+    import json as _json
+    import shutil as _shutil
+
+    from .. import journal as _journal
+    from ..writers.txn import MANIFEST_NAME
+
+    bdir = _journal.backups_dir(target) / "runs" / run_id
+    man_path = bdir / MANIFEST_NAME
+    if not man_path.is_file():
+        raise _ExitWith(EXIT["NOT_FOUND"],
+                        f"ERROR: no transaction backup {run_id!r} under "
+                        f"{bdir.parent} (see the journal: `akcli log`)")
+    manifest = _json.loads(man_path.read_text(encoding="utf-8"))
+    entries = manifest.get("files") or []
+
+    current: dict[str, str] = {}
+    stale: list[str] = []
+    for m in entries:
+        f = Path(m["file"])
+        sha = (_hashlib.sha256(f.read_bytes()).hexdigest()
+               if f.is_file() else "<missing>")
+        current[m["file"]] = sha
+        # forward state == sha_after -> restoring goes BACK to sha_before;
+        # forward state == sha_before -> this is a redo (back to sha_after).
+        if sha not in (m.get("sha_after"), m.get("sha_before")):
+            stale.append(f.name)
+    if stale:
+        raise _ExitWith(EXIT["OPLIST"],
+                        f"REFUSED: {', '.join(stale)} changed since "
+                        f"transaction {run_id} (a swap would discard that "
+                        "edit); restore manually from "
+                        f"{bdir} if you really mean it")
+
+    do_apply = bool(getattr(args, "apply", False))
+    if do_apply:
+        _refuse_if_gui_open(args, [Path(m["file"]) for m in entries])
+        swapped: list[dict] = []
+        try:
+            for m in entries:
+                f = Path(m["file"])
+                bak = bdir / m["backup"]
+                tmp = f.parent / f".{f.name}.undorun.tmp"
+                _shutil.copy2(bak, tmp)
+                _shutil.copy2(f, bak)
+                tmp.replace(f)
+                swapped.append(m)
+        except BaseException as exc:
+            # reverse the completed swaps so the set stays consistent
+            try:
+                for m in reversed(swapped):
+                    f = Path(m["file"])
+                    bak = bdir / m["backup"]
+                    tmp = f.parent / f".{f.name}.undorun.tmp"
+                    _shutil.copy2(bak, tmp)
+                    _shutil.copy2(f, bak)
+                    tmp.replace(f)
+            except BaseException:
+                raise _ExitWith(
+                    EXIT["OPLIST"],
+                    f"ERROR: TXN_ROLLBACK_FAILED: undo --run {run_id} failed "
+                    f"partway AND could not reverse ({type(exc).__name__}: "
+                    f"{exc}); the backup set under {bdir} is intact") from exc
+            raise _ExitWith(EXIT["OPLIST"],
+                            f"ERROR: undo --run {run_id} failed "
+                            f"({type(exc).__name__}: {exc}); every completed "
+                            "swap was reversed — nothing changed") from exc
+        _journal.record(target, "undo", "applied", run_id=run_id,
+                        files=[m["file"] for m in entries],
+                        note=getattr(args, "note", None))
+    payload = {
+        "target": str(target), "run_id": run_id, "applied": do_apply,
+        "files": [{"file": m["file"], "backup": m["backup"],
+                   "restored": do_apply} for m in entries],
+    }
+    if args.json:
+        _emit(_dumps(_stamp(payload)))
+    else:
+        verb = "restored" if do_apply else "would restore"
+        _emit(f"undo --run {run_id}: {verb} {len(entries)} file(s):")
+        for m in entries:
+            _emit(f"  {m['file']}")
+        if not do_apply:
+            _emit("status: dry-run — nothing written (re-run with --apply)")
+        else:
+            _emit(f"status: APPLIED — run {run_id} swapped (same command again = redo)")
+    return EXIT["OK"]
 
 
 def _undo_list(args: argparse.Namespace, target) -> int:
@@ -1037,14 +1145,17 @@ def _ops_sha256(ops_path: str | None) -> str | None:
 
 
 def _draw_result_payload(*, applied: bool, status: str, ops: list[dict],
-                         connectivity: list, net_diff, preview=None) -> dict:
+                         connectivity: list, net_diff, preview=None,
+                         project_root=None, txn=None) -> dict:
     """The ONE author of the plan/draw ``--json`` payload.
 
     Every plan/draw exit path (normal run AND structural op-list refusal)
     routes through here, so the shape can never fork from
-    ``draw-result.schema.json`` in just one branch.
+    ``draw-result.schema.json`` in just one branch. ``project_root`` /
+    ``evaluation_scope`` appear ONLY when the net gate ran over a sheet tree
+    (absent, not null, on the flat path — flat output stays byte-identical).
     """
-    return {
+    payload = {
         "schema_version": "1.0",   # draw-result.schema.json
         "applied": applied,
         "status": status,
@@ -1056,6 +1167,15 @@ def _draw_result_payload(*, applied: bool, status: str, ops: list[dict],
         "net_diff": net_diff,
         "preview": preview,
     }
+    if project_root is not None:
+        payload["project_root"] = project_root
+        payload["evaluation_scope"] = "tree"
+    if txn is not None:
+        # Multi-sheet transaction summary (absent — not null — on the
+        # single-file path, whose payload stays byte-identical).
+        payload["run_id"] = txn["run_id"]
+        payload["files"] = txn["files"]
+    return payload
 
 
 def _render_preview(tmp_path, out_path) -> dict | None:
@@ -1143,6 +1263,34 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
     net_equiv = True
     net_diff_err = None
     preview = None
+
+    # Multi-sheet routing: an op-list using the envelope's `sheets` map (or
+    # per-op `sheet` tags) edits several files in ONE transaction.
+    from ..writers import txn as _txn
+    routed = _txn.sheet_routed(oplist)
+
+    # Hierarchy scope: a child sheet read standalone is a TRUNCATED graph (its
+    # global labels lose the members other sheets contribute), so evaluating
+    # the gate there would grade the wrong design. Resolve the tree's root
+    # first — the flat case (no parent references the target) short-circuits
+    # to exactly the historical single-file path.
+    tree_root = None
+    if (want_diff or render_out) and not getattr(args, "flat", False):
+        from pathlib import Path as _P
+        from .. import project as _project
+        explicit = _P(args.root) if getattr(args, "root", None) else None
+        try:
+            resolved = _project.resolve_root(target, explicit=explicit)
+            if resolved != target.resolve():
+                tree_root = resolved
+        except AkcliError as e:
+            if e.code == "PROJECT_ROOT_MISMATCH" or strict:
+                raise          # a wrong --root is a usage error; strict = closed
+            # Advisory mode degrades HONESTLY: no diff at all beats a
+            # truncated one silently presented as the design's net effect.
+            net_diff_err = str(e)
+            want_diff = False
+
     if want_diff or render_out:
         from ..netdiff import diff as net_diff
         from ..netdiff import format_summary as net_summary
@@ -1150,22 +1298,59 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         from ..readers import kicad as kreader
         import os
         import shutil
-        # the copy lives NEXT TO the target (never a TemporaryDirectory): a
-        # hierarchical root must still resolve its child sheets on read-back
-        tmp = target.parent / f".{target.name}.netdiff.{os.getpid()}.tmp"
         dry_ok = False
         had_exc = False
+        stage_base = None
+        if tree_root is not None or routed:
+            # Tree- (or transaction-) scoped target: stage the WHOLE tree
+            # (relative layout preserved) so the dry-applied files are read
+            # back THROUGH the root — before/after nets both come from the
+            # full graph. A routed op-list stages even when the target IS the
+            # root: several staged files change, not just one.
+            from .. import journal as _journal
+            scope_root = tree_root if tree_root is not None else target.resolve()
+            stage_base = (_journal.ensure_workspace_dir(scope_root) / "stage"
+                          / f"{os.getpid()}")
+            tmp = None
+        else:
+            # the copy lives NEXT TO the target (never a TemporaryDirectory): a
+            # hierarchical root must still resolve its child sheets on read-back
+            tmp = target.parent / f".{target.name}.netdiff.{os.getpid()}.tmp"
         try:
-            before_nets = kreader.read_sch(str(target)).nets if want_diff else None
-            shutil.copy2(target, tmp)
+            if stage_base is not None:
+                from .. import project as _project
+                before_nets = (kreader.read_sch(str(scope_root)).nets
+                               if want_diff else None)
+                stage_files = list(_project.tree_files(scope_root))
+                if routed:
+                    for f in _txn.resolve_sheet_files(oplist, target).values():
+                        if f not in stage_files:
+                            stage_files.append(f)
+                mapping = _project.stage_tree(stage_files, stage_base)
+                dry_target = mapping[target.resolve()]
+                staged_root = mapping[scope_root]
+                if tree_root is not None:
+                    _log(args, 1, f"net gate scope: sheet tree rooted at "
+                                  f"{tree_root.name}")
+            else:
+                before_nets = (kreader.read_sch(str(target)).nets
+                               if want_diff else None)
+                shutil.copy2(target, tmp)
+                dry_target = tmp
+                staged_root = tmp
             tmp_findings: list = []
-            tmp_results = kwriter.apply(oplist, str(tmp), apply=True,
-                                        sources=sources,
-                                        verify_out=tmp_findings,
-                                        backup_dir=None)
+            if routed:
+                tmp_results, _rep = _txn.apply_project(
+                    oplist, dry_target, apply=True, sources=sources,
+                    file_map={}, verify_out=tmp_findings)
+            else:
+                tmp_results = kwriter.apply(oplist, str(dry_target), apply=True,
+                                            sources=sources,
+                                            verify_out=tmp_findings,
+                                            backup_dir=None)
             dry_ok = _draw_exit(tmp_results, tmp_findings) == EXIT["OK"]
             if want_diff and dry_ok:
-                after_nets = kreader.read_sch(str(tmp)).nets
+                after_nets = kreader.read_sch(str(staged_root)).nets
                 nd = net_diff(before_nets, after_nets)
                 net_lines = net_summary(nd)      # [] iff nd.equivalent
                 net_risk = net_has_risk(nd)
@@ -1185,15 +1370,18 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
             # a refused op-list leaves the temp pristine, so rendering it would
             # show the before-state as if it were the plan — skip it honestly.
             if render_out and dry_ok:
-                preview = _render_preview(tmp, render_out)
+                preview = _render_preview(dry_target, render_out)
             elif render_out and not had_exc:
                 sys.stderr.write(
                     "WARNING: preview skipped (op-list did not dry-apply "
                     "cleanly; fix the errors below)\n")
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+            if stage_base is not None:
+                shutil.rmtree(stage_base, ignore_errors=True)
+            if tmp is not None:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
 
     if net_diff_err is not None:
         if strict:
@@ -1210,15 +1398,25 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
                         "named net; nothing written")
 
     findings: list = []
-    results = kwriter.apply(
-        oplist, str(target), apply=do_apply, sources=sources, verify_out=findings,
-        # write a rotated <name>.bak under .akcli/backups/ on apply (the atomic
-        # write already guarantees the original is never corrupted; this is extra
-        # safety and the stack `akcli undo` walks). Depth from [project] backup_depth.
-        backup_dir=(_backups_dir(target) if do_apply else None),
-        backup_depth=_backup_depth(cfg),
-        allow_open=bool(getattr(args, "allow_open", False)),
-    )
+    txn_report = None
+    if routed:
+        results, txn_report = _txn.apply_project(
+            oplist, target, apply=do_apply, sources=sources,
+            verify_out=findings,
+            allow_open=bool(getattr(args, "allow_open", False)),
+        )
+    else:
+        results = kwriter.apply(
+            oplist, str(target), apply=do_apply, sources=sources,
+            verify_out=findings,
+            # write a rotated <name>.bak under .akcli/backups/ on apply (the
+            # atomic write already guarantees the original is never corrupted;
+            # this is extra safety and the stack `akcli undo` walks). Depth
+            # from [project] backup_depth.
+            backup_dir=(_backups_dir(target) if do_apply else None),
+            backup_depth=_backup_depth(cfg),
+            allow_open=bool(getattr(args, "allow_open", False)),
+        )
 
     if do_apply and _draw_exit(results, findings) == EXIT["OK"]:
         _log(args, 1, f"wrote {target}")
@@ -1251,8 +1449,17 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         status_line = f"status: dry-run — nothing written{hint}"
     elif code == EXIT["OK"]:
         status = "applied"
-        status_line = (f"status: APPLIED — wrote {target.name} "
-                       f"(backup {_backup_label(target)}; `akcli undo` reverts)")
+        if txn_report is not None and txn_report.get("backup"):
+            written = [f["file"].rsplit("/", 1)[-1]
+                       for f in txn_report["files"] if f["written"]]
+            status_line = (
+                f"status: APPLIED — wrote {len(written)} file(s) "
+                f"({', '.join(written)}) in one transaction (backup "
+                f".akcli/backups/{txn_report['backup']}; `akcli undo "
+                f"{target.name} --run {txn_report['run_id']} --apply` reverts)")
+        else:
+            status_line = (f"status: APPLIED — wrote {target.name} "
+                           f"(backup {_backup_label(target)}; `akcli undo` reverts)")
     else:
         status = "refused"
         status_line = "status: REFUSED — nothing written (fix the errors above)"
@@ -1266,7 +1473,10 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
             net_diff=None if (net_lines is None or not show_diff) else {
                 "equivalent": net_equiv, "risk": net_risk, "lines": net_lines,
             },
-            preview=preview)))
+            preview=preview,
+            project_root=(tree_root.as_posix() if tree_root is not None
+                          else None),
+            txn=txn_report)))
     else:
         _emit(_draw_results_text(results, findings))
         if show_diff and net_lines is not None:
@@ -1280,15 +1490,30 @@ def _run_draw(args: argparse.Namespace, do_apply: bool) -> int:
         _emit(status_line)
 
     from .. import journal as _journal
-    _journal.record(
-        target, getattr(args, "command", "draw") or "draw", status,
-        ops_sha256=_ops_sha256(args.ops),
-        op_count=len(oplist.get("ops", []) or []),
-        net_diff=(None if net_lines is None
-                  else {"equivalent": net_equiv, "risk": net_risk}),
-        note=getattr(args, "note", None),
-        backup=(_backup_label(target) if status == "applied" else None),
-    )
+    if txn_report is not None:
+        _journal.record(
+            target, getattr(args, "command", "draw") or "draw", status,
+            ops_sha256=_ops_sha256(args.ops),
+            op_count=len(oplist.get("ops", []) or []),
+            net_diff=(None if net_lines is None
+                      else {"equivalent": net_equiv, "risk": net_risk}),
+            note=getattr(args, "note", None),
+            run_id=txn_report["run_id"],
+            files=[f["file"] for f in txn_report["files"] if f["dirty"]],
+            backup=(f".akcli/backups/{txn_report['backup']}"
+                    if status == "applied" and txn_report.get("backup")
+                    else None),
+        )
+    else:
+        _journal.record(
+            target, getattr(args, "command", "draw") or "draw", status,
+            ops_sha256=_ops_sha256(args.ops),
+            op_count=len(oplist.get("ops", []) or []),
+            net_diff=(None if net_lines is None
+                      else {"equivalent": net_equiv, "risk": net_risk}),
+            note=getattr(args, "note", None),
+            backup=(_backup_label(target) if status == "applied" else None),
+        )
 
     return code
 
@@ -1382,6 +1607,10 @@ def register(sub, common) -> None:
                         "redoes the last step)")
     p.add_argument("--list", action="store_true",
                    help="show the backup stack (mtimes/sizes) and exit")
+    p.add_argument("--run", metavar="RUN_ID",
+                   help="restore ALL files of a multi-sheet draw transaction "
+                        "(all-or-nothing; same command again = redo) from "
+                        ".akcli/backups/runs/<RUN_ID>/")
     p.add_argument("--allow-open", dest="allow_open", action="store_true",
                    help="swap even when a KiCad GUI lock file is present "
                         "(File>Revert in KiCad afterwards)")
@@ -1430,6 +1659,13 @@ def register(sub, common) -> None:
                    help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
     p.add_argument("--no-net-diff", action="store_true",
                    help="skip the before/after net connectivity diff")
+    p.add_argument("--root", metavar="FILE",
+                   help="root .kicad_sch of the sheet tree to evaluate the net "
+                        "diff over (auto-discovered when exactly one root "
+                        "instantiates the target)")
+    p.add_argument("--flat", action="store_true",
+                   help="evaluate the target file alone, ignoring any parent "
+                        "sheet tree (the truncated single-file net view)")
     p.add_argument("--render", metavar="OUT.svg",
                    help="render the WOULD-BE sheet (dry-applied to a temp "
                         "copy) to an SVG preview — look before you --apply")
@@ -1450,6 +1686,13 @@ def register(sub, common) -> None:
                    help="extra .kicad_sym / template .kicad_sch symbol source (repeatable)")
     p.add_argument("--no-net-diff", action="store_true",
                    help="skip the before/after net connectivity diff")
+    p.add_argument("--root", metavar="FILE",
+                   help="root .kicad_sch of the sheet tree to evaluate the net "
+                        "diff over (auto-discovered when exactly one root "
+                        "instantiates the target)")
+    p.add_argument("--flat", action="store_true",
+                   help="evaluate the target file alone, ignoring any parent "
+                        "sheet tree (the truncated single-file net view)")
     p.add_argument("--strict-nets", action="store_true",
                    help="with --apply: refuse to write when the net diff shows "
                         "a split/merge touching a named net")

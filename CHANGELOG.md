@@ -17,7 +17,7 @@ All notable changes to `akcli` are documented here. The format is based on
   - **MINOR** — backwards-compatible new subcommands, flags, checks, readers, or ops.
   - **PATCH** — backwards-compatible bug fixes and internal changes.
 
-- **`schema_version`** (stamped on every `Schematic`/`Pcb`/`Library` JSON export; currently `"1.0"`).
+- **`schema_version`** (stamped on every `Schematic`/`Pcb`/`Library` JSON export; currently `"1.3"` — `model.SCHEMA_VERSION` is the single source of truth).
   Bumped independently of the package version. A **minor** schema bump only adds optional fields
   (consumers must ignore unknown keys); a **major** schema bump may remove or rename fields and
   coincides with a package MAJOR bump.
@@ -30,6 +30,140 @@ All notable changes to `akcli` are documented here. The format is based on
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
 ## [Unreleased]
+
+## [0.20.0] - 2026-08-08
+
+The hierarchy-first architecture update, complete in one release: the net
+gate evaluates the sheet TREE a child belongs to, one op-list edits several
+sheets in one atomic transaction, a reused sheet gets per-instance
+references, and the agent contract surface becomes sliceable and
+schema-reachable.
+
+### Changed
+
+- **`plan`/`draw` on a child `.kicad_sch` of a hierarchy now evaluate the
+  net-diff over the whole sheet tree**, not the child alone. A child read
+  standalone is a truncated graph — its global labels lose every member the
+  sibling sheets contribute — so the previous behaviour could grade a
+  split/merge against the wrong design ("connectivity is the ONLY hard write
+  gate" was silently false for hierarchical projects). The root is
+  auto-discovered by reverse-indexing the project directory (nearest
+  `.kicad_pro` ancestor, bounded climb); `--root FILE` names it explicitly,
+  `--flat` restores the single-file view. Writes that previously passed on
+  the truncated view may now be refused with tree-level findings. Flat
+  (single-file) targets short-circuit to the historical path — their output
+  is byte-identical to 0.19.
+- Root resolution failures are honest, never guessed: several claiming roots
+  refuse with the new `PROJECT_ROOT_AMBIGUOUS` (exit 6; a single `.kicad_pro`
+  stem tie-breaks), and a `--root` whose tree does not contain the target is
+  the new `PROJECT_ROOT_MISMATCH` (exit 2). Under `--strict-nets` an
+  unresolvable root fails CLOSED; advisory runs degrade to
+  `net diff unavailable` (a missing diff beats a truncated one presented as
+  the design's net effect).
+- `plan`/`draw --render` on a child sheet renders the staged child from the
+  tree evaluation (same one-dry-apply-two-consumers contract as before).
+
+### Added
+
+- **Multi-sheet op-lists in one atomic transaction.** The envelope gains an
+  optional `sheets` map (`{"amp": {"file": "amp.kicad_sch"}}`) and every op
+  an optional `"sheet"` tag routing it onto the declared child file
+  (`protocol_version` stays 1 — purely additive; an undeclared tag is the
+  new `SHEET_UNKNOWN`, with did-you-mean; a `sheet`-tagged macro expands
+  with the tag riding onto every child op). The write is a transaction
+  (`writers/txn.py`): every dirty file is staged — temp + fsync +
+  connectivity-verified — before the first `os.replace`; the pre-write bytes
+  of every file land in `.akcli/backups/runs/<run_id>/` with a manifest (the
+  recovery unit, deliberately journal-independent); a partial commit rolls
+  back automatically, and only a failed rollback is `TXN_ROLLBACK_FAILED`
+  (loud, with the backup set intact). Each routed file keeps its own uuid
+  namespace, so multi-sheet op-lists replay byte-identically per file. The
+  draw `--json` payload carries `run_id` + per-file `files[]` on these runs
+  (absent — not null — on single-file runs), and the journal records the
+  transaction.
+- **`akcli undo <target> --run <run_id>`** — all-or-nothing restore of every
+  file a multi-sheet transaction wrote (three-way swap per file: the same
+  command again is a redo). Refuses when any file changed since the
+  transaction (a swap would discard that edit); dry-run by default.
+- **Per-instance references (sheet reuse becomes writable).** A sheet file
+  instantiated more than once is per-instance annotated in KiCad — so a
+  scalar designator, which would write the SAME refdes onto every instance
+  (a duplicate-refdes design), is now refused with the new
+  `INSTANCE_REFS_REQUIRED` (the message lists the instance paths to use).
+  `place_component` gains optional `instance_designators` and
+  `set_component_parameters` gains `instance_references`
+  (`{"<instance path>": "<REF>"}`, pairwise-distinct; `designator` stays the
+  scalar uuid seed, so per-instance references never re-identify the node);
+  power ports need no map — the writer allocates one `#PWR0n` per instance
+  automatically. Locating a part by refdes (`_symbol_by_ref`, wire anchors,
+  `set_component_*`) now matches ANY instance's reference, not just the
+  first path entry's. The manifest's `constraints.hierarchy` is
+  `"hierarchical_write_v2"` with a machine-readable `sheet_reuse: true`.
+- **`akcli capabilities --section NAME` / `--command VERB`** — the ~96 KB
+  manifest becomes sliceable: one section (`exit_codes`, `error_codes`,
+  `global_flags`, `commands`, `ops`, `calculators`, `schemas`,
+  `conventions`) or one command's entry (~3% of the full document) in a
+  stamped envelope. An unknown VERB reports `found: false` and exits 8 (the
+  query-miss convention). The no-flag document keeps its exact historical
+  shape.
+- **`akcli schema <name>`** — every packaged JSON Schema printed
+  byte-for-byte (short names or full filenames; unknown names fail at parse
+  time with the full list). A `pip install`-ed orchestrator no longer digs
+  into site-packages for `ops.schema.json`.
+- **`examples/circuits/`** — copy-paste-ready op-lists (`voltage-divider`,
+  `rc-lowpass-with-power`) with pinned expected nets; CI applies the exact
+  committed op-lists and asserts the nets plus apply-twice byte-equality, so
+  the examples cannot drift from the tool.
+- `draw-result.schema.json`: optional `project_root` + `evaluation_scope`
+  fields, present ONLY when the gate ran tree-scoped (absent — not null — on
+  the flat path, whose payload is unchanged).
+- New modules `akcli.project` (root discovery + tree staging, read-only),
+  `akcli.writers.atomic` (the atomic write decomposed into
+  prepare/commit/abort — the two-phase-commit primitives; behaviour
+  byte-identical) and `akcli.writers.txn` (the transaction).
+- Agent-eval tasks 09 (hierarchical amp sheet — the multi-sheet envelope,
+  cross-file `GND`, sheet-pin↔hier-label pairing; hierarchy coverage was
+  zero) and 10 (bus fan-out — `add_bus`/`add_bus_entry` coverage was zero);
+  the harness now copies a task's `setup/*.kicad_sch` children next to the
+  board.
+- The agent surface teaches all of it: the `akcli-schematic-authoring` /
+  `akcli-circuit-design` / `akcli-circuit-debug` / `akcli-altium-interop`
+  skills and `/circuit-draw` now cover the `sheets` envelope, tree-scoped
+  net-diff (`--root`/`--flat`), per-instance references, `undo --run`, the
+  new error codes, and the capabilities slices — replacing the
+  one-op-list-per-FILE prose that 0.20 obsoleted.
+
+### Changed (write gates)
+
+- `DUPLICATE_DESIGNATOR` now counts per **path entry**, not per symbol node:
+  one symbol carrying the same reference on two instance paths of a reused
+  sheet is two placements of that refdes (previously invisible).
+- A multi-sheet apply GUI-lock-checks EVERY file up front
+  (`safety.refuse_if_gui_locked`), before touching a single byte.
+
+### Fixed
+
+- **BOM dedup could hide a duplicated refdes across sheet instances**: the
+  `_identity` key was the bare symbol `UniqueId`, but a sheet file
+  instantiated twice re-uses the file's symbol uuid for BOTH physical parts —
+  two instances carrying the same (duplicate!) refdes were silently merged
+  into one BOM line instead of raising `BOM_DUPLICATE_DESIGNATOR`. The key
+  is now `(UniqueId, sheet instance)`.
+- A scalar `set_component_parameters.reference` rename of a symbol on a
+  multiply-instantiated sheet used to smash its per-path references into one
+  duplicate refdes; it now refuses (`INSTANCE_REFS_REQUIRED` — use
+  `instance_references`).
+
+- **`place_gnd`/`place_vcc` no longer die `SYMBOL_NOT_FOUND` on a stock
+  KiCad install with no project `sym-lib-table`.** The sugar power ops carry
+  no explicit `lib_id` — the writer injects it at execution time, AFTER the
+  symbol-source scan collected the lib_ids to resolve, so the lib-table
+  fallback never learned the implied `power:GND`/`power:VCC` nickname. The
+  scan now sees sugar ops. (This was the documented rail-port pattern in
+  `docs/op-list-authoring.md` failing in the most common environment.)
+- `CHANGELOG` version-policy prose claimed `schema_version` is "currently
+  1.0" while `model.SCHEMA_VERSION` has been `"1.3"` since 0.17 — corrected
+  and pointed at the single source of truth.
 
 ## [0.19.0] - 2026-08-06
 

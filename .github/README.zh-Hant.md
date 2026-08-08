@@ -77,7 +77,7 @@ akcli undo  board.kicad_sch                                      # 回復上一�
 | 指令 | 功能 |
 |---|---|
 | `read` · `net` · `component` · `pins` | 把 KiCad 或 Altium 解析成同一套正規化 JSON 模型；查詢 net（整條 net，或腳位層級的 `net --at`／`--same`／`--why`）、元件與腳位座標。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | 從帶版本的 **22 種 op + 10 種巨集** JSON op-list 繪製 `.kicad_sch`（根檔案，或既有階層中的子圖頁），並由 net-diff 安全閘門與一鍵 `undo` 把關；`ops from-intent` 可把設計文件（宣告的 nets + 元件）直接編譯成 op-list。符號來源依序為 `--symbols`、設定檔路徑，最後是專案與全域的 `sym-lib-table`。 |
+| `new` · `plan` · `draw` · `ops` · `arrange` | 從帶版本的 **22 種 op + 10 種巨集** JSON op-list 繪製 `.kicad_sch`——根檔案、子圖頁，或**一次交易寫入多張圖頁**（`sheets` 信封 + 逐 op 的 `sheet` 路由，附帶執行備份與 `undo --run`）——並由涵蓋**整個 sheet tree** 的 net-diff 安全閘門與一鍵 `undo` 把關；`ops from-intent` 可把設計文件（宣告的 nets + 元件）直接編譯成 op-list。符號來源依序為 `--symbols`、設定檔路徑，最後是專案與全域的 `sym-lib-table`。 |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + 文件完整性 + intent／contract 檢查、原理圖 ↔ PCB 等價、net 成員關係比對、MCU pin → net 對照。 |
 | `review` | 建議性（advisory）、依信心分級的設計審查，橫跨六大偵測家族（signal／validation／pcb／emc／domain／gerber）；標記 DNP 的零件不會滿足任何規則。 |
 | `sim` | 轉成 SPICE deck，在 KiCad 自帶 ngspice 上斷言；角點掃描；用 datasheet 點擬合二極體模型。元件值會先正規化，無法確定解讀的一律拒絕而不猜測。 |
@@ -86,6 +86,7 @@ akcli undo  board.kicad_sch                                      # 回復上一�
 | `library` · `fab` · `release` | 零件庫工作區稽核／修復、從腳位表產生零件符號（`new-symbol`——提供腳位表，akcli 計算座標）並附獨立 lint（`lint-symbols`）與把關寫入的共點腳位檢查、版本化 fab profile 檢查，以及寫出可追溯 manifest 的 release preflight。 |
 | `gate` | 迭代級的四項檢查組合，供每輪 GUI 編輯後重跑（完整 `check` 集、intent 斷言、原理圖 ↔ PCB `verify`、BOM lock 漂移——預設離線）；已配置的專案零參數即可執行，出貨級閘門仍是 `release preflight`。 |
 | `export` · `render` · `doc` · `view` | netlist 匯出（Protel／KiCad／CSV——KiCad 格式帶有重新匯入所需的 UUID sheetpath 身分）、純標準庫 SVG 渲染、Markdown pinout book，以及 localhost 的 `/calc` + `/live` 儀表板。 |
+| `capabilities` · `schema` | 自我描述的介面 manifest——完整、逐區塊（`--section`）或逐指令（`--command draw`）——以及每份內建 JSON Schema 的逐位元組輸出，供客戶端驗證。 |
 
 兩個代表性範例——一次設計審查與一次料件搜尋：
 
@@ -149,8 +150,9 @@ Python 之外的東西——一律在執行期偵測，核心流程永遠不需�
 
 ## 路線圖
 
-**目前已提供（v0.18.0）：** KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet` 與寫入既有
-階層中的子圖頁、net-diff 安全護欄、`new`／多層 `undo`）、保持 net 不變的 `arrange --groups` 重排、
+**目前已提供（v0.20.0）：** KiCad 寫入／繪製（22 種 op + 10 種巨集，含階層 `add_sheet`、寫入既有
+階層中的子圖頁、一次交易寫入多張圖頁、涵蓋整個 sheet tree 的 net-diff 安全護欄、重複實例化圖頁的
+逐實例參考編號、`new`／多層 `undo`／`undo --run`）、保持 net 不變的 `arrange --groups` 重排、
 建議性的 `akcli review` 引擎（六大偵測家族，現已納入電源入口保護偵測、datasheet facts store、
 `propose`／`tree`／`validate`）、ERC／power／BOM／diff／pinmap／intent／contract 檢查（含 waiver 與
 SARIF）、唯讀的文件完整性檢查 `check --integrity`、原理圖 ↔ PCB `verify`、專案 `library` 工作區、

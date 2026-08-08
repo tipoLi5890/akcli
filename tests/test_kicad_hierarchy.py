@@ -201,7 +201,8 @@ def _placed(doc, ref: str):
     return None
 
 
-def _place_into_child(tmp_path, n_sheets: int):
+def _place_into_child(tmp_path, n_sheets: int, extra_fields: dict | None = None,
+                      expect_rc: int = 0):
     """Place R9 into the CHILD file of an n-instance hierarchy; return it."""
     import json
 
@@ -222,12 +223,12 @@ def _place_into_child(tmp_path, n_sheets: int):
     ops.write_text(json.dumps({
         "protocol_version": 1, "target_format": "kicad",
         "ops": [{"op": "place_component", "lib_id": "RR", "designator": "R9",
-                 "x_mil": 3000, "y_mil": 3000}],
+                 "x_mil": 3000, "y_mil": 3000, **(extra_fields or {})}],
     }), encoding="utf-8")
     child = tmp_path / "child.kicad_sch"
     rc = main(["draw", str(child), "--ops", str(ops), "--apply",
                "--symbols", str(lib)])
-    assert rc == 0
+    assert rc == expect_rc
     return child
 
 
@@ -243,29 +244,43 @@ def test_child_sheet_placement_joins_the_sibling_sheet_paths(tmp_path, capsys):
         _instance_paths(_placed(doc, "R101"))
 
 
-def test_twice_instantiated_child_placement_copies_both_paths(tmp_path, capsys):
-    """A sheet instantiated twice gives each symbol TWO (path ...) entries; a
-    newly placed one must carry both (kicad-cli reported an annotation error
-    when it carried a single, wrong, one)."""
+def test_twice_instantiated_scalar_ref_refuses(tmp_path, capsys):
+    """0.20: a sheet instantiated twice REFUSES a scalar designator — writing
+    R9 onto both (path ...) entries annotates two instances with one refdes
+    (the duplicate-refdes design the per-instance map exists to prevent). The
+    refusal lists the instance paths the map must cover."""
+    _place_into_child(tmp_path, 2, expect_rc=6)
+    out = capsys.readouterr().out
+    assert "INSTANCE_REFS_REQUIRED" in out
+    assert f"/{ROOT_UUID}/{SHEET1_UUID}" in out    # the fix is copy-pasteable
+
+
+def test_twice_instantiated_child_placement_with_instance_map(tmp_path, capsys):
+    """With instance_designators, the new symbol carries BOTH sibling paths —
+    each with its OWN reference — and the write replays byte-identically."""
     from akcli.readers import sexpr as sx
 
-    child = _place_into_child(tmp_path, 2)
+    imap = {f"/{ROOT_UUID}/{SHEET1_UUID}": "R9",
+            f"/{ROOT_UUID}/{SHEET2_UUID}": "R209"}
+    child = _place_into_child(tmp_path, 2,
+                              extra_fields={"instance_designators": imap})
     capsys.readouterr()
     doc = sx.parse(child.read_text(encoding="utf-8"))
-    sibling = _instance_paths(_placed(doc, "R101"))
-    assert len(sibling) == 2
-    assert _instance_paths(_placed(doc, "R9")) == sibling
+    sym = _placed(doc, "R9")
+    assert _instance_paths(sym) == _instance_paths(_placed(doc, "R101"))
+
+    from akcli.writers import instances as winst
+    assert winst.symbol_references(sym) == imap
+    # the SAME symbol answers to its second instance's refdes
+    assert _placed(doc, "R209") is not None
 
     # ...and the write replays byte-identically
-    import json
-
     from akcli.cli import main
     once = child.read_bytes()
     assert main(["draw", str(child), "--ops", str(tmp_path / "ops.json"),
                  "--apply", "--symbols", str(tmp_path / "lib.kicad_sym")]) == 0
     capsys.readouterr()
     assert child.read_bytes() == once
-    assert json  # keep the import honest for linters
 
 
 def test_unannotated_child_sheet_is_writable(tmp_path, capsys):

@@ -166,11 +166,13 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
 
 What will **not** carry over (plan around it, state it in the report):
 - Symbol artwork, sheet graphics, text/annotation placement — connectivity only.
-- Hierarchy: the KiCad writer targets one sheet file per run — it can create a
-  `(sheet)` reference (`add_sheet`) and write a child file directly, but it cannot
-  place *into* a sub-sheet path from the parent, so a multi-sheet Altium design is
-  rebuilt sheet by sheet. The KiCad READER does follow `(sheet ...)` children
-  (per-instance namespaces, sheet-pin<->hierarchical-label connectivity).
+- Hierarchy: a multi-sheet Altium design is rebuilt with ONE multi-sheet op-list —
+  the envelope's `sheets` map + per-op `"sheet"` tags route ops onto the (pre-created)
+  child files in one atomic transaction (`add_sheet` places the parent's reference;
+  naming a sub-sheet *path* from the parent still fails `HIERARCHICAL_UNSUPPORTED`).
+  The KiCad READER follows `(sheet ...)` children (per-instance namespaces,
+  sheet-pin<->hierarchical-label connectivity), and the net gate evaluates the whole
+  rebuilt tree from its root.
 - Binary `.SchLib` symbol graphics; `.PcbDoc` fills/regions/texts/polygons (pads/tracks/
   vias/arcs DO read now, but nothing converts them to `.kicad_pcb` — read-side only).
 - Altium pin electrical types map only ints 0–7 (no `POWER_OUT`/`NO_CONNECT`), so

@@ -37,6 +37,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -95,6 +96,15 @@ def score_ops(task_dir: Path, ops_path: Path) -> dict:
         if new.returncode != 0:
             result["errors"].append(f"akcli new failed: {new.stderr.strip()}")
             return result
+
+        # Hierarchy tasks ship pre-made child sheets (setup/*.kicad_sch,
+        # committed so their root uuids — and thus every derived uuid — are
+        # deterministic); they land next to the board so a `sheets`-routed
+        # op-list resolves them.
+        setup = task_dir / "setup"
+        if setup.is_dir():
+            for f in sorted(setup.glob("*.kicad_sch")):
+                shutil.copy2(f, tmp / f.name)
 
         # The harness owns the target filename; everything else is the agent's.
         if isinstance(oplist, dict):

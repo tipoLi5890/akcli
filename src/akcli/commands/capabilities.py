@@ -200,15 +200,23 @@ def build_manifest() -> dict:
                 "rotation_enum": sorted(_ops._VALID_ROTATIONS),  # noqa: SLF001
                 "wire_orthogonal_only": True,
                 "grid_mil": int(_ops._GRID_MIL),  # noqa: SLF001
-                "hierarchy": "hierarchical_write_v1",
-                "hierarchy_note": "one op-list per FILE: a child .kicad_sch of "
-                                  "an existing hierarchy is a normal draw "
-                                  "target (the write gate accepts its "
-                                  "/<top-root>/<sheet> parent-hierarchy "
-                                  "instances path); add_sheet places the "
-                                  "parent's sheet symbol, and an op naming a "
-                                  "sub-sheet path from the parent's op-list "
-                                  "still fails HIERARCHICAL_UNSUPPORTED",
+                "hierarchy": "hierarchical_write_v2",
+                "sheet_reuse": True,
+                "hierarchy_note": "one op-list can edit SEVERAL files: the "
+                                  "envelope's 'sheets' map + per-op 'sheet' "
+                                  "tags route ops onto declared child "
+                                  ".kicad_sch files in one atomic "
+                                  "transaction (run backup + `undo --run`); "
+                                  "a child .kicad_sch is also still a normal "
+                                  "single-file draw target. A sheet "
+                                  "instantiated more than once needs "
+                                  "per-instance references "
+                                  "(instance_designators / "
+                                  "instance_references — a scalar ref "
+                                  "refuses INSTANCE_REFS_REQUIRED). An op "
+                                  "naming a sub-sheet path directly still "
+                                  "fails HIERARCHICAL_UNSUPPORTED: route by "
+                                  "'sheet' tag instead",
             },
             # HONESTY: Altium is import-only — the per-op "altium" support
             # matrix is informational and there is NO Altium write executor;
@@ -242,8 +250,42 @@ def build_manifest() -> dict:
     }
 
 
+# Top-level manifest sections addressable via --section (the full manifest is
+# ~96 KB — mostly `commands` — while an agent usually needs ONE section or one
+# command's flags; a slice is a few hundred bytes instead of the whole tax).
+_SECTIONS = ("exit_codes", "error_codes", "global_flags", "commands", "ops",
+             "calculators", "schemas", "conventions")
+
+
+def _slice_payload(manifest: dict, section: str, verb: str | None) -> tuple[dict, int]:
+    """One section (or one command) of the manifest, in a stamped envelope."""
+    payload = {
+        "schema_version": manifest["schema_version"],
+        "akcli_version": manifest["akcli_version"],
+        "protocol_version": manifest["protocol_version"],
+        "section": section,
+    }
+    if verb is not None:
+        match = [c for c in manifest["commands"] if c["name"] == verb]
+        payload["command"] = verb
+        payload["found"] = bool(match)
+        if not match:
+            return payload, EXIT["QUERY_MISS"]
+        payload["commands"] = match
+        return payload, EXIT["OK"]
+    payload[section] = manifest[section]
+    return payload, EXIT["OK"]
+
+
 def _cmd_capabilities(args: argparse.Namespace) -> int:
     manifest = build_manifest()
+    verb = getattr(args, "command_filter", None)
+    section = "commands" if verb else getattr(args, "section", None)
+    if section:
+        # A slice is machine-facing by definition: JSON on stdout either way.
+        payload, code = _slice_payload(manifest, section, verb)
+        _emit(_dumps(payload))
+        return code
     if args.json:
         _emit(_dumps(manifest))
         return EXIT["OK"]
@@ -279,4 +321,10 @@ def register(sub, common) -> None:
     p = sub.add_parser(
         "capabilities", parents=[common],
         help="print the full machine-readable CLI surface manifest")
+    p.add_argument("--section", choices=_SECTIONS,
+                   help="print ONE manifest section (stamped JSON slice) "
+                        "instead of the whole document")
+    p.add_argument("--command", dest="command_filter", metavar="VERB",
+                   help="print one command's manifest entry (implies "
+                        "--section commands; unknown VERB exits 8)")
     p.set_defaults(handler=_cmd_capabilities)

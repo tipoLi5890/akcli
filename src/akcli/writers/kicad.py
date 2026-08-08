@@ -52,9 +52,6 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import os
-import shutil
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -67,17 +64,15 @@ from ..readers import kicad_lib, sexpr
 from ..readers.sexpr import SNode
 from ..report import Severity
 from ..safety import MAX_FILE_BYTES, gui_lock_path
-from . import connectivity, geometry, instances, lib_cache
+from . import atomic, connectivity, geometry, instances, lib_cache
+from .atomic import backup_name
 
-__all__ = ["OpResult", "apply"]
+__all__ = ["OpResult", "apply", "backup_name"]
 
 # Default schematic grid (50 mil) in integer nm — raw [x,y] endpoints snap here.
 _GRID_NM = geometry.DEFAULT_GRID_NM
 
-# How many rotated backups to keep on --apply: <name>.bak (newest) plus
-# .bak2..bak{depth}. Overridable via config [project] backup_depth; `akcli undo`
-# walks this stack. 1 == the historical single-.bak behaviour.
-_DEFAULT_BACKUP_DEPTH = 3
+_DEFAULT_BACKUP_DEPTH = atomic.DEFAULT_BACKUP_DEPTH
 
 # Sugar power-port presets (SPEC §2.2): documented sugar over place_power_port.
 _SUGAR_POWER = {
@@ -282,16 +277,29 @@ def _symbol_reference(sym: SNode) -> str | None:
     return None
 
 
+def _symbol_answers_to(sym: SNode, ref: str) -> bool:
+    """Does ``sym`` carry ``ref`` on ANY of its instance paths (or property)?
+
+    A sheet file instantiated twice holds one reference PER path — an agent
+    addressing the part by its second instance's refdes (R201) must find the
+    same symbol node the first instance's refdes (R101) does.
+    """
+    refs = instances.symbol_references(sym)
+    if refs:
+        return ref in refs.values()
+    return _symbol_reference(sym) == ref
+
+
 def _symbol_by_ref(doc: SNode, ref: str) -> SNode | None:
     for sym in _placed_symbols(doc):
-        if _symbol_reference(sym) == ref:
+        if _symbol_answers_to(sym, ref):
             return sym
     return None
 
 
 def _symbols_by_ref(doc: SNode, ref: str) -> list[SNode]:
     """ALL placed instances of ``ref`` (a multi-unit part is several)."""
-    return [s for s in _placed_symbols(doc) if _symbol_reference(s) == ref]
+    return [s for s in _placed_symbols(doc) if _symbol_answers_to(s, ref)]
 
 
 def _symbol_by_uuid(doc: SNode, uid: str) -> SNode | None:
@@ -800,7 +808,7 @@ def _make_symbol(
 def _place_symbol(
     doc: SNode, ctx: dict, src_libs: list, lib_id: str, designator: str,
     pos_nm: tuple[int, int], rotation: int, mirror: str, op_index: int, path: str,
-    unit: int = 1,
+    unit: int = 1, instance_refs: dict | None = None,
 ) -> str:
     """Cache + place ONE UNIT of a symbol; return its (deterministic) uuid."""
     body = lib_cache.ensure_cached(doc, lib_id, src_libs)
@@ -841,7 +849,10 @@ def _place_symbol(
     # Idempotent replay: a same-uuid instance already present is replaced wholesale.
     sym = _make_symbol(lib_id, pos_nm, rotation, mirror, sym_uuid, pin_numbers, pin_uuids, unit)
     _append_top_idempotent(doc, sym, sym_uuid)
-    instances.write_instance(doc, sym, designator, path)
+    # instance_refs (a {path: ref} map) takes over on a multiply-instantiated
+    # sheet — the uuid seed above stays the SCALAR designator either way, so
+    # per-instance references never re-identify the node.
+    instances.write_instance(doc, sym, instance_refs or designator, path)
     # New pins invalidate the route_net corner-avoidance memo (ops run in
     # order; a later route must see THIS part's pins).
     ctx.pop("pin_tips", None)
@@ -865,9 +876,20 @@ def _op_place_component(doc, op, idx, src_libs, path, ctx) -> list[str]:
             (geometry.mil_to_nm(float(op["x_mil"])), geometry.mil_to_nm(float(op["y_mil"]))),
             _GRID_NM,
         )
+    imap = op.get("instance_designators")
+    if imap is not None:
+        if not isinstance(imap, dict) or not imap:
+            fail("INSTANCE_REFS_REQUIRED",
+                 "instance_designators must be a non-empty object of "
+                 "{\"<instance path>\": \"<REF>\"}")
+        if op["designator"] not in imap.values():
+            fail("INSTANCE_REFS_REQUIRED",
+                 f"designator {op['designator']!r} must be one of the "
+                 "instance_designators values (it seeds the symbol's uuid "
+                 "and is the displayed Reference)")
     uid = _place_symbol(
         doc, ctx, sources, op["lib_id"], op["designator"],
-        pos, rotation, mirror, idx, path, unit,
+        pos, rotation, mirror, idx, path, unit, instance_refs=imap,
     )
     sym = _symbol_by_uuid(doc, uid)
     if op.get("value") is not None and sym is not None:
@@ -914,7 +936,17 @@ def _op_set_component_parameters(doc, op, idx, src_libs, path, ctx) -> list[str]
     sym = _symbol_by_ref(doc, op["designator"])
     if sym is None:
         fail("VERIFY_FAILED", f"set_component_parameters: no component {op['designator']!r}")
-    if op.get("reference"):
+    imap = op.get("instance_references")
+    if imap is not None:
+        if not isinstance(imap, dict) or not imap:
+            fail("INSTANCE_REFS_REQUIRED",
+                 "instance_references must be a non-empty object of "
+                 "{\"<instance path>\": \"<REF>\"}")
+        instances.write_instance(doc, sym, imap, path)
+    elif op.get("reference"):
+        # A scalar rename of a multiply-instantiated symbol would smash its
+        # per-path references into one duplicate refdes; write_instance
+        # refuses that with INSTANCE_REFS_REQUIRED (use instance_references).
         instances.write_instance(doc, sym, str(op["reference"]), path)
     if op.get("value") is not None:
         _set_property(sym, "Value", str(op["value"]))
@@ -1213,6 +1245,13 @@ def _existing_pwr_ref_for_op(doc: SNode, pos_nm: tuple[int, int],
     from an addition) — delete the old one explicitly; see
     ``docs/op-list-authoring.md``.
     """
+    sym = _existing_pwr_sym_for_op(doc, pos_nm, want_flag)
+    return _symbol_reference(sym) if sym is not None else None
+
+
+def _existing_pwr_sym_for_op(doc: SNode, pos_nm: tuple[int, int],
+                             want_flag: bool) -> SNode | None:
+    """The power symbol a prior replay placed at ``pos_nm``, else ``None``."""
     for sym in _placed_symbols(doc):
         ref = _symbol_reference(sym)
         if not ref or not ref.startswith("#"):
@@ -1233,7 +1272,7 @@ def _existing_pwr_ref_for_op(doc: SNode, pos_nm: tuple[int, int],
             if len(kids) >= 3 and _unescape_atom(kids[1].value) == "Value":
                 value = _unescape_atom(kids[2].value)
         if _is_pwr_flag(_inst_lib_id(sym), value) is want_flag:
-            return ref
+            return sym
     return None
 
 
@@ -1272,13 +1311,32 @@ def _op_place_power_port(doc, op, idx, src_libs, path, ctx) -> list[str]:
             f"with op [{prev[0]}] ({prev[1]!r} on the same coordinate; the "
             f"later op would replace the earlier port) — move one of them or "
             f"drop it")
-    # Reuse the ref from a prior replay of this op so the auto-allocated #PWR
-    # designator (and thus the deterministic uuid) stays stable -> idempotent.
-    ref = (_existing_pwr_ref_for_op(doc, pos, is_flag)
-           or instances.alloc_pwr_ref(doc))
+    # Reuse the ref(s) from a prior replay of this op so the auto-allocated
+    # #PWR designators (and thus the deterministic uuid) stay stable ->
+    # idempotent. On a sheet instantiated N times the port needs N distinct
+    # references (one per instance path) — allocated as a consecutive batch,
+    # zero change to the op's interface.
+    prior = _existing_pwr_sym_for_op(doc, pos, is_flag)
+    inst_refs: dict | None = None
+    if prior is not None:
+        prior_refs = instances.symbol_references(prior)
+        ref = _symbol_reference(prior) or instances.alloc_pwr_ref(doc)
+        if len(prior_refs) > 1:
+            inst_refs = dict(prior_refs)
+    else:
+        sheet_paths = instances.sibling_paths(doc)
+        multi = (len(sheet_paths) > 1 and all(
+            len([s for s in p.strip("/").split("/") if s]) >= 2
+            for p in sheet_paths))
+        if multi:
+            batch = instances.alloc_pwr_refs(doc, len(sheet_paths))
+            inst_refs = dict(zip(sheet_paths, batch))
+            ref = batch[0]
+        else:
+            ref = instances.alloc_pwr_ref(doc)
     uid = _place_symbol(
         doc, ctx, list(src_libs), lib_id, ref,
-        pos, rotation, "none", idx, path,
+        pos, rotation, "none", idx, path, instance_refs=inst_refs,
     )
     sym = _symbol_by_uuid(doc, uid)
     if sym is not None:
@@ -2074,21 +2132,7 @@ def apply(
     errors, a non-``kicad`` ``target_format``, or ``VERIFY_FAILED`` on an
     optimistic-lock conflict / failed post-write verify.
     """
-    # --- protocol gate (reject a higher major up front) -------------------- #
-    pv = oplist.get("protocol_version")
-    if isinstance(pv, int) and pv > PROTOCOL_VERSION:
-        fail("PROTOCOL_MISMATCH",
-             f"op-list protocol_version {pv} > supported {PROTOCOL_VERSION}")
-
-    # --- structural validation (mirrors ops.schema.json) ------------------- #
-    errs = validate_oplist(oplist)
-    if errs:
-        e = errs[0]
-        fail(e.code, e.message)
-
-    if oplist.get("target_format") != "kicad":
-        fail("OP_UNSUPPORTED",
-             f"kicad writer cannot apply target_format {oplist.get('target_format')!r}")
+    envelope_gate(oplist)
 
     # --- read + snapshot (optimistic lock) --------------------------------- #
     p = Path(path)
@@ -2107,49 +2151,16 @@ def apply(
     if len(data) > MAX_FILE_BYTES:
         fail("KICAD_SEXPR_TOOBIG", f"file exceeds {MAX_FILE_BYTES} bytes")
     snap_sha = hashlib.sha256(data).hexdigest()
-    try:
-        snap_mtime = os.stat(p).st_mtime_ns
-    except OSError:
-        snap_mtime = None
 
     doc = sexpr.parse(data.decode("utf-8"))
 
     src_libs = _coerce_source_list(sources)
 
     # --- apply ops --------------------------------------------------------- #
-    results: list[OpResult] = []
-    any_error = False
     ctx = _ctx_new(p)
-    for idx, op in enumerate(oplist.get("ops", [])):
-        name = op.get("op")
-        handler = _HANDLERS.get(name)
-        res = OpResult(op_index=idx, op=name)
-        if handler is None:
-            res.status = "error"
-            res.error_code = "OP_UNSUPPORTED"
-            res.message = f"no kicad writer for op {name!r}"
-            res.remediation = _remediation_for("OP_UNSUPPORTED")
-            any_error = True
-            results.append(res)
-            continue
-        try:
-            res.created_uuids = handler(doc, op, idx, src_libs, instances.instances_path(doc), ctx)
-        except _Note as note:
-            res.message = note.message
-        except AkcliError as exc:
-            res.status = "error"
-            res.error_code = exc.code
-            res.message = exc.message
-            res.remediation = _remediation_for(exc.code)
-            any_error = True
-        except Exception as exc:  # noqa: BLE001 — per-op containment (SPEC §2.4):
-            # a handler bug must surface as ONE failed OpResult, never as a
-            # traceback aborting the whole run (nothing is written on any_error).
-            res.status = "error"
-            res.error_code = "INTERNAL"
-            res.message = f"{type(exc).__name__}: {exc}"
-            any_error = True
-        results.append(res)
+    inst_path = instances.instances_path(doc)
+    results, any_error = run_ops(
+        oplist, src_libs, lambda op: (doc, inst_path, ctx))
 
     # --- connectivity verify (always; over the resulting bytes) ------------ #
     if not any_error:
@@ -2168,7 +2179,8 @@ def apply(
 
     # --- write (only on --apply AND fully clean) --------------------------- #
     if apply and not any_error and not verify_errors:
-        _atomic_write(p, text_out, snap_sha, snap_mtime, backup_dir, backup_depth)
+        atomic.atomic_write(p, text_out, snap_sha, backup_dir, backup_depth,
+                            verify=_verify_temp)
 
     return results
 
@@ -2181,79 +2193,73 @@ def _coerce_source_list(sources: object) -> list:
     return [sources]
 
 
-def backup_name(name: str, level: int) -> str:
-    """Backup filename for ``level`` >= 1: level 1 is ``<name>.bak``, 2 ``.bak2`` …"""
-    return f"{name}.bak" if level <= 1 else f"{name}.bak{level}"
-
-
-def _rotate_backups(bd: Path, name: str, depth: int) -> None:
-    """Shift ``<name>.bak`` -> ``.bak2`` -> … -> ``.bak{depth}`` to free ``.bak``.
-
-    The caller writes a fresh ``<name>.bak`` afterwards, so this makes room while
-    keeping the ``depth`` most-recent snapshots; the oldest (``.bak{depth}``) is
-    overwritten and any deeper stragglers are left untouched. ``depth`` 1 skips
-    rotation entirely (historical single-backup behaviour).
+def envelope_gate(oplist: dict) -> None:
+    """Fatal document-level gates shared by the single-file executor and the
+    multi-file transaction: protocol major, structural validity, target format.
     """
-    depth = max(1, int(depth))
-    for level in range(depth, 1, -1):
-        src = bd / backup_name(name, level - 1)
-        if src.exists():
-            os.replace(src, bd / backup_name(name, level))
+    pv = oplist.get("protocol_version")
+    if isinstance(pv, int) and pv > PROTOCOL_VERSION:
+        fail("PROTOCOL_MISMATCH",
+             f"op-list protocol_version {pv} > supported {PROTOCOL_VERSION}")
+    errs = validate_oplist(oplist)
+    if errs:
+        e = errs[0]
+        fail(e.code, e.message)
+    if oplist.get("target_format") != "kicad":
+        fail("OP_UNSUPPORTED",
+             f"kicad writer cannot apply target_format {oplist.get('target_format')!r}")
 
 
-def _atomic_write(
-    p: Path, text: str, snap_sha: str, snap_mtime, backup_dir,
-    backup_depth: int = _DEFAULT_BACKUP_DEPTH,
-) -> None:
-    """Snapshot-guarded atomic write: temp -> fsync -> re-parse+verify -> replace.
+def run_ops(oplist: dict, src_libs: list, resolve) -> tuple[list["OpResult"], bool]:
+    """The per-op dispatch loop with per-op containment (SPEC §2.4).
 
-    Re-stats the original against the snapshot (mtime + sha256) right before the
-    swap; a concurrent modification raises ``VERIFY_FAILED`` rather than clobbering
-    someone else's edit. The temp is verified one final time and only ``os.replace``
-    -d when it parses and verifies error-free.
+    ``resolve(op)`` returns ``(doc, instances_path, ctx)`` for the op — a
+    constant triple in the single-file executor, a sheet-routed one in the
+    multi-file transaction. A handler bug surfaces as ONE failed OpResult,
+    never as a traceback aborting the whole run (nothing is written on
+    ``any_error``).
     """
-    # optimistic-lock re-check
-    try:
-        cur = p.read_bytes()
-    except OSError:
-        cur = b""
-    if hashlib.sha256(cur).hexdigest() != snap_sha:
-        fail("VERIFY_FAILED",
-             f"{p} changed on disk since it was read (optimistic-lock conflict)")
-
-    directory = p.parent if str(p.parent) else Path(".")
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=p.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(text.encode("utf-8"))
-            fh.flush()
-            os.fsync(fh.fileno())
-        # re-parse + verify the TEMP file itself (SPEC §3.5)
-        verify_doc = sexpr.parse(Path(tmp).read_text(encoding="utf-8"))
-        bad = [
-            # the temp lives in the target's own directory, so relative sheet
-            # files resolve exactly as they will after the replace
-            f for f in connectivity.verify(verify_doc, path=tmp)
-            if f.severity in (Severity.ERROR, Severity.CRITICAL)
-        ]
-        if bad:
-            fail("VERIFY_FAILED",
-                 f"post-write connectivity verify failed: {bad[0].message}")
-        if backup_dir is not None and p.exists():
-            bd = Path(backup_dir)
-            bd.mkdir(parents=True, exist_ok=True)
-            # Snapshot FIRST, rotate, then promote atomically: a crash
-            # mid-sequence leaves at worst a .bak-pending file next to a
-            # fully usable stack — never a level-1 gap with the newest
-            # snapshot existing only as the (about-to-change) live file.
-            pending = bd / (backup_name(p.name, 1) + ".pending")
-            shutil.copy2(p, pending)
-            _rotate_backups(bd, p.name, backup_depth)
-            os.replace(pending, bd / backup_name(p.name, 1))
-        os.replace(tmp, p)
-    except BaseException:
+    results: list[OpResult] = []
+    any_error = False
+    for idx, op in enumerate(oplist.get("ops", [])):
+        name = op.get("op")
+        handler = _HANDLERS.get(name)
+        res = OpResult(op_index=idx, op=name)
+        if handler is None:
+            res.status = "error"
+            res.error_code = "OP_UNSUPPORTED"
+            res.message = f"no kicad writer for op {name!r}"
+            res.remediation = _remediation_for("OP_UNSUPPORTED")
+            any_error = True
+            results.append(res)
+            continue
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            doc, inst_path, ctx = resolve(op)
+            res.created_uuids = handler(doc, op, idx, src_libs, inst_path, ctx)
+        except _Note as note:
+            res.message = note.message
+        except AkcliError as exc:
+            res.status = "error"
+            res.error_code = exc.code
+            res.message = exc.message
+            res.remediation = _remediation_for(exc.code)
+            any_error = True
+        except Exception as exc:  # noqa: BLE001 — per-op containment (SPEC §2.4)
+            res.status = "error"
+            res.error_code = "INTERNAL"
+            res.message = f"{type(exc).__name__}: {exc}"
+            any_error = True
+        results.append(res)
+    return results, any_error
+
+
+def _verify_temp(tmp: str) -> None:
+    """Re-parse + connectivity-verify a staged temp file (SPEC §3.5)."""
+    verify_doc = sexpr.parse(Path(tmp).read_text(encoding="utf-8"))
+    bad = [
+        f for f in connectivity.verify(verify_doc, path=tmp)
+        if f.severity in (Severity.ERROR, Severity.CRITICAL)
+    ]
+    if bad:
+        fail("VERIFY_FAILED",
+             f"post-write connectivity verify failed: {bad[0].message}")

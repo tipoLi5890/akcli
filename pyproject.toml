@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package and CLI stay `akcli` (see src/akcli/__init__.py name cascade);
 # keep the three in lockstep.
 name = "akcli-kicad"
-version = "0.19.0"
+version = "0.20.0"
 description = "AI-native schematic design agent, purpose-built for KiCad: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
 requires-python = ">=3.11"
 readme = "README.md"

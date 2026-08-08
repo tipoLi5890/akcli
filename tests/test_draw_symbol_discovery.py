@@ -99,6 +99,20 @@ def test_oplist_lib_ids_dedups_in_first_seen_order():
     assert _oplist_lib_ids(None) == []
 
 
+def test_oplist_lib_ids_sees_sugar_power_ops():
+    """`place_gnd`/`place_vcc` carry no lib_id field — the writer injects it at
+    EXECUTION time, after this scan. The scan must still learn the implied
+    nickname, or the documented rail-port pattern dies SYMBOL_NOT_FOUND on a
+    stock install whose power lib only resolves via the lib-table fallback."""
+    oplist = {"ops": [
+        {"op": "place_gnd", "at": [1000, 1000]},
+        {"op": "place_vcc", "at": [1000, 500]},
+        {"op": "place_gnd", "at": [2000, 1000]},          # dedup
+        {"op": "place_gnd", "lib_id": "power:GNDA", "at": [3000, 1000]},
+    ]}
+    assert _oplist_lib_ids(oplist) == ["power:GND", "power:VCC", "power:GNDA"]
+
+
 def test_no_lib_ids_means_no_discovery(tmp_path, monkeypatch):
     _global_table(tmp_path, monkeypatch)
     assert _draw_symbol_sources(_args(), _Cfg()) == []

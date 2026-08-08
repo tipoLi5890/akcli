@@ -53,6 +53,13 @@ ERROR_CODES: frozenset[str] = frozenset(
         # emitted as a connectivity Finding code by ``verify``)
         "POWER_PORT_STACKED",
         "SHEET_FILE_MISSING",
+        # sheet-tree root resolution (hierarchy-aware net-diff/gate scope)
+        "PROJECT_ROOT_AMBIGUOUS",
+        "PROJECT_ROOT_MISMATCH",
+        # multi-sheet op-list envelope + write transaction
+        "SHEET_UNKNOWN",
+        "INSTANCE_REFS_REQUIRED",
+        "TXN_ROLLBACK_FAILED",
         # safety / IO
         "PATH_OUTSIDE_ROOT",
         "FILE_UNREADABLE",
@@ -127,6 +134,11 @@ _CODE_EXIT: dict[str, int] = {
     "VERIFY_FAILED": EXIT["OPLIST"],
     "OP_UNSUPPORTED": EXIT["OPLIST"],
     "HIERARCHICAL_UNSUPPORTED": EXIT["OPLIST"],
+    "PROJECT_ROOT_AMBIGUOUS": EXIT["OPLIST"],
+    "PROJECT_ROOT_MISMATCH": EXIT["USAGE"],
+    "SHEET_UNKNOWN": EXIT["OPLIST"],
+    "INSTANCE_REFS_REQUIRED": EXIT["OPLIST"],
+    "TXN_ROLLBACK_FAILED": EXIT["OPLIST"],
     # generation refusals are op-list-class failures: nothing was written and
     # the document (not the environment) is what must change -> 6
     "DESIGN_UNSUPPORTED": EXIT["OPLIST"],
@@ -271,6 +283,32 @@ REMEDIATION: dict[str, str] = {
         "to this file; create it first with `akcli new <file>` (then re-run), "
         "or fix the 'file' field — nets/check/render refuse the whole design "
         "while the child is missing",
+    "PROJECT_ROOT_AMBIGUOUS":
+        "several root sheets instantiate this file, so the tree to evaluate "
+        "cannot be guessed; pass --root FILE to name the root (or --flat to "
+        "evaluate this file alone, accepting the truncated net view)",
+    "PROJECT_ROOT_MISMATCH":
+        "the --root file's sheet tree does not contain the target; point "
+        "--root at the schematic whose (sheet ...) chain reaches the target, "
+        "or drop --root to auto-discover it",
+    "SHEET_UNKNOWN":
+        "the op's 'sheet' tag names an entry the envelope's 'sheets' map does "
+        "not declare (or the declared file does not exist next to the "
+        "target); declare it as \"sheets\": {\"<name>\": {\"file\": "
+        "\"<child.kicad_sch>\"}} — `akcli new` the child first if needed",
+    "INSTANCE_REFS_REQUIRED":
+        "this sheet file is instantiated more than once, so a single "
+        "designator would annotate BOTH instances with the same reference "
+        "(a duplicate-refdes design); pass per-instance references — "
+        "place_component: \"instance_designators\": {\"<path>\": \"R101\", "
+        "...}; set_component_parameters: \"instance_references\" — the error "
+        "message lists the instance paths to use",
+    "TXN_ROLLBACK_FAILED":
+        "a multi-file commit failed partway AND the automatic rollback could "
+        "not restore every file; nothing is lost — the full pre-write backup "
+        "set is under .akcli/backups/runs/<run_id>/ and the journal records "
+        "the transaction; run `akcli undo <root> --run <run_id> --apply` to "
+        "restore, then re-run the draw",
     # safety / IO
     "PATH_OUTSIDE_ROOT":
         "the path escapes the working root; use a path inside the project "

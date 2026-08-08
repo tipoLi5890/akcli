@@ -35,7 +35,7 @@ Every historically red release CI (0.4.0, 0.8.0, 0.9.0, 0.10.0) failed only on
   `tools/` and `hooks/` (`_vendor` excluded but hand-patched); new
   `write_text`/`read_text`/text-mode `open` calls must comply or CI fails.
 - Artifact files whose bytes matter (`.kicad_sch`) are written in **binary**
-  (`os.fdopen(fd, "wb")` in `writers/kicad.py`) — keep it that way.
+  (`os.fdopen(fd, "wb")` in `writers/atomic.py`) — keep it that way.
 - Paths emitted into JSON/goldens use `as_posix()` (backslashes break
   byte-stable snapshots).
 - Subprocess: `shlex.split(..., posix=False)` semantics differ on Windows

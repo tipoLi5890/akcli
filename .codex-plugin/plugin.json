@@ -1,6 +1,6 @@
 {
   "name": "akcli",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "AI-native schematic design agent, purpose-built for KiCad (zero-dependency pure-stdlib Python CLI): author and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source real parts and fetch datasheets, and import Altium .SchDoc/.SchLib/.PcbDoc read-only into the KiCad flow.",
   "author": {
     "name": "Li, ching yu",

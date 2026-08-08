@@ -57,6 +57,33 @@
         "path": {"type": "string"},
         "bytes": {"type": "integer", "minimum": 0}
       }
+    },
+    "project_root": {
+      "type": "string",
+      "description": "Present ONLY when the net gate evaluated a sheet TREE (the target is a child of a hierarchy): posix path of the resolved root schematic. Absent — not null — on the flat single-file path."
+    },
+    "evaluation_scope": {
+      "const": "tree",
+      "description": "Present alongside project_root: the net diff and preview were computed over the whole sheet tree, not the target file alone."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Present ONLY on a multi-sheet (envelope 'sheets'/per-op 'sheet') run: the transaction id — recorded in the journal, named by `akcli undo --run`. Absent on the single-file path."
+    },
+    "files": {
+      "type": "array",
+      "description": "Present alongside run_id: one entry per file the transaction loaded. 'written' is true only after a committed --apply.",
+      "items": {
+        "type": "object",
+        "required": ["file", "dirty", "written"],
+        "properties": {
+          "file": {"type": "string"},
+          "dirty": {"type": "boolean"},
+          "written": {"type": "boolean"},
+          "sha_before": {"type": "string"},
+          "sha_after": {"type": "string"}
+        }
+      }
     }
   }
 }

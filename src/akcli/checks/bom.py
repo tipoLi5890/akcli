@@ -122,14 +122,20 @@ def _part_identity(comp: Component) -> str | None:
 
 
 def _identity(comp: Component) -> object:
-    """A dedup key: the ``UniqueId`` if present, else a per-object distinct key.
+    """A dedup key: ``(UniqueId, sheet instance)``, else per-object distinct.
 
-    Components sharing a non-empty ``UniqueId`` are units of one physical part
-    (deduped); a missing id makes each placement its own identity so genuine
-    duplicate refdes are still caught.
+    Components sharing a non-empty ``UniqueId`` on the SAME sheet instance are
+    units of one physical part (deduped). The sheet qualifier matters: a sheet
+    file instantiated twice re-uses the file's symbol uuid for BOTH physical
+    parts, so a bare ``UniqueId`` key silently merged two instances carrying
+    the same (duplicate!) refdes into one — hiding exactly the
+    ``BOM_DUPLICATE_DESIGNATOR`` case it must catch. A missing id makes each
+    placement its own identity.
     """
     uid = _clean(comp.unique_id)
-    return uid if uid is not None else ("__no_uid__", id(comp))
+    if uid is None:
+        return ("__no_uid__", id(comp))
+    return (uid, getattr(comp, "sheet", "") or "")
 
 
 def _pos(comp: Component) -> tuple[float, float]:

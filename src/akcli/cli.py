@@ -36,6 +36,7 @@ from typing import NoReturn
 from . import __version__
 from .commands import calc as _calc_cmd
 from .commands import capabilities as _capabilities_cmd
+from .commands import schema_cmd as _schema_cmd
 from .commands import checks as _checks_cmd
 from .commands import doc as _doc_cmd
 from .commands import doctor as _doctor_cmd
@@ -162,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     _doctor_cmd.register(sub, common)
     _sim_cmd.register(sub, common)
     _capabilities_cmd.register(sub, common)
+    _schema_cmd.register(sub, common)
     _log_cmd.register(sub, common)
 
     return parser

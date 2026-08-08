@@ -525,7 +525,7 @@ sheet size (`A4`|`A3`|…, default `A4`); `--title` fills the title-block title;
 the whole session — its root uuid is the namespace for every deterministic op
 UUID, so regenerating it breaks idempotent re-runs.
 
-### `akcli undo <target.kicad_sch> [--apply] [--steps N] [--list] [--allow-open] [--note TEXT]`
+### `akcli undo <target.kicad_sch> [--apply] [--steps N] [--list] [--run RUN_ID] [--allow-open] [--note TEXT]`
 Restore the target from the **rotated draw backups** that `akcli draw --apply`
 writes under the workspace's `.akcli/backups/` (`<name>.bak` newest, then
 `.bak2`, `.bak3` — up to 3). Legacy pre-0.12 stacks beside the file are still
@@ -538,6 +538,13 @@ Dry-run by default (prints the part/net delta that restoring would cause);
   single subsequent `undo` redoes the last step; N clamps to the available
   stack. `--steps 0` is a usage error (exit `2`); `--steps` with no backup exits
   `4`.
+- `--run RUN_ID` (0.20) restores **every file of a multi-sheet draw
+  transaction** together, all-or-nothing, from
+  `.akcli/backups/runs/<RUN_ID>/` (the `run_id` is in the draw's `--json`
+  payload, its status line, and the journal). Three-way swap per file, so the
+  **same command again is a redo**. Refuses (`exit 6`) when any file changed
+  since the transaction — a swap would silently discard that later edit — and
+  exits `4` for an unknown RUN_ID.
 - `--allow-open` swaps even when a KiCad GUI lock file is present (File>Revert
   in KiCad afterwards); `--note` records a free-form intent note in the
   workspace journal.
@@ -662,7 +669,7 @@ dry-apply the net diff uses (coordinate-grid overlay included) — **look before
 a refused op-list honestly skips the render, and a renderer failure is a warning that never
 changes the verdict. The `--json` payload carries `preview: {path, bytes}` (or `null`).
 
-### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--strict-nets] [--allow-open] [--no-erc] [--render OUT.svg]`
+### `akcli draw <target.kicad_sch> --ops FILE [--symbols PATH ...] [--apply] [--no-net-diff] [--root FILE] [--flat] [--strict-nets] [--allow-open] [--no-erc] [--render OUT.svg]`
 Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 22 ops + 10 macros (see
 `schemas/ops.schema.json`), including `delete_component` (with `cascade`) / `delete_object` /
 `move_component` / `rename_net`, hierarchical `add_sheet` (below), and multi-unit placement via
@@ -693,6 +700,28 @@ Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 22 ops + 10 m
   the dry-apply itself fails. `--no-net-diff` skips the computation. If the diff cannot be
   computed at all (unreadable target, missing child sheet, ...) a
   `WARNING: net diff unavailable: ...` line goes to stderr — never a silent skip.
+- **Sheet-tree scope (0.20).** When the target is a **child sheet of a hierarchy**, the net
+  diff is evaluated over the **whole sheet tree**, not the child alone (a child read standalone
+  is a truncated graph — its global labels lose every member the other sheets contribute). The
+  root is auto-discovered by scanning the project directory for the file that instantiates the
+  target; `--root FILE` names it explicitly (a root whose tree does not contain the target is
+  `PROJECT_ROOT_MISMATCH`, exit `2`), and when several roots instantiate the target the run
+  refuses to guess (`PROJECT_ROOT_AMBIGUOUS` — under `--strict-nets` the write fails closed;
+  advisory runs degrade to `net diff unavailable`). `--flat` restores the single-file view
+  explicitly. Tree-scoped runs stage the tree under `.akcli/stage/` (cleaned up afterwards) and
+  stamp `project_root` + `evaluation_scope: "tree"` into the `--json` payload — both fields are
+  **absent** on the flat path, whose output is byte-identical to 0.19.
+- **Multi-sheet op-lists (0.20).** The envelope's `sheets` map (`{"amp": {"file":
+  "amp.kicad_sch"}}`) + per-op `"sheet"` tags route ops onto declared child files, so ONE
+  op-list edits the root and its children in **one atomic transaction**: every dirty file is
+  staged and verified before the first write, the pre-write bytes of every file are copied to
+  `.akcli/backups/runs/<run_id>/`, and a partial commit rolls back automatically
+  (`TXN_ROLLBACK_FAILED` only when even the rollback fails — the backup set is intact and
+  `akcli undo <target> --run <run_id> --apply` restores it). The `--json` payload carries
+  `run_id` + per-file `files[]` on these runs (absent on single-file runs). A sheet
+  instantiated more than once refuses a scalar designator (`INSTANCE_REFS_REQUIRED`) — pass
+  `instance_designators` / `instance_references` maps; see
+  [docs/op-list-authoring.md](op-list-authoring.md).
 - `--strict-nets` (with `--apply`): **refuse to write** (exit `6`, evidence lines on stderr)
   when the diff shows a split or merge touching a *named* net on either side — splits/merges of
   unnamed nets are ordinary wiring edits and pass. It forces the diff even under `--no-net-diff`,
@@ -968,7 +997,9 @@ human reads without opening an EDA tool.
 Query the **workspace write journal**. Every write-path command (`plan`, `draw`, `arrange`,
 `undo`, `relink-symbols`) appends one JSONL entry to `<dir>/.akcli/journal.jsonl` — timestamp,
 command, target, status (`dry-run`/`applied`/`refused`), the op-list sha256, op count, the
-net-diff verdict, and the backup name — so a later invocation (or a harness hook) can answer
+net-diff verdict, and the backup name (a multi-sheet transaction also records `run_id` and the
+dirty `files` it touched — feed `run_id` to `akcli undo <target> --run <run_id>`) — so a later
+invocation (or a harness hook) can answer
 "was there a plan for this op-list before the `--apply`" and "what did the last session do here"
 without re-deriving state. Write commands accept `--note TEXT` to record *why* the edit was
 made next to *what* was done — design intent for the next session (see
@@ -979,18 +1010,47 @@ or an edited file (which filters to that file); `--cmd` filters by command; `--j
 (`journal.jsonl.1`), and `AKCLI_JOURNAL=off` disables it. Add `.akcli/` to your project's
 `.gitignore`.
 
-### `akcli capabilities [--json]`
+### `akcli capabilities [--json] [--section NAME] [--command VERB]`
 The **self-describing surface manifest** — the single root document an agent reads to drive the
 tool blind. `--json` emits every subcommand + flag (introspected from the live parser, so it can
 never drift from reality), the frozen exit-code and error-code tables, the op-list vocabulary
 (core/sugar/macros + per-executor support, plus a `constraints` block — the rotation enum, the
-orthogonal-wire-only rule, `grid_mil`, and the hierarchy mode `hierarchy: "hierarchical_write_v1"`
-with a `hierarchy_note` spelling out the one-op-list-per-FILE rule — and an honest
+orthogonal-wire-only rule, `grid_mil`, and the hierarchy mode `hierarchy: "hierarchical_write_v2"`
+(`sheet_reuse: true`) with a `hierarchy_note` spelling out the `sheets` map / per-op `sheet`
+multi-file transaction and the per-instance reference rule for a reused sheet — and an honest
 `altium_write_wired: false` flag: Altium is import-only, so the informational "altium" op column
 is NOT a write target), the calculator registry, the packaged JSON Schemas with their version fields, and
 the tool conventions (`stdout=data/stderr=logs`, dry-run default, version-stamp policy, and the
 `--json` error-envelope contract). Without `--json`, a compact human summary. Static surface only —
 environment probing (which optional tools are actually installed here) is `akcli doctor`.
+
+**Slicing (0.20).** The full manifest is ~96 KB (mostly `commands`), while an agent usually
+needs one section or one command's flags. `--section NAME` (one of `exit_codes`, `error_codes`,
+`global_flags`, `commands`, `ops`, `calculators`, `schemas`, `conventions`) prints that section
+alone in a stamped envelope; `--command VERB` prints one command's entry (implies
+`--section commands`; an unknown VERB reports `found: false` and exits `8`, the query-miss
+convention). A slice is machine-facing by definition, so it is JSON with or without `--json`;
+the no-flag document keeps its exact historical shape.
+
+```bash
+akcli capabilities --section exit_codes
+akcli capabilities --command draw
+```
+
+### `akcli schema <name>`
+Print a packaged JSON Schema **byte-for-byte** — the fourteen schemas ship inside the wheel
+(mirrored from the repo's canonical `schemas/`, byte-identity CI-gated), and this command makes
+them reachable through the CLI: an orchestrator that `pip install`-ed akcli gets
+`ops.schema.json` for client-side validation without digging into site-packages. Names accept
+the short form (`ops`, `findings`, `netlist`, `draw-result`, `ops.capabilities`, ...) or the
+full filename; an unknown name fails at parse time with the full list (USAGE envelope under
+`--json`). The output IS the schema file's exact text — already JSON, already carrying its own
+version field — so `--json` changes nothing.
+
+```bash
+akcli schema ops
+akcli schema findings.schema.json
+```
 
 ### `akcli doctor [--network] [--require CAPS] [--json]`
 One-shot environment report. Probes — the same way the features themselves discover them —
@@ -1219,8 +1279,8 @@ surface as:
 | `3` (parse) | `ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`, `ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG`, `KICAD_SEXPR_BAD_NUMBER`, `KICAD_BAD_ENCODING`, `INTERNAL` |
 | `4` (unusable path) | `FILE_UNREADABLE` |
 | `5` (unsupported) | `ALTIUM_UNSUPPORTED` |
-| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROTOCOL_MISMATCH`, `TARGET_LOCKED`, `GROUP_UNKNOWN`, `GROUP_NO_ORIGIN`, `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`, `DESIGN_UNSUPPORTED`, `SIM_NO_GROUND`, `SIM_NODE_COLLISION`, `SIM_NODE_COUNT_MISMATCH`, `SIM_VALUE_INVALID`, `BRIDGE_BUSY` (reserved, unraised) |
-| `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG`, `SIM_OP_ASSERT_UNSUPPORTED` |
+| `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROJECT_ROOT_AMBIGUOUS`, `SHEET_UNKNOWN`, `INSTANCE_REFS_REQUIRED`, `TXN_ROLLBACK_FAILED`, `PROTOCOL_MISMATCH`, `TARGET_LOCKED`, `GROUP_UNKNOWN`, `GROUP_NO_ORIGIN`, `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`, `DESIGN_UNSUPPORTED`, `SIM_NO_GROUND`, `SIM_NODE_COLLISION`, `SIM_NODE_COUNT_MISMATCH`, `SIM_VALUE_INVALID`, `BRIDGE_BUSY` (reserved, unraised) |
+| `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG`, `SIM_OP_ASSERT_UNSUPPORTED`, `PROJECT_ROOT_MISMATCH` |
 | `7` (tool/network) | `KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, `NGSPICE_MISSING`, `NGSPICE_FAILED`, `NETWORK` (`jlc`), `BINFETCH_DOWNLOAD`, `BINFETCH_CHECKSUM`, `BRIDGE_TIMEOUT` (reserved, unraised) |
 
 Two related but distinct vocabularies:

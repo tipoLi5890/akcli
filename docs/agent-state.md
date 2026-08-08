@@ -13,6 +13,7 @@ state lives and how a new session picks it up.
 | **The design itself** | `*.kicad_sch` | KiCad / the draw pipeline |
 | **What happened** (edit history) | `.akcli/journal.jsonl` | every write command |
 | **Undo snapshots** | `.akcli/backups/<name>.bak…bakN` | every `--apply`/`--write` schematic edit (`draw`, `arrange`, `groups --frame`, `relink-symbols`, `jlc bom --fix`, `sim fit-diode`); `undo` swaps within the stack rather than growing it |
+| **Multi-sheet transaction backups** | `.akcli/backups/runs/<run_id>/` (+ `manifest.json`) | a multi-sheet `draw --apply` (a routed op-list touching several files in one atomic commit); the recovery unit for `akcli undo <target> --run <run_id>` |
 | **Policy & decisions** (grid, rails, waivers + reasons) | `akcli.toml` | you, in git |
 | **Designer intent** (asserted netlist) | intent JSON (`nets --intent-snapshot`) | you, in git |
 | **Audited component facts** | `datasheets/extracted/<MPN>.json` | `review facts add` |
@@ -35,7 +36,11 @@ One per workspace (the directory holding the edited file):
   (`dry-run`/`applied`/`refused`), op-list sha256, op count, net-diff verdict,
   backup name. `plan` and `draw` also journal their dry runs; `arrange`,
   `undo`, `groups --frame`, `relink-symbols` and `jlc bom --fix` journal only
-  when they apply. The `cmd` field is the journal's own name for the
+  when they apply. A routed (multi-sheet) `draw` adds two optional fields to
+  that entry — on its dry runs too: `run_id` and `files` (the DIRTY files the
+  transaction touched, i.e. those it would write / did write); `undo --run ID`
+  records the same pair. The `cmd` field
+  is the journal's own name for the
   operation, which is what `akcli log --cmd NAME` filters on: `plan`, `draw`,
   `arrange`, `arrange-groups`, `groups-frame`, `undo`, `relink-symbols`,
   `jlc-bom-fix`. Size-capped with
@@ -45,6 +50,18 @@ One per workspace (the directory holding the edited file):
   from `[project] backup_depth`, default 3). Walked by `akcli undo`
   (`--list`/`--steps`). Legacy stacks beside the file (pre-0.12) are still
   found when this directory holds none for the target.
+- `backups/runs/<run_id>/` — the recovery unit for a multi-sheet transaction
+  (a routed op-list that writes several sheet files in one atomic commit):
+  the pre-write bytes of every dirty file plus a `manifest.json` (sha
+  before/after per file). Restored — or redone, the same command run again —
+  by `akcli undo <target> --run <run_id> [--apply]`; deliberately
+  journal-independent (the recovery path survives `AKCLI_JOURNAL=off`) and
+  refuses the swap if any file changed since the transaction.
+- `stage/<pid>/` — ephemeral shadow-tree copy used only while the net-diff
+  gate evaluates a sheet tree (a dry-applied child is staged and read back
+  through the whole tree so global labels see every sheet's members);
+  created and removed within the same command invocation, never left behind
+  on success.
 
 ## Design intent in the journal
 
@@ -80,6 +97,10 @@ context from files — never from memory of a previous conversation:
    `akcli nets board.kicad_sch --intent-snapshot intent.json` at a known-good
    point.)
 4. `akcli undo board.kicad_sch --list` — how deep is the rollback runway?
+   For a multi-sheet edit, `akcli log --cmd draw --json` carries the `run_id`
+   (the text listing shows it as the `backup runs/<run_id>` label); and
+   `akcli undo board.kicad_sch --run <run_id>` restores — or redoes — every
+   file that transaction wrote, all-or-nothing.
 
 Anything worth telling the *next* session goes into a file it will read:
 a `--note` on the write, a waiver (with `reason`) in `akcli.toml`, an updated

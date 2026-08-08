@@ -78,7 +78,7 @@ One normalized model behind every command, so each check, diff, and report works
 | Command | What it does |
 |---|---|
 | `read` · `net` · `component` · `pins` | Parse KiCad or Altium into one normalized JSON model; query nets (whole-net or pin-level: `net --at` / `--same` / `--why`), components, and pin coordinates. |
-| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` — a root file or a child sheet of an existing hierarchy — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate and one-command `undo`; `ops from-intent` compiles a design document (declared nets + components) straight into an op-list. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
+| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` — a root file, a child sheet, or **several sheets in one atomic transaction** (the `sheets` envelope + per-op `sheet` routing, with run backups and `undo --run`) — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate evaluated over the **whole sheet tree** and one-command `undo`; `ops from-intent` compiles a design document (declared nets + components) straight into an op-list. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + document-integrity + intent / contract checks, schematic ↔ PCB equivalence, net-membership diff, MCU pin → net map. |
 | `review` | Advisory, confidence-graded design review across six detector families (signal / validation / pcb / emc / domain / gerber); DNP parts satisfy no rule. |
 | `sim` | Render to a SPICE deck and assert on KiCad's bundled ngspice; sweep corners; fit diode models from datasheet points. Component values are normalized, or refused rather than guessed. |
@@ -87,6 +87,7 @@ One normalized model behind every command, so each check, diff, and report works
 | `library` · `fab` · `release` | Library-workspace audit/repair, symbol authoring from a pin table (`new-symbol` — you give the pin table, akcli computes the coordinates) with a standalone lint (`lint-symbols`) and a coincident-pin check that gates the write, versioned fab-profile checks, and a release preflight that writes a traceable manifest. |
 | `gate` | Iteration-weight bundle of the four checks re-run after every GUI edit round (the full `check` set, intent assertions, sch ↔ PCB `verify`, BOM-lock drift — offline by default) — zero-argument in a configured project; `release preflight` stays the release-weight gate. |
 | `export` · `render` · `doc` · `view` | Netlist export (Protel / KiCad / CSV — the KiCad form carries the UUID sheetpath identity a re-import needs), pure-stdlib SVG render, a Markdown pinout book, and a localhost `/calc` + `/live` dashboard. |
+| `capabilities` · `schema` | The self-describing surface manifest — whole, per-section (`--section`), or per-command (`--command draw`) — and every packaged JSON Schema printed byte-for-byte for client-side validation. |
 
 Two headline examples — a design review and a part search:
 
@@ -156,9 +157,10 @@ by the core loop:
 
 ## Roadmap
 
-**Shipped (v0.18.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`
-and writes into a child sheet of an existing hierarchy, net-diff safety rails, `new` / multi-level
-`undo`), net-preserving `arrange --groups` re-layout, the advisory `akcli review` engine (six
+**Shipped (v0.20.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`,
+writes into a child sheet of an existing hierarchy and across several sheets in one atomic
+transaction, a net-diff safety rail evaluated over the whole sheet tree, per-instance references on
+a reused sheet, `new` / multi-level `undo` / `undo --run`), net-preserving `arrange --groups` re-layout, the advisory `akcli review` engine (six
 detector families, now including power-entry protection, plus a datasheet facts store, `propose` /
 `tree` / `validate`), ERC / power / BOM / diff / pinmap / intent / contract checks with waivers
 (SARIF from `check --format sarif` / `review report --format sarif`), read-only document `check --integrity`, schematic ↔ PCB `verify`, a project `library`

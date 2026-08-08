@@ -14,7 +14,7 @@ read-only on-ramp into the KiCad flow, not a symmetric conversion peer. That rep
 release-critical now live in a demand-driven optional track, and the experimental Windows live
 bridge was **deleted outright** (0.17).
 
-## Where we are (v0.18.0)
+## Where we are (v0.20.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 
@@ -34,6 +34,13 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   KiCad rather than exported, so akcli derives them from the located `kicad-cli` — standard
   nicknames resolve **on a stock KiCad install**, an environment value still wins, and `doctor`'s
   `symbols` probe reports whether the resolution works on this machine (0.18).
+  **Hierarchy-first (0.20)**: `plan`/`draw` on a child sheet now evaluate the net gate over the
+  whole sheet tree, not the child alone — the root is auto-discovered from the nearest
+  `.kicad_pro` (or named via `--root`/`--flat`). A `sheets` envelope routes one op-list across
+  several files inside a single atomic transaction, recoverable with `akcli undo <target> --run
+  <run_id>`, and a sheet instantiated more than once now takes per-instance references
+  (`instance_designators`/`instance_references`), refusing a duplicate refdes with the new
+  `INSTANCE_REFS_REQUIRED`.
   **Modular authoring (v0.10)**: functional-group envelope with group-local coordinates and a
   persisted `Group` property, `akcli groups`/`--frame` self-refreshing module borders,
   bare `arrange --groups --frames`, relative placement (`anchor`+`offset_mil`), `place_array`,
@@ -120,6 +127,8 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   under `--json`, an `INTERNAL` last-resort handler keeps the envelope contract even for an
   unexpected exception, a corrupt numeric field parses into `KICAD_SEXPR_BAD_NUMBER` instead of a
   raw traceback, and pin-level `net --at`/`--same`/`--why` answer connectivity questions directly.
+  0.20 additions: `akcli capabilities --section NAME`/`--command VERB` slice the ~96 KB manifest
+  into a stamped subset, and `akcli schema NAME` prints any packaged JSON Schema byte-for-byte.
 - **Quality gates:** ~3 100 tests (parser fuzzing, round-trip netlist properties, live ngspice in
   CI, Windows/macOS/Linux × Python 3.11–3.14), ruff over `src`/`tests`/`tools`/`hooks` + a 40-file
   mypy beachhead (parts/, calc/, the typed core, the net/parse spine, and the renderer), a
@@ -298,7 +307,7 @@ a tunable rule engine reaching across artifacts.
       mechanically (AST scan) in CI — **shipped in 0.9.0** (S)
 - [x] Review-rule calibration baseline replayed in CI (`tools/corpus_replay.py` +
       `tests/golden/corpus_replay_baseline.json`) — **shipped in 0.9.0** (S)
-- [x] Agent-loop eval harness (`tools/agent_eval/` — eight ground-truthed design tasks, scored
+- [x] Agent-loop eval harness (`tools/agent_eval/` — ten ground-truthed design tasks (0.20 added hierarchy + bus coverage), scored
       through the real safety rails; references CI-pinned at 100%) — **shipped in 0.9.0** (M)
 
 **Exit criterion:** a schematic PR can be gated end-to-end (check + review + diff + intent + sim
@@ -332,7 +341,10 @@ Goal: the public surface is stable enough to promise.
       `tools/sync_schemas.py --check` gates the packaged mirrors against `schemas/`. 0.18 added
       field-kind and enum-table assertions against `ops.schema.json` (only field *names* were
       compared), two-way mirror pruning so an orphan in `src/akcli/schemas/` cannot hide, and a
-      gate asserting the shipped `pyproject` version has a non-empty CHANGELOG section
+      gate asserting the shipped `pyproject` version has a non-empty CHANGELOG section. 0.20 added
+      the `sheets` envelope as a purely additive change (`protocol_version` stays 1) and the
+      manifest's `constraints.hierarchy` now reports `hierarchical_write_v2`/`sheet_reuse: true`;
+      `SCHEMA_VERSION` stays 1.3
 - [x] First PyPI release (`pip install akcli-kicad`) — **shipped in 0.15.0**; dist name is `akcli-kicad`; PyPI publishing opted in 2026-07-22 via the
       `publish-pypi` job in `release.yml`, gated on the **repository** variable
       `PYPI_TRUSTED_PUBLISHING` (must be repo-scoped, not environment-scoped — a job-level `if:`
@@ -383,7 +395,7 @@ repositioning they proceed only if real usage pulls them:
 
 | Track | v0.8 (shipped) | v0.9–v0.10 | v1.0 / optional |
 |---|---|---|---|
-| **KiCad authoring & safety** | `arrange --groups`, `move_component` carry, `check-lock` | PreToolUse hook, honest flags | contract freeze |
+| **KiCad authoring & safety** | `arrange --groups`, `move_component` carry, `check-lock` | PreToolUse hook, honest flags, tree-scoped net gate + multi-sheet transactions + per-instance refs (0.20) | contract freeze |
 | **Verification & checks** | `findings.schema.json`, sch↔PCB `verify` | diff/pinmap schemas, ERC matrix, diff-pairs, golden corpus | frozen contracts in CI; GitHub Action (deferred) |
 | **Design review** | full engine M1–M9 (signal/validation/pcb/emc/domain/gerber, facts, propose/diff/tree, validate, `--review-policy`) | more domain families, PDN/EMC depth | lifecycle drivers |
 | **Simulation** | — | behavioral models, review testbenches | waveform panel (deferred) |

@@ -46,6 +46,10 @@ checkout instead use `PYTHONPATH=src python3 -m akcli ...` or `bin/akcli ...`.
 ```bash
 akcli capabilities --json         # COLD-START: the full CLI surface manifest (commands, flags,
                                   # exit/error tables, op vocabulary, schemas) in one document
+akcli capabilities --command draw # ONE command's entry (~3% of the manifest) — prefer slices
+                                  # over the full ~96 KB document (--section exit_codes|ops|...)
+akcli schema ops                  # any packaged JSON Schema, byte-for-byte (ops, findings,
+                                  # netlist, draw-result, ...) for client-side validation
 akcli read <file> --summary --json  # counts + metadata ONLY — start big boards here, never
                                     # with a full dump (context-budget escape hatch)
 akcli read <file> --json          # full normalized Schematic/Pcb (carries schema_version)
@@ -106,7 +110,11 @@ engineering calculators — E-series snap, dividers, IPC-2221 track width, I²C 
 
 KiCad is the only writable target. Build an op-list JSON (document shape and the op vocabulary — 22 ops + 10 macros incl. `delete_component`/`delete_object`/`add_sheet`/`route_net`/
 `add_rectangle`/`add_text_box`/`set_title_block` and the `place_array` macro —
-are defined in **`schemas/ops.schema.json`**; guide: `docs/op-list-authoring.md`, scaffolder: `akcli ops list` / `akcli ops template <op>`):
+are defined in **`schemas/ops.schema.json`**; guide: `docs/op-list-authoring.md`, scaffolder: `akcli ops list` / `akcli ops template <op>`). One op-list can also edit
+the target AND its child sheets in one atomic transaction — envelope `sheets` map +
+per-op `"sheet"` tags; the net gate evaluates the whole sheet tree; `akcli undo
+<target> --run <run_id>` reverts a multi-file run together (details: the
+akcli-schematic-authoring skill):
 
 ```json
 {
