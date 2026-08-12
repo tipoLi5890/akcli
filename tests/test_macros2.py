@@ -25,7 +25,7 @@ from akcli import ops
 from akcli.cli import main
 from akcli.errors import EXIT, AkcliError
 from akcli.readers import kicad as kreader
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 from akcli.writers import kicad as kwriter
 
 _MIN_SYM = """\
@@ -98,7 +98,7 @@ def sheet(tmp_path: Path) -> Path:
 
 
 def _oplist(op_list):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": op_list}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": op_list}
 
 
 def _draw(tmp_path, sheet, sym, op_list) -> None:
@@ -131,14 +131,15 @@ def test_connect_and_label_points_resolve_mid_at_expansion():
     ]))
     label = doc["ops"][1]
     # mid x = 185 -> snapped to 200 on the 50-mil grid; horizontal wire -> 0
-    assert label["at"] == [200, 0] and label["orientation"] == 0
+    assert label["at"] == [200, 0] and label["rotation"] == 0
     doc = ops.expand_macros(_oplist([
         {"op": "connect_and_label", "from": [100, 100], "to": [100, 470],
          "net": "V", "scope": "global", "orientation": 270},
     ]))
     label = doc["ops"][1]
     assert label["at"] == [100, 300]                  # 285 -> 300 along Y
-    assert label["orientation"] == 270                # explicit wins
+    # the macro's own field kept its v1 name; the emitted core op speaks v2
+    assert label["rotation"] == 270                   # explicit wins
     assert label["scope"] == "global"
 
 
@@ -269,9 +270,9 @@ def test_rename_net_labels_and_power_values(tmp_path, sheet, sym):
          "at": "R1.1"},
     ])
     res = kwriter.apply(_oplist([
-        {"op": "rename_net", "from": "N1", "to": "NET_X"},
-        {"op": "rename_net", "from": "+5V", "to": "+3V3"},
-        {"op": "rename_net", "from": "GHOST", "to": "ANY"},
+        {"op": "rename_net", "old_name": "N1", "new_name": "NET_X"},
+        {"op": "rename_net", "old_name": "+5V", "new_name": "+3V3"},
+        {"op": "rename_net", "old_name": "GHOST", "new_name": "ANY"},
     ]), str(sheet), apply=True, sources=[str(sym)])
     assert [r.status for r in res] == ["ok", "ok", "ok"]
     assert res[0].message == "renamed 1 object(s) from 'N1' to 'NET_X'"
@@ -287,7 +288,7 @@ def test_rename_net_scope_restricts_label_kind(tmp_path, sheet, sym):
         {"op": "connect_and_label", "from": "R1.2", "to": "R2.1", "net": "N1"},
     ])
     res = kwriter.apply(_oplist([
-        {"op": "rename_net", "from": "N1", "to": "NEVER", "scope": "global"},
+        {"op": "rename_net", "old_name": "N1", "new_name": "NEVER", "scope": "global"},
     ]), str(sheet), apply=True, sources=[str(sym)])
     assert res[0].status == "ok" and "nothing renamed" in res[0].message
     assert "N1" in _nets(sheet)                        # local label untouched

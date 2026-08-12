@@ -14,10 +14,11 @@ from __future__ import annotations
 import argparse
 import json
 
+from .. import contract as _contract
 from ..errors import ERROR_CODES, EXIT, exit_for_code
 from ._shared import _dumps, _emit
 
-CAPABILITIES_VERSION = "1.0"
+CAPABILITIES_VERSION = _contract.SCHEMA_VERSIONS["capabilities"]
 
 # Option strings owned by the shared global-flags parent (reported once under
 # ``global_flags``, filtered out of every per-command flag list).
@@ -149,6 +150,7 @@ def build_manifest() -> dict:
     from .. import __version__
     from .. import cli as _cli   # lazy: cli imports this module at registration
     from .. import ops as _ops
+    from .. import opspec as _opspec
     from ..calc import CALCS
 
     parser = _cli.build_parser()
@@ -160,9 +162,10 @@ def build_manifest() -> dict:
         if not isinstance(a, argparse._HelpAction)
     ] + top_flags
 
-    macro_names = sorted(_ops.MACRO_OPS)
-    core_names = sorted(_ops._CORE_OPS)   # noqa: SLF001 - single source of truth
-    sugar_names = sorted(_ops._SUGAR_OPS)  # noqa: SLF001
+    # straight off the ONE vocabulary source (akcli.opspec), not a copy
+    macro_names = sorted(_opspec.macro_names())
+    core_names = sorted(_opspec.core_names())
+    sugar_names = sorted(_opspec.sugar_names())
 
     return {
         "schema_version": CAPABILITIES_VERSION,
@@ -189,17 +192,18 @@ def build_manifest() -> dict:
             # BEFORE attempting an op instead of learning each constraint
             # from a failed draw (BAD_ANGLE / NON_ORTHOGONAL_WIRE /
             # HIERARCHICAL_UNSUPPORTED / OFF_GRID).
-            # ``rotation_enum`` and ``grid_mil`` are read from ops.py's own
-            # validator constants and cannot drift. ``wire_orthogonal_only``
+            # ``rotation_enum`` comes from opspec (the ONE vocabulary source)
+            # and ``grid_mil`` from ops' own constant, so neither can drift.
+            # ``wire_orthogonal_only``
             # and the two ``hierarchy`` fields are hand-maintained prose —
             # there is no constant to export — so whoever changes the writer's
             # hierarchy rule (writers/instances.instances_path,
             # writers/connectivity's INVALID_INSTANCES_PATH) must update these
             # strings and the pin in tests/test_json_version_stamps.py.
             "constraints": {
-                "rotation_enum": sorted(_ops._VALID_ROTATIONS),  # noqa: SLF001
+                "rotation_enum": sorted(_opspec.ENUMS["rotation"]),
                 "wire_orthogonal_only": True,
-                "grid_mil": int(_ops._GRID_MIL),  # noqa: SLF001
+                "grid_mil": int(_ops.GRID_MIL),
                 "hierarchy": "hierarchical_write_v2",
                 "sheet_reuse": True,
                 "hierarchy_note": "one op-list can edit SEVERAL files: the "
@@ -211,8 +215,7 @@ def build_manifest() -> dict:
                                   "single-file draw target. A sheet "
                                   "instantiated more than once needs "
                                   "per-instance references "
-                                  "(instance_designators / "
-                                  "instance_references — a scalar ref "
+                                  "(instance_designators — a scalar ref "
                                   "refuses INSTANCE_REFS_REQUIRED). An op "
                                   "naming a sub-sheet path directly still "
                                   "fails HIERARCHICAL_UNSUPPORTED: route by "

@@ -174,6 +174,28 @@ def gui_lock_path(path: Path) -> Path:
     return path.parent / f"~{path.name}.lck"
 
 
+def ensure_state_root_ignore(root: os.PathLike | str) -> None:
+    """Drop a self-ignoring ``.gitignore`` (``*``) into the akcli state root.
+
+    The ONE implementation of the ``.akcli/`` self-ignore contract
+    (``journal.ensure_self_ignore`` is the name the state layer publishes and
+    delegates here). It lives in this leaf module because the write helper
+    below must honour the contract too, and a leaf may not import the state
+    layer: keeping the rule here is what lets ``safety`` stay import-free of
+    ``journal`` while both still write the identical file at the identical
+    moment.
+
+    Best-effort: state-dir hygiene must never fail the parent write command.
+    An existing ``.gitignore`` is left alone (user-managed content wins).
+    """
+    gi = Path(root) / ".gitignore"
+    try:
+        if not gi.exists():
+            gi.write_text("*\n", encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
 def atomic_write_with_backup(
     path: os.PathLike | str,
     data: bytes | str,
@@ -195,8 +217,7 @@ def atomic_write_with_backup(
         if bd.parent.name == ".akcli":
             # every `.akcli/` creation path self-ignores the state root, so
             # the user's .gitignore never needs an entry (journal.py contract)
-            from . import journal
-            journal.ensure_self_ignore(bd.parent)
+            ensure_state_root_ignore(bd.parent)
         shutil.copy2(path, bd / (path.name + ".bak"))
 
     directory = path.parent if str(path.parent) else Path(".")

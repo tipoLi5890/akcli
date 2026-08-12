@@ -25,7 +25,7 @@ def _blank_sch(tmp_path: Path) -> Path:
 
 
 def _opsfile(tmp_path: Path, *ops_list, **envelope) -> Path:
-    doc = {"protocol_version": 1, "target_format": "kicad",
+    doc = {"protocol_version": 2, "target_format": "kicad",
            "ops": list(ops_list), **envelope}
     f = tmp_path / "ops.json"
     f.write_text(json.dumps(doc), encoding="utf-8")

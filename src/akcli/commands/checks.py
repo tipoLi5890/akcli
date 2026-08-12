@@ -88,7 +88,7 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
         # itself just wrote (imports and hand-edited files need them most).
         if not str(args.path).lower().endswith(".kicad_sch"):
             return []
-        from ..readers import sexpr as _sexpr
+        from .. import sexpr as _sexpr
         from ..writers import connectivity as _connectivity
         text = Path(args.path).read_text(encoding="utf-8")
         # the path enables the checks that need the filesystem (a (sheet ...)

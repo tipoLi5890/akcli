@@ -107,11 +107,13 @@ Run it locally with `python -m pytest tests/test_docs_conformance.py -q`.
 
 A sibling gate (`tests/test_schema_exports.py`) requires the packaged mirror
 `src/akcli/schemas/*.json` to be byte-identical to the canonical `schemas/*.json`
-— and to contain nothing else: `ops._schema_text()` reads the mirror first, so a
+— and to contain nothing else: the schema loader reads the mirror first, so a
 mirror file whose canonical original was deleted or renamed would keep being
-served from the wheel. After editing, adding **or removing** a schema, run
-`python tools/sync_schemas.py` (or `python tools/sync_schemas.py --check` to see
-the drift, including orphaned mirrors, without writing).
+served from the wheel. `schemas/ops.schema.json` and `ops.capabilities.json` are
+additionally *generated* from `src/akcli/opspec.py`. Both steps run behind one
+command: after editing the op vocabulary, adding **or removing** a schema, run
+`python3 tools/schemas.py build` (or `python3 tools/schemas.py check` to see the
+drift — generator and mirror, including orphans — without writing).
 
 ## PyPI publishing
 

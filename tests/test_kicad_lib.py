@@ -13,7 +13,8 @@ import pytest
 
 from akcli import model, units
 from akcli.errors import AkcliError
-from akcli.readers import kicad_lib, sexpr
+from akcli.readers import kicad_lib
+from akcli.sexpr import parser as sexpr
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 DEVICE = FIX / "symbols" / "Device.kicad_sym"

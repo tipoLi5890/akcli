@@ -1,5 +1,5 @@
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "target_format": "kicad",
   "target_file": "power_entry.kicad_sch",
   "ops": [

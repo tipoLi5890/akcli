@@ -42,11 +42,10 @@ Two documented normalizations:
   akcli emits its membership-derived ``stable_id`` instead. Both sides must
   agree that the net has no *designed* name; the text is allowed to differ.
 
-Known gap (NOT enforced here, tracked separately): when one net carries several
-names, akcli's canonical pick is priority-then-alphabetical while eeschema's is
-GLOBAL > POWER_PIN > LOCAL_LABEL > HIER_LABEL. ``board_v8``'s ``MID``/``VOUT``
-node is the standing example (see ``tests/fixtures/kicad/README.md``). Every
-board arbitrated here names each net exactly once, so the two rules coincide.
+Closed gap (0.21): akcli's canonical pick now follows eeschema's driver
+priority (GLOBAL > POWER_PIN > LOCAL_LABEL > HIER_LABEL) for KiCad sources;
+``board_v8``'s ``MID``/``VOUT`` node — the standing example — now names
+``VOUT`` on both sides (see ``tests/fixtures/kicad/README.md``).
 """
 
 from __future__ import annotations
@@ -60,7 +59,7 @@ import pytest
 from akcli import exporters
 from akcli.drivers import kicad_cli
 from akcli.readers import kicad as kreader
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 
 CORPUS = Path(__file__).parent / "fixtures" / "corpus"
 KICAD_FIX = Path(__file__).parent / "fixtures" / "kicad"

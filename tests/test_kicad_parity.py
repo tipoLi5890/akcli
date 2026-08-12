@@ -43,8 +43,8 @@ from akcli import model, units
 from akcli.checks import nets as netcheck
 from akcli.drivers import kicad_cli as kicad_cli_driver
 from akcli.readers import kicad as kreader
-from akcli.readers import sexpr
-from akcli.writers import geometry
+from akcli.sexpr import parser as sexpr
+from akcli.geometry import transform as geometry
 from akcli.writers import kicad as kw
 
 
@@ -144,7 +144,7 @@ _LIB = """\
 
 
 def _oplist(*ops):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(ops)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(ops)}
 
 
 def _seed(d: Path, name: str) -> Path:
@@ -280,14 +280,14 @@ def scope_parity(tmp_path_factory):
         # SCOPE1: DISCONNECTED local vs global, same sheet, same name
         *stub(1, "R1"),
         {"op": "add_net_label", "name": "SCOPE1", "at": [1000, 1700],
-         "scope": "local", "orientation": 90},
+         "scope": "local", "rotation": 90},
         *stub(2, "R2"),
         {"op": "add_net_label", "name": "SCOPE1", "at": [2000, 1700],
-         "scope": "global", "orientation": 90},
+         "scope": "global", "rotation": 90},
         # +3V3: DISCONNECTED local label vs power port, same sheet
         *stub(3, "R3"),
         {"op": "add_net_label", "name": "+3V3", "at": [3000, 1700],
-         "scope": "local", "orientation": 90},
+         "scope": "local", "rotation": 90},
         {"op": "place_component", "lib_id": "RR", "designator": "R4",
          "x_mil": 4000, "y_mil": 2000},
         {"op": "place_power_port", "lib_id": "+3V3", "net_name": "+3V3",
@@ -295,25 +295,25 @@ def scope_parity(tmp_path_factory):
         # SCOPE2: two DISCONNECTED locals, same sheet, same name
         *stub(5, "R5"),
         {"op": "add_net_label", "name": "SCOPE2", "at": [5000, 1700],
-         "scope": "local", "orientation": 90},
+         "scope": "local", "rotation": 90},
         *stub(6, "R6"),
         {"op": "add_net_label", "name": "SCOPE2", "at": [6000, 1700],
-         "scope": "local", "orientation": 90},
+         "scope": "local", "rotation": 90},
         # SCOPE3: two DISCONNECTED globals
         *stub(7, "R7"),
         {"op": "add_net_label", "name": "SCOPE3", "at": [7000, 1700],
-         "scope": "global", "orientation": 90},
+         "scope": "global", "rotation": 90},
         *stub(8, "R8"),
         {"op": "add_net_label", "name": "SCOPE3", "at": [8000, 1700],
-         "scope": "global", "orientation": 90},
+         "scope": "global", "rotation": 90},
         # SCOPE4: CONNECTED local (mid-span!) + global on one wire
         {"op": "place_component", "lib_id": "RR", "designator": "R9",
          "x_mil": 9000, "y_mil": 2000},
         {"op": "add_wire", "vertices": ["R9.1", [9000, 1600]]},
         {"op": "add_net_label", "name": "SCOPE4", "at": [9000, 1700],
-         "scope": "local", "orientation": 90},
+         "scope": "local", "rotation": 90},
         {"op": "add_net_label", "name": "SCOPE4", "at": [9000, 1600],
-         "scope": "global", "orientation": 90},
+         "scope": "global", "rotation": 90},
     ]
     tgt = _draw(d, "scope.kicad_sch", *ops)
     return _export_nets(tgt), kreader.read_sch(tgt)
@@ -1136,3 +1136,62 @@ def test_bus_alias_vector_name_collision_vector_wins(bus_alias_vector_collision)
     assert ee["/child/X"] == {("R4", "1")}
     assert _ee_partition(ee) == _akcli_partition(
         kreader.read_sch(bus_alias_vector_collision))
+
+
+# --------------------------------------------------------------------------- #
+# (g) DIFFERENT-NAME driver competition — R9's acceptance fixtures.
+#
+# Every scope fixture above uses SAME-name labels, so it can prove partition
+# parity but can never catch a wrong canonical-name CHOICE.  eeschema ranks
+# drivers PIN(1) < SHEET_PIN(2) < HIER_LABEL(3) < LOCAL_LABEL(4) <
+# POWER_PIN(5) < GLOBAL_LABEL(6); akcli currently ranks all label kinds
+# equal (alphabetical tie-break) above power ports, and never lets a
+# hierarchical label name a net.  These tests assert the eeschema answer and
+# are strict-xfail until the R9 net-name alignment lands: they start passing
+# exactly when it does (strict=True then fails loudly to force removing the
+# marker).
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def name_choice_parity(tmp_path_factory):
+    d = tmp_path_factory.mktemp("parity_name_choice")
+    ops = [
+        # net 1: CONNECTED local label vs power port (different names) —
+        # eeschema: POWER_PIN(5) beats LOCAL_LABEL(4) -> "+3V3"
+        {"op": "place_component", "lib_id": "RR", "designator": "R1",
+         "x_mil": 1000, "y_mil": 2000},
+        {"op": "add_wire", "vertices": ["R1.1", [1000, 1700]]},
+        {"op": "add_net_label", "name": "VDD_MCU", "at": [1000, 1700],
+         "scope": "local", "rotation": 90},
+        {"op": "place_power_port", "lib_id": "+3V3", "net_name": "+3V3",
+         "at": [1000, 1700]},
+        # net 2: CONNECTED local vs global (different names, chosen so the
+        # WRONG alphabetical tie-break prefers the local) —
+        # eeschema: GLOBAL_LABEL(6) beats LOCAL_LABEL(4) -> "ZZZ_GLOBAL"
+        {"op": "place_component", "lib_id": "RR", "designator": "R2",
+         "x_mil": 3000, "y_mil": 2000},
+        {"op": "add_wire", "vertices": ["R2.1", [3000, 1700]]},
+        {"op": "add_net_label", "name": "AAA_LOCAL", "at": [3000, 1700],
+         "scope": "local", "rotation": 90},
+        {"op": "add_net_label", "name": "ZZZ_GLOBAL", "at": [3000, 1800],
+         "scope": "global", "rotation": 90},
+    ]
+    tgt = _draw(d, "name_choice.kicad_sch", *ops)
+    return _export_nets(tgt), kreader.read_sch(tgt)
+
+
+@needs_kicad
+def test_power_port_outranks_differently_named_local_label(name_choice_parity):
+    ee, sch = name_choice_parity
+    assert ("R1", "1") in ee.get("+3V3", set())
+    named = _akcli_named(sch)
+    assert ("R1", "1") in named.get("+3V3", frozenset())
+    assert "VDD_MCU" not in named
+
+
+@needs_kicad
+def test_global_label_outranks_differently_named_local_label(name_choice_parity):
+    ee, sch = name_choice_parity
+    assert ("R2", "1") in ee.get("ZZZ_GLOBAL", set())
+    named = _akcli_named(sch)
+    assert ("R2", "1") in named.get("ZZZ_GLOBAL", frozenset())
+    assert "AAA_LOCAL" not in named

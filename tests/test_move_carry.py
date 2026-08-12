@@ -19,7 +19,7 @@ DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kica
 
 
 def _oplist(*ops):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(ops)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(ops)}
 
 
 def _seed_label_chain(tmp_path: Path) -> Path:

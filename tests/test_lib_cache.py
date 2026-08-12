@@ -18,8 +18,9 @@ import pytest
 
 from akcli import model
 from akcli.errors import AkcliError
-from akcli.readers import kicad_lib, sexpr
-from akcli.readers.sexpr import SNode
+from akcli.readers import kicad_lib
+from akcli.sexpr import parser as sexpr
+from akcli.sexpr.parser import SNode
 from akcli.writers import lib_cache
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"

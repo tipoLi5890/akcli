@@ -39,7 +39,8 @@ import os
 from pathlib import Path
 
 from .. import model, units
-from ..readers import kicad_lib, sexpr
+from .. import sexpr
+from ..readers import kicad_lib
 from ..report import Finding, Severity, anchor
 
 SYMLIB_PIN_COINCIDENT = "SYMLIB_PIN_COINCIDENT"          # ERROR: one point, two pins

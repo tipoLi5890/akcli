@@ -15,7 +15,7 @@ DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kica
 
 
 def _doc(*ops_list, **envelope):
-    return {"protocol_version": 1, "target_format": "kicad",
+    return {"protocol_version": 2, "target_format": "kicad",
             "ops": list(ops_list), **envelope}
 
 

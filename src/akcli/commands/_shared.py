@@ -591,10 +591,11 @@ def _table_symbol_sources(lib_ids, explicit: list, project_dir=None) -> list[str
 
 
 def _draw_exit(results: list, findings: list) -> int:
-    """Exit 6 (OPLIST) when any op errored or connectivity has an error finding."""
-    if any(r.status == "error" for r in results):
-        return EXIT["OPLIST"]
-    actionable = {_report.Severity.ERROR, _report.Severity.CRITICAL}
-    if any(f.severity in actionable for f in findings):
-        return EXIT["OPLIST"]
-    return EXIT["OK"]
+    """Exit 6 (OPLIST) when any op errored or connectivity has an error finding.
+
+    The rule itself lives in :func:`..pipeline.draw_exit` — the staged net gate
+    and the real apply must grade an op-list identically, so the command layer
+    reads the engine's verdict instead of keeping its own copy.
+    """
+    from ..pipeline import draw_exit
+    return draw_exit(results, findings)

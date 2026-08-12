@@ -22,6 +22,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .. import contract as _contract
 from ..errors import EXIT
 from ._shared import (
     _add_exit_policy_flags,
@@ -197,7 +198,7 @@ def _cmd_library_import_altium(args: argparse.Namespace) -> int:
         for item in plan:
             safety.atomic_write_with_backup(item["file"], item["text"])
         provenance = {
-            "schema_version": "1",
+            "schema_version": _contract.SCHEMA_VERSIONS["envelope"],
             "source": {"path": str(src),
                        "sha256": hashlib.sha256(src.read_bytes()).hexdigest()},
             "converter": {"tool": "akcli library import-altium",

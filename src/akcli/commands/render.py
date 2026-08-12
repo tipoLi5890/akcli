@@ -14,6 +14,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .. import contract as _contract
 from ..errors import EXIT
 from ._shared import _dumps, _emit, _load_schematic, _require_path
 
@@ -46,7 +47,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
     out.write_text(svg, encoding="utf-8", newline="\n")
 
     summary = {
-        "schema_version": "1",
+        "schema_version": _contract.SCHEMA_VERSIONS["envelope"],
         "render_version": render_svg.RENDER_VERSION,
         "source": str(path),
         "output": str(out),

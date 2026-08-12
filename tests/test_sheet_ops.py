@@ -16,7 +16,7 @@ from pathlib import Path
 
 from akcli import ops
 from akcli.readers import kicad as kreader
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 from akcli.report import Severity
 from akcli.writers import kicad as kw
 
@@ -38,7 +38,7 @@ _LIB = """\
 
 
 def _oplist(*op):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(op)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(op)}
 
 
 def _seed(d: Path, name: str = "root.kicad_sch") -> Path:

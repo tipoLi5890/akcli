@@ -105,7 +105,7 @@ capabilities` self-describes the entire CLI surface in one JSON document — and
 machine-readable `remediation` hint.
 
 - **Claude Code** — install the bundled plugin for 8 `/akcli:circuit-*` commands (review, pinmap,
-  draw, diff, parts, sim, datasheet, release) plus 12 skills spanning design, review, authoring, Altium interop, parts
+  draw, diff, parts, sim, datasheet, release) plus 13 skills spanning design, review, authoring, Altium interop, parts
   sourcing, calculators, and release gating.
 - **Codex** — install the bundled plugin, or drop the loose skill folders into `.agents/skills/` for
   auto-discovery. See [docs/codex-plugin.md](docs/codex-plugin.md).

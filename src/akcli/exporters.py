@@ -31,6 +31,7 @@ import re
 from pathlib import PurePath
 
 from . import __version__
+from .kicad_escape import quote_atom
 from .errors import fail
 from .model import Component, Net, Pin, Schematic
 
@@ -61,22 +62,14 @@ def _sorted_components(sch: Schematic) -> list[Component]:
 
 
 def _kicad_quote(s: object) -> str:
-    """Quote a token KiCad-style (escape ``\\``, ``"`` and control chars).
+    """None-tolerant quote: absent netlist fields render as ``""``.
 
-    The ``.net`` netlist is an s-expression like the schematic, so it obeys the
-    same rule as ``writers.kicad._q``: a raw newline/CR/tab inside a quoted
-    atom (a multi-line component value carried over from an import) yields a
-    file KiCad's netlist reader rejects. Pinned identical to every other akcli
-    quoter by ``tests/test_sexpr_quoting.py``.
+    The escape itself is :func:`akcli.kicad_escape.quote_atom`; this wrapper
+    adds the exporter's ``None -> ""`` coercion (an imported component with no
+    footprint/value still needs a well-formed empty atom in the ``.net``).
     """
-    text = "" if s is None else str(s)
-    text = text.replace("\\", "\\\\").replace('"', '\\"')
-    return '"' + text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
+    return quote_atom("" if s is None else str(s))
 
-
-# --------------------------------------------------------------------------- #
-# Protel / Tango netlist (Altium-importable)
-# --------------------------------------------------------------------------- #
 def to_protel(sch: Schematic) -> str:
     """Emit a classic Protel ``.NET`` netlist (importable by Altium Designer)."""
     out: list[str] = []

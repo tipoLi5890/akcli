@@ -171,7 +171,7 @@ def test_read_throttle_pcb_footprints(tmp_path):
 
 def test_capabilities_constraints_and_altium_honesty():
     """The manifest publishes hard limits + the unwired-Altium flag —
-    derived from ops.py / ops.capabilities.json, not hardcoded copies."""
+    derived from opspec / ops.capabilities.json, not hardcoded copies."""
     argv = ["capabilities", "--json"]
     doc = json_of(argv)
     ops = doc["ops"]
@@ -192,13 +192,25 @@ def test_capabilities_constraints_and_altium_honesty():
     assert "'sheets' map" in cons["hierarchy_note"]
 
 
+def _py_files() -> list[Path]:
+    """Scan surface of the mechanical gate: EVERY product module, recursively.
+
+    Was ``commands/*.py`` (non-recursive) — which would have silently stopped
+    covering payload builders the moment one moved out of ``commands/`` or a
+    command module became a package.  ``tests/test_gate_coverage.py`` asserts
+    this collection stays exhaustive.
+    """
+    return [p for p in sorted((ROOT / "src" / "akcli").rglob("*.py"))
+            if "_vendor" not in p.parts and "__pycache__" not in p.parts]
+
+
 def test_dumps_object_literals_carry_version_stamp():
     """Mechanical anti-drift guard: a NEW `_dumps({...})` object payload in
-    any command module must carry a `*_version` key or route through
+    any product module must carry a `*_version` key or route through
     `_stamp(...)`. (Non-literal args — variables, comprehensions — can't be
     checked statically; the behavioral tests above cover the known ones.)"""
     offenders: list[str] = []
-    for path in sorted((ROOT / "src" / "akcli" / "commands").glob("*.py")):
+    for path in _py_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call)

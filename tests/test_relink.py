@@ -16,7 +16,8 @@ import pytest
 
 from akcli import relink
 from akcli.errors import AkcliError
-from akcli.readers import kicad, sexpr
+from akcli.readers import kicad
+from akcli.sexpr import parser as sexpr
 
 # --------------------------------------------------------------------------- #
 # fixture text

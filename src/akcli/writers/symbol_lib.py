@@ -29,7 +29,7 @@ from __future__ import annotations
 from .. import units
 from ..kicad_escape import escape_string
 from ..symbol_spec import Layout, PlacedPin
-from .sexpr_writer import quote
+from ..sexpr.writer import quote
 
 __all__ = ["to_kicad_sym", "FORMAT_VERSION"]
 

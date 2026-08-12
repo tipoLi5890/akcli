@@ -56,7 +56,7 @@ _ANY_POISON = _SCALAR_POISON + (
 
 
 def _doc(op_list: list) -> dict:
-    return {"protocol_version": 1, "target_format": "kicad", "ops": op_list}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": op_list}
 
 
 # Hand-built known-valid base documents (guarded by test_base_docs_are_valid).
@@ -70,7 +70,7 @@ _CORE_OPS_DOC = [
     {"op": "add_junction", "at": [2400, 850]},
     {"op": "add_no_connect", "pin": "R1.2"},
     {"op": "add_net_label", "name": "CLK", "at": "R1.1", "scope": "global",
-     "orientation": 90},
+     "rotation": 90},
     {"op": "place_power_port", "lib_id": "power:GND", "net_name": "GND",
      "at": [100, 100]},
     {"op": "place_gnd", "at": "C1.2"},
@@ -317,7 +317,7 @@ def test_unhashable_enum_slot_values_return_operrors():
     place = {"op": "place_component", "lib_id": "a", "designator": "b",
              "x_mil": 0, "y_mil": 0}
     docs = [
-        {"protocol_version": 1, "target_format": ["kicad"], "ops": []},
+        {"protocol_version": 2, "target_format": ["kicad"], "ops": []},
         _doc([{"op": ["place_component"]}]),
         _doc([dict(place, rotation=[90])]),
         _doc([dict(place, mirror={"a": 1})]),

@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from akcli.errors import AkcliError
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 from akcli.writers import instances
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
@@ -214,12 +214,29 @@ def test_write_instance_creates_reference_property_when_missing():
 # --------------------------------------------------------------------------- #
 # deterministic_uuid
 # --------------------------------------------------------------------------- #
+def test_deterministic_uuid_values_are_pinned():
+    """Hard-pins the ACTUAL uuid strings, not just stability.
+
+    The seed string is ``f"{designator}:{op_index}"`` — including the
+    historical ``:0`` suffix.  Any refactor of ``deterministic_uuid`` (e.g.
+    dropping the vestigial ``op_index`` parameter) MUST keep producing these
+    exact values: a changed seed re-identifies every node in every existing
+    ``.kicad_sch``, so the next re-apply duplicates the whole document.
+    """
+    assert instances.deterministic_uuid(ROOT_UUID, "R3") \
+        == "6a9ce664-198e-5668-b2cf-c065e8750fd0"
+    assert instances.deterministic_uuid(ROOT_UUID, "wire:100:200:300:200") \
+        == "4d3c7326-5e43-560a-a3ba-bef57f1cace4"
+    # non-canonical namespace fallback (DNS-hashed) is part of the contract
+    assert instances.deterministic_uuid("not-a-uuid", "R3") \
+        == "4cb993f1-26a3-5546-9d50-5dd71317a7eb"
+
+
 def test_deterministic_uuid_stable_and_distinct():
-    a = instances.deterministic_uuid(ROOT_UUID, "R3", 0)
-    b = instances.deterministic_uuid(ROOT_UUID, "R3", 0)
+    a = instances.deterministic_uuid(ROOT_UUID, "R3")
+    b = instances.deterministic_uuid(ROOT_UUID, "R3")
     assert a == b                                   # idempotent
-    assert a != instances.deterministic_uuid(ROOT_UUID, "R3", 1)   # op index matters
-    assert a != instances.deterministic_uuid(ROOT_UUID, "R4", 0)   # designator matters
+    assert a != instances.deterministic_uuid(ROOT_UUID, "R4")   # designator matters
     # canonical UUID string
     import uuid as _u
 
@@ -228,8 +245,8 @@ def test_deterministic_uuid_stable_and_distinct():
 
 def test_deterministic_uuid_non_uuid_namespace():
     # A non-canonical sheet id still yields a stable, valid UUID.
-    a = instances.deterministic_uuid("not-a-uuid", "R3", 0)
-    b = instances.deterministic_uuid("not-a-uuid", "R3", 0)
+    a = instances.deterministic_uuid("not-a-uuid", "R3")
+    b = instances.deterministic_uuid("not-a-uuid", "R3")
     assert a == b
     import uuid as _u
 

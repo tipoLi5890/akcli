@@ -141,7 +141,7 @@ def test_draw_writes_escaped_lib_id(tmp_path):
     assert main(["new", str(board)]) == 0
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "place_component", "lib_id": f"lib:{name_raw}",
                  "designator": "D1", "x_mil": 1000, "y_mil": 1000}],
     }))

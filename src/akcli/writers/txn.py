@@ -35,7 +35,7 @@ from pathlib import Path
 
 from .. import journal as _journal
 from ..errors import AkcliError, fail
-from ..readers import sexpr
+from .. import sexpr
 from ..report import Severity
 from ..safety import MAX_FILE_BYTES, refuse_if_gui_locked
 from . import atomic, connectivity, instances
@@ -79,7 +79,7 @@ class _FileRun:
     doc: sexpr.SNode
     original: str
     snap_sha: str
-    ctx: dict
+    ctx: "_kw.ExecCtx"
     inst_path: str
     text_out: str = ""
     findings: list = field(default_factory=list)

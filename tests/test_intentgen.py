@@ -256,8 +256,9 @@ def test_generate_structure_and_order(tmp_path, libs):
 
 def test_generate_is_structurally_valid(tmp_path, libs):
     doc = _gen(tmp_path, libs, _design(_NETS, _COMPONENTS))
-    prepared, errs = ops.prepare_oplist(doc)
-    assert errs == []
+    prep = ops.prepare_oplist(doc)
+    prepared, errs = prep.doc, prep.errors
+    assert prep.ok, errs
     assert prepared["ops"]
 
 
@@ -288,8 +289,9 @@ def test_generate_grouped(tmp_path, libs):
         layout={"group": "BLOCK", "origin": [2000, 3000]}))
     assert doc["groups"] == {"BLOCK": {"origin": [2000, 3000]}}
     assert all(o.get("group") == "BLOCK" for o in doc["ops"])
-    prepared, errs = ops.prepare_oplist(doc)
-    assert errs == []
+    prep = ops.prepare_oplist(doc)
+    prepared, errs = prep.doc, prep.errors
+    assert prep.ok, errs
     # group-local -> absolute translation happened
     px = [o["x_mil"] for o in prepared["ops"]
           if o.get("op") == "place_component"]

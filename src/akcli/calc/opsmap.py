@@ -1,7 +1,7 @@
 """calc → op-list bridge: turn a computed network into `place_component` ops.
 
 `akcli calc <name> ... --ops out.json` runs the calculator, then emits a
-ready-to-edit op-list (protocol_version 1) placing the computed parts with
+ready-to-edit op-list placing the computed parts with
 their **standard E-series values** already filled in. Coordinates are a
 simple vertical strip — move them where they belong; `akcli plan` validates
 before any write.
@@ -12,6 +12,7 @@ table below is the contract.
 
 from __future__ import annotations
 
+from ..contract import PROTOCOL_VERSIONS
 from .registry import CalcError
 from .si import fmt_eng
 
@@ -127,7 +128,7 @@ def to_oplist(calc_name: str, envelope: dict) -> dict:
             "value": value,
         } for idx, (lib_id, ref, value) in enumerate(parts)]
     return {
-        "protocol_version": 1,
+        "protocol_version": PROTOCOL_VERSIONS["oplist"],
         "target_format": "kicad",
         "target_file": "<board.kicad_sch>",
         "meta": {

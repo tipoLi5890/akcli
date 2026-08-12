@@ -118,7 +118,7 @@ akcli-schematic-authoring skill):
 
 ```json
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "target_format": "kicad",
   "target_file": "board.kicad_sch",
   "ops": [

@@ -22,10 +22,13 @@ from pathlib import Path
 
 import pytest
 
+from akcli import ops as ops_mod
 from akcli.errors import AkcliError
-from akcli.readers import kicad_lib, sexpr
+from akcli.readers import kicad_lib
+from akcli.sexpr import parser as sexpr
 from akcli.report import Severity
-from akcli.writers import connectivity, geometry
+from akcli.writers import connectivity
+from akcli.geometry import transform as geometry
 from akcli.writers import kicad as kw
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
@@ -42,7 +45,7 @@ def _copy(tmp_path: Path) -> Path:
     return tgt
 
 
-def _oplist(*ops, protocol=1, target="kicad") -> dict:
+def _oplist(*ops, protocol=ops_mod.PROTOCOL_VERSION, target="kicad") -> dict:
     return {"protocol_version": protocol, "target_format": target, "ops": list(ops)}
 
 
@@ -288,7 +291,7 @@ def test_apply_with_backup_dir(tmp_path):
 def test_protocol_major_mismatch_raises(tmp_path):
     tgt = _copy(tmp_path)
     with pytest.raises(AkcliError) as ei:
-        kw.apply(_oplist(protocol=2), str(tgt), apply=True)
+        kw.apply(_oplist(protocol=ops_mod.PROTOCOL_VERSION + 1), str(tgt), apply=True)
     assert ei.value.code == "PROTOCOL_MISMATCH"
 
 

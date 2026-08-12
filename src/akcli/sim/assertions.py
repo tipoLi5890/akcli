@@ -47,6 +47,8 @@ ngspice; ``parse_meas_output`` reads them back from the engine's
 
 from __future__ import annotations
 
+from .. import contract
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -55,7 +57,7 @@ from pathlib import Path
 from ..errors import AkcliError, fail
 from ..report import Finding, Severity
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = contract.PROTOCOL_VERSIONS["sim"]
 
 SIM_ASSERT_FAIL = "SIM_ASSERT_FAIL"
 SIM_MEAS_FAILED = "SIM_MEAS_FAILED"

@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from akcli.calc import CALCS
+from akcli.ops import PROTOCOL_VERSION
 from akcli.calc.opsmap import MAPPABLE
 from akcli.webui import page
 from akcli.webui.server import (
@@ -254,7 +255,7 @@ def test_calc_ops_export(env):
     port, *_ = env
     status, body, _ = _get(port, "/api/ops?name=led&vs=5&vf=2&i=10m")
     doc = json.loads(body)
-    assert status == 200 and doc["protocol_version"] == 1
+    assert status == 200 and doc["protocol_version"] == PROTOCOL_VERSION
     assert [o["op"] for o in doc["ops"]] == ["place_led_indicator"]
     from akcli.ops import expand_macros
     assert any(o.get("lib_id") == "Device:LED"
@@ -366,7 +367,7 @@ def _overlap_sch(tmp_path: Path) -> Path:
         '(kicad_sch (version 20231120) (generator "akcli") '
         '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
     kw.apply(
-        {"protocol_version": 1, "target_format": "kicad", "ops": [
+        {"protocol_version": 2, "target_format": "kicad", "ops": [
             {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
              "x_mil": 2000, "y_mil": 2000},
             {"op": "place_component", "lib_id": "Device:R", "designator": "R2",

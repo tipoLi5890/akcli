@@ -25,9 +25,9 @@ import os
 from pathlib import Path
 
 from .. import model, netbuild, units
-from ..errors import AkcliError, fail
+from ..errors import fail
 from ..kicad_escape import unescape_string
-from ..writers import geometry
+from ..geometry import transform as geometry
 from ..model import (
     Component,
     NetLabel,
@@ -41,7 +41,9 @@ from ..model import (
 from ..model import BusEntry as MBusEntry
 from ..model import Footprint as MFootprint
 from ..model import Junction as MJunction
-from . import kicad_lib, sexpr
+from .. import sexpr
+from ..sexpr import query as _sq
+from . import kicad_lib
 from .kicad_lib import _read_text
 
 __all__ = ["read_sch", "read_pcb", "read_primitives", "read_embedded_library"]
@@ -52,29 +54,10 @@ def _mm_to_mil(mm: float) -> float:
     return units.nm_to_mil(units.mm_to_nm(mm))
 
 
-def _av(node: sexpr.SNode | None, idx: int) -> str | None:
-    """Atom value of child ``idx`` (or ``None``)."""
-    if node is not None and node.children and 0 <= idx < len(node.children):
-        c = node.children[idx]
-        if c.is_atom:
-            return c.value
-    return None
-
-
-def _fnum(node: sexpr.SNode | None, idx: int, default: float = 0.0) -> float:
-    v = _av(node, idx)
-    if v is None:
-        return default
-    try:
-        return float(v)
-    except ValueError:
-        # Corrupt numeric field (bad merge, disk damage, hand edit): surface a
-        # structured parse error instead of a raw ValueError traceback, so the
-        # CLI's JSON envelope contract holds for malformed inputs too.
-        raise AkcliError(
-            "KICAD_SEXPR_BAD_NUMBER",
-            f"malformed number {v!r} in ({node.tag} ...)"
-            if node is not None else f"malformed number {v!r}") from None
+# The ONE atom/number accessor pair lives in sexpr.query (rank 30); these
+# module-local aliases keep this file's 60+ call sites unchanged.
+_av = _sq.atom_value
+_fnum = _sq.fnum
 
 
 # ---------------------------------------------------------------------------
@@ -118,29 +101,8 @@ def _is_power(lib_id: str, raw: dict[str, sexpr.SNode]) -> bool:
 # ---------------------------------------------------------------------------
 # instance transform
 # ---------------------------------------------------------------------------
-def _pin_world(
-    lx_mil: float,
-    ly_mil: float,
-    px_mil: float,
-    py_mil: float,
-    rot_deg: int,
-    mirror: str,
-) -> tuple[float, float]:
-    """World coords (mil, +Y down) of a symbol-local pin offset.
-
-    Delegates to :func:`writers.geometry.transform_point` — the single,
-    eeschema-verified transform (library +Y-up flip, then rotate-then-mirror;
-    see that module's docstring and ``tests/test_kicad_parity.py``). The
-    reader used to keep its own mirror-then-rotate copy, which disagreed with
-    both the writer and eeschema on part of the rot × mirror matrix. Math is
-    exact in integer nanometres; a non-right angle is snapped to the nearest
-    90° (eeschema only stores right angles for symbol instances).
-    """
-    local = (units.mil_to_nm(lx_mil), -units.mil_to_nm(ly_mil))
-    origin = (units.mil_to_nm(px_mil), units.mil_to_nm(py_mil))
-    rot = (round(rot_deg / 90) * 90) % 360
-    wx, wy = geometry.transform_point(local, rot, mirror, origin)
-    return units.nm_to_mil(wx), units.nm_to_mil(wy)
+# Hoisted to geometry.point_world_mil (rank 40); alias keeps ~15 call sites.
+_pin_world = geometry.point_world_mil
 
 
 def _flag(sym: sexpr.SNode, tag: str, default: bool) -> bool:
@@ -202,7 +164,7 @@ def _placed_symbols(root: sexpr.SNode) -> list[sexpr.SNode]:
 def _build(root: sexpr.SNode) -> tuple[list[Component], NetPrimitives]:
     """Single-file build (no sheet recursion) — see :func:`_build_hierarchy`."""
     components: list[Component] = []
-    prims = NetPrimitives()
+    prims = NetPrimitives(eeschema_naming=True)
     _build_file(root, components, {}, prims, sheet="", want_path=None,
                 warnings=[])
     return components, prims
@@ -386,13 +348,14 @@ def _collect_wires_labels(
         )
 
     # local / global / hierarchical labels -> net names. A hierarchical label
-    # names its net sheet-LOCALLY and additionally emits a synthetic "hier"
+    # names its net sheet-LOCALLY (at eeschema's HIER_LABEL driver priority,
+    # below a local label) and additionally emits a synthetic "hier"
     # connector that pairs with the matching sheet pin on the PARENT (the
     # connector text is unique per sheet instance, so nothing else merges).
     for tag, scope in (
         ("label", "local"),
         ("global_label", "global"),
-        ("hierarchical_label", "local"),
+        ("hierarchical_label", "hier_label"),
     ):
         for lb in root.find_all(tag):
             text = _av(lb, 1)
@@ -549,7 +512,7 @@ def read_sch(path: os.PathLike | str) -> Schematic:
     root = _parse_root(path, "kicad_sch")
     root_uuid = _av(root.find("uuid"), 1) or ""
     components: list[Component] = []
-    prims = NetPrimitives()
+    prims = NetPrimitives(eeschema_naming=True)
     sheet_names: list[str] = []
     warnings: list[str] = []
     sheet_paths: dict[str, str] = {}

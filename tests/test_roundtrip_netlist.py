@@ -44,7 +44,7 @@ BLANK_SHEET = (
     '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n'
 )
 
-IDENTITY = {"protocol_version": 1, "target_format": "kicad", "ops": []}
+IDENTITY = {"protocol_version": 2, "target_format": "kicad", "ops": []}
 
 
 def _netlist(path: Path) -> set[tuple[str | None, frozenset]]:
@@ -170,7 +170,7 @@ def _generate(rng: random.Random):
 def test_seeded_oplist_netlist_matches_prediction(seed, tmp_path):
     rng = random.Random(seed)
     ops_list, partition, names = _generate(rng)
-    doc = {"protocol_version": 1, "target_format": "kicad", "ops": ops_list}
+    doc = {"protocol_version": 2, "target_format": "kicad", "ops": ops_list}
 
     dry = tmp_path / "dry.kicad_sch"
     wet = tmp_path / "wet.kicad_sch"

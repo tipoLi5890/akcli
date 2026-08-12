@@ -13,6 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from ..contract import PROTOCOL_VERSIONS
 from ..errors import EXIT
 from ._shared import (
     _draw_exit,
@@ -42,12 +43,18 @@ def _bom_cfg(args, path) -> tuple[tuple[str, ...], int, float]:
             float(tbl.get("extended_fee", 3.0)))
 
 
-# Catalog depth for an *exact*-MPN resolution (datasheet --resolve-mpn / the
-# standalone-MPN path). The jlcsearch mirror ranks longer/marketing variants
-# ahead of a short generic MPN, so a depth of 10 could push the true exact
-# casefold match past the cut and mis-report the part as not-found; search wider
-# and let the exact-match filter pick it out.
-_MPN_RESOLVE_LIMIT = 100
+def _mpn_resolve_limit() -> int:
+    """Catalog depth for an *exact*-MPN resolution (the ONE policy).
+
+    Owned by :mod:`akcli.parts.bom_report`; read through this lazy accessor so
+    importing the command module never drags the networked ``parts`` package
+    into an offline run. ``jlc search --category`` over-fetches with the same
+    idiom: the jlcsearch mirror ranks longer/marketing variants ahead of a
+    short generic MPN, so a shallow search would push the true exact casefold
+    match past the cut and mis-report the part as not-found.
+    """
+    from ..parts.bom_report import MPN_RESOLVE_LIMIT
+    return MPN_RESOLVE_LIMIT
 
 
 def _jlc_price(p) -> str:
@@ -113,9 +120,9 @@ def _cmd_jlc_search(args: argparse.Namespace) -> int:
     category = getattr(args, "category", None)
     user_limit = getattr(args, "limit", None) or 20
     # jlcsearch has no server-side category parameter, so --category is a
-    # client-side post-filter: over-fetch first (the _MPN_RESOLVE_LIMIT idiom)
+    # client-side post-filter: over-fetch first (the MPN_RESOLVE_LIMIT idiom)
     # so the filtered result is not starved by the API's own truncation.
-    fetch_limit = max(user_limit, _MPN_RESOLVE_LIMIT) if category else user_limit
+    fetch_limit = max(user_limit, _mpn_resolve_limit()) if category else user_limit
     from ..parts import search as parts_search  # lazy: keeps network out of offline paths
     try:
         results = parts_search.search(query, limit=fetch_limit,
@@ -153,14 +160,15 @@ def _easyeda_enrich(lcsc: str):
 
 
 def _enrich(lcsc: str):
-    """Resolve EasyEDA enrichment via the top-level ``cli`` module.
+    """Resolve EasyEDA enrichment through THIS module's patch seam.
 
-    ``cli`` re-exports ``_easyeda_enrich`` and tests patch ``cli._easyeda_enrich``
-    (the documented offline seam); routing the handler calls through ``cli``
-    keeps that patch effective after the command-module split.
+    ``_easyeda_enrich`` is late-bound on purpose: tests patch
+    ``akcli.commands.jlc._easyeda_enrich`` (the offline seam) and the handler
+    picks the patch up at call time.  The seam used to live on ``cli`` — a
+    command module reaching back into the dispatcher was the layering
+    inversion this indirection removes.
     """
-    from .. import cli
-    return cli._easyeda_enrich(lcsc)
+    return _easyeda_enrich(lcsc)
 
 
 def _easyeda_lines(info) -> list[str]:
@@ -186,7 +194,7 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
     path = paths[0]
     multi = len(paths) > 1
     sch = _load_schematic(path)
-    from ..parts import bom_jlc, search as parts_search  # lazy: networked
+    from ..parts import bom_jlc, bom_report, search as parts_search  # lazy: networked
     qty = max(1, getattr(args, "qty", 1) or 1)
     prefixes, cfg_min_stock, extended_fee = _bom_cfg(args, path)
     min_stock = getattr(args, "min_stock", None) or cfg_min_stock
@@ -208,21 +216,13 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
         raise _ExitWith(EXIT["USAGE"],
                         "ERROR: --fix works on one schematic at a time")
     cache = parts_search.default_cache_dir()
+    want_alts = getattr(args, "alternates", False)
+    boards = ([(p.stem, _load_schematic(p)) for p in paths] if multi else None)
     try:
-        if multi:
-            boards = [(p.stem, _load_schematic(p)) for p in paths]
-            lines = bom_jlc.check_multi(
-                boards, min_stock=min_stock, qty=qty,
-                cache_dir=cache, no_part_prefixes=prefixes, offline=offline)
-        else:
-            lines = bom_jlc.check(
-                sch, min_stock=min_stock, qty=qty,
-                cache_dir=cache, no_part_prefixes=prefixes, offline=offline)
-        want_alts = getattr(args, "alternates", False)
-        if do_suggest or want_alts:
-            bom_jlc.suggest_parts(lines, cache_dir=cache,
-                                  include_risk=want_alts)
-            bom_jlc.basic_alternatives(lines, cache_dir=cache)
+        lines = bom_report.collect_lines(
+            sch, boards, min_stock=min_stock, qty=qty, cache=cache,
+            no_part_prefixes=prefixes, offline=offline,
+            suggest=do_suggest, alternates=want_alts)
     except parts_search.JlcNetworkError as exc:
         raise _ExitWith(EXIT["TOOL_MISSING"], f"ERROR: NETWORK: {exc.message}")
     if do_fix:
@@ -241,7 +241,8 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
             sys.stderr.write("--fix: nothing to fix (no suggestions)\n")
         else:
             from ..writers import kicad as kwriter
-            oplist = {"protocol_version": 1, "target_format": "kicad",
+            oplist = {"protocol_version": PROTOCOL_VERSIONS["oplist"],
+                      "target_format": "kicad",
                       "target_file": path.name, "ops": ops}
             findings: list = []
             from .. import journal as _journal
@@ -317,94 +318,22 @@ def _cmd_jlc_bom(args: argparse.Namespace) -> int:
             payload["lock_drift"] = drift
         _emit(_dumps(_stamp(payload)))
     else:
-        rows = [("REFS", "QTY", "NEED", "VALUE", "PART", "STATUS",
-                 "STOCK", "UNIT", "EXT", "B", "NOTE")]
-        for ln in sorted(lines, key=lambda x: x.refs[0]):
-            p = ln.part
-            rows.append((
-                ",".join(ln.refs[:4]) + ("…" if len(ln.refs) > 4 else ""),
-                str(ln.qty),
-                str(ln.need),
-                (ln.value or "-")[:16],
-                ln.lcsc or ln.mpn or "-",
-                ln.status,
-                str(p.stock) if p else "-",
-                f"${ln.unit_price:.4f}" if ln.unit_price is not None else "-",
-                f"${ln.ext_price:.2f}" if ln.ext_price is not None else "-",
-                ("B" if p.basic else "P" if p.preferred else "-") if p else "-",
-                (f"→ {ln.suggestion.lcsc} {ln.suggestion.mpn} "
-                 f"(stock {ln.suggestion.stock}"
-                 f"{', Basic' if ln.suggestion.basic else ''}) — "
-                 "--fix writes it" if ln.suggestion else ln.note),
-            ))
+        rows = bom_report.table_rows(lines)
         widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]) - 1)]
         _emit("\n".join(
             "  ".join(c.ljust(w) for c, w in zip(r[:-1], widths)) + "  " + r[-1]
             for r in rows).rstrip())
-        cls = agg.get("classes") or {}
-        summary = (f"{agg['lines']} line(s): {agg['ok']} ok, "
-                   f"{agg['problems']} problem(s), "
-                   f"{agg['no_part_id']} without a part id")
-        if agg.get("mismatches"):
-            summary += f" · {agg['mismatches']} C-number MISMATCH(ES)"
-        extra = [f"{cls.get(k, 0)} {k}" for k in ("dnp", "external", "no-part")
-                 if cls.get(k)]
-        if extra:
-            summary += " · " + ", ".join(extra)
-        if agg.get("fitted_coverage") is not None:
-            summary += f" · fitted coverage {agg['fitted_coverage']:.0%}"
-        if offline and agg.get("unverified"):
-            summary += f" · {agg['unverified']} unverified (offline)"
-        if agg.get("extended_lines"):
-            summary += (f" · {agg['basic_lines']}B/{agg['extended_lines']}E "
-                        f"lines (ext. feeder fees ≈ ${agg['extended_fee_est']:.2f})")
+        summary = bom_report.summary_text(agg, qty=qty, offline=offline)
         if drift is not None:
             for d in drift:
                 _emit(f"  DRIFT {d['kind']}: {d['refs']} — {d['detail']}")
             _emit(f"lock drift: {len(drift)} change(s) vs {against}"
                   if drift else f"lock drift: none vs {against}")
-        if agg["priced_lines"]:
-            summary += (f" · est. parts cost ${agg['est_cost']:.2f} "
-                        f"for {qty} board(s)"
-                        + (f" ({agg['priced_lines']}/{agg['lines']} lines priced)"
-                           if agg["priced_lines"] < agg["lines"] else ""))
         sys.stdout.flush()          # keep the table above the stderr summary
         sys.stderr.write(summary + "\n")
     if (agg["problems"] or drift) and not getattr(args, "exit_zero", False):
         return EXIT["FINDINGS"]
     return EXIT["OK"]
-
-
-def _resolve_mpn_only_rows(rows: list, cache) -> None:
-    """In-place: pin a C-number onto ``no-lcsc`` rows via exact MPN match.
-
-    One catalog search per *distinct* MPN (casefold-deduped across BOM
-    refs) — misses are rewritten to ``not-found`` with the nearest-MPN
-    hint, same as the standalone-MPN lookup path. Network errors propagate
-    (``JlcNetworkError``) so the caller can map them to exit 7.
-    """
-    from ..parts import search as parts_search  # lazy: networked
-
-    pending = [r for r in rows if r.status == "no-lcsc" and r.mpn]
-    by_mpn: dict[str, list] = {}
-    for r in pending:
-        by_mpn.setdefault(r.mpn.casefold(), []).append(r)
-    for key, group in by_mpn.items():
-        mpn = group[0].mpn
-        results = parts_search.search(mpn, limit=_MPN_RESOLVE_LIMIT,
-                                      cache_dir=cache)
-        exact = [p for p in results if p.mpn.casefold() == key]
-        exact.sort(key=lambda p: (p.stock > 0, p.basic, p.stock), reverse=True)
-        for r in group:
-            if exact:
-                r.lcsc = exact[0].lcsc
-                r.mpn = exact[0].mpn
-                r.status = ""
-                r.note = ""
-            else:
-                near = f" (nearest: {results[0].mpn})" if results else ""
-                r.status = "not-found"
-                r.note = "no exact MPN match" + near
 
 
 def _cmd_jlc_datasheet(args: argparse.Namespace) -> int:
@@ -420,7 +349,8 @@ def _cmd_jlc_datasheet(args: argparse.Namespace) -> int:
         raise _ExitWith(EXIT["USAGE"],
                         "ERROR: give a C-number (C2984661), an MPN, or a "
                         "schematic path")
-    from ..parts import datasheet as ds  # lazy: networked
+    from ..parts import bom_report  # lazy: networked
+    from ..parts import datasheet as ds
     from ..parts import easyeda
     from ..parts import search as parts_search
     cache = parts_search.default_cache_dir()
@@ -432,15 +362,15 @@ def _cmd_jlc_datasheet(args: argparse.Namespace) -> int:
         rows = ds.rows_for_schematic(sch)
         if getattr(args, "resolve_mpn", False):
             try:
-                _resolve_mpn_only_rows(rows, cache)
+                bom_report.resolve_mpn_only_rows(rows, cache)
             except parts_search.JlcNetworkError as exc:
                 raise _ExitWith(EXIT["TOOL_MISSING"],
                                 f"ERROR: NETWORK: {exc.message}")
     else:
         # MPN: exact match against the catalog, prefer in-stock/Basic depth
         try:
-            results = parts_search.search(target, limit=_MPN_RESOLVE_LIMIT,
-                                          cache_dir=cache)
+            results = parts_search.search(
+                target, limit=bom_report.MPN_RESOLVE_LIMIT, cache_dir=cache)
         except parts_search.JlcNetworkError as exc:
             sys.stderr.write(f"ERROR: NETWORK: {exc.message}\n")
             return EXIT["TOOL_MISSING"]
@@ -557,78 +487,15 @@ _ADD_EXIT = {
 }
 
 
-def _read_symbol_name(kicad_sym_path: str) -> str | None:
-    """Read the first symbol id from a produced ``.kicad_sym`` (don't guess from files)."""
-    try:
-        from ..readers import kicad_lib  # lazy
-        lib = kicad_lib.read(kicad_sym_path)
-    except Exception:
-        return None
-    return lib.symbols[0].name if lib.symbols else None
-
-
-def _read_symbol_value(kicad_sym_path: str) -> str | None:
-    """Read the first symbol's ``Value`` property from a produced ``.kicad_sym``.
-
-    The converter writes the part's actual value there (``10k``, ``100n``) when
-    EasyEDA carries one, and falls back to the MPN otherwise — so this is the
-    authoritative Value for a placement, ahead of the enrichment MPN/title.
-    """
-    try:
-        from ..readers import sexpr  # lazy
-        root = sexpr.parse(Path(kicad_sym_path).read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    for sym in root.find_all("symbol"):
-        for prop in sym.find_all("property"):
-            kids = prop.children or []
-            if len(kids) >= 3 and kids[1].value == "Value":
-                val = (kids[2].value or "").strip()
-                return val or None
-    return None
-
-
 def _build_place_oplist(result, args, value: str | None) -> dict | None:
-    """Build a one-op ``place_component`` op-list from a successful conversion.
+    """Thin arg-unpacking wrapper over :func:`akcli.parts.place_oplist.build_place_oplist`."""
+    from ..parts import place_oplist
 
-    ``lib_id``'s symbol name is read from the produced ``.kicad_sym`` (the converter
-    names by component name, not the C-number); the footprint id comes from the
-    produced ``.kicad_mod`` stem. Returns ``None`` if no symbol artifact was produced.
-    """
-    from ..ops import PROTOCOL_VERSION
-
-    lib_name = getattr(args, "lib_name", None) or "akcli"
-    sym_art = next((a for a in result.artifacts if a.endswith(".kicad_sym")), None)
-    if sym_art is None:
-        return None
-    sym_name = _read_symbol_name(sym_art)
-    if not sym_name:
-        return None
-    fp_art = next((a for a in result.artifacts if a.endswith(".kicad_mod")), None)
-    fp_name = Path(fp_art).stem if fp_art else sym_name
-
-    # The converted symbol's own Value wins: it carries the part's actual value
-    # ("10k") when EasyEDA has one, where the enrichment fallback only knows the
-    # MPN. Keeps the placed instance's Value consistent with the library symbol.
-    value = _read_symbol_value(sym_art) or value
-
-    fp_lib = getattr(args, "footprint_lib", None) or "footprint"
-    x_mil, y_mil = args.at
-    op: dict = {
-        "op": "place_component",
-        "lib_id": f"{lib_name}:{sym_name}",
-        "designator": args.designator,
-        "x_mil": float(x_mil),
-        "y_mil": float(y_mil),
-        "footprint": f"{fp_lib}:{fp_name}",
-    }
-    if value:
-        op["value"] = value
-    return {
-        "protocol_version": PROTOCOL_VERSION,
-        "target_format": "kicad",
-        "ops": [op],
-    }
+    return place_oplist.build_place_oplist(
+        result,
+        lib_name=getattr(args, "lib_name", None) or "akcli",
+        footprint_lib=getattr(args, "footprint_lib", None) or "footprint",
+        designator=args.designator, at=args.at, value=value)
 
 
 def _cmd_jlc_add(args: argparse.Namespace) -> int:

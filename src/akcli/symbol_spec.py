@@ -38,6 +38,8 @@ electrical tip toward the body* — the same convention as
 
 from __future__ import annotations
 
+from . import contract
+
 import json
 import math
 import os
@@ -62,7 +64,7 @@ __all__ = [
     "layout",
 ]
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = contract.PROTOCOL_VERSIONS["symbol-spec"]
 
 #: The four body edges a pin may be attached to. Never inferred from the name.
 SIDES: tuple[str, ...] = ("left", "right", "top", "bottom")

@@ -61,6 +61,10 @@ akcli net board.kicad_sch GND --json
 # (b) List ALL nets and look for duplicates / near-names (GND vs GND_2, N$-auto names)
 akcli net board.kicad_sch
 akcli net board.kicad_sch --json | jq '.total'   # same envelope + net shape as `akcli nets`
+akcli net board.kicad_sch --why R1.2             # pin -> net, attachment kind, nearest name sources
+# An unexpected net NAME (your label shows up as an alias) is usually not a
+# wiring bug: canonical naming follows eeschema's driver priority — see the
+# akcli-net-naming skill before rewiring anything.
 
 # (c) Check the component side: which net does each pin of U3 actually land on?
 akcli component board.kicad_sch U3
@@ -204,7 +208,7 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   `INSTANCE_REFS_REQUIRED` — the target sheet is instantiated more than once,
   so a scalar designator would annotate every instance with one refdes; the
   error lists the instance paths — copy them into
-  `instance_designators`/`instance_references` maps. `PROJECT_ROOT_AMBIGUOUS`
+  `instance_designators` maps. `PROJECT_ROOT_AMBIGUOUS`
   — several roots instantiate the target and the net gate refuses to guess
   the tree: pass `--root FILE` (or `--flat` to accept the truncated
   single-file view). `PROJECT_ROOT_MISMATCH` (exit 2) — your `--root`'s tree

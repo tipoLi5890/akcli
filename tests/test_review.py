@@ -25,7 +25,7 @@ _SCHEMA = json.loads((Path(__file__).parent.parent / "schemas" /
 
 
 def _oplist(*ops):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(ops)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(ops)}
 
 
 def _seed_review_sheet(tmp_path: Path) -> Path:

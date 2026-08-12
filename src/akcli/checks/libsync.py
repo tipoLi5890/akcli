@@ -30,7 +30,8 @@ from pathlib import Path
 from .. import model, relink
 from ..errors import AkcliError
 from ..readers import kicad as _krd
-from ..readers import kicad_lib, sexpr
+from .. import sexpr
+from ..readers import kicad_lib
 from ..readers.kicad_lib import _read_text
 from ..report import Finding, Severity, anchor
 

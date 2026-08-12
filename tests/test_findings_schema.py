@@ -60,7 +60,7 @@ def test_datasheet_backed_requires_datasheet_evidence():
     """The schema itself refuses a datasheet_backed claim without evidence."""
     base = {"code": "REVIEW_X", "severity": "warning", "message": "m",
             "refs": [], "confidence": "datasheet_backed"}
-    doc = {"schema_version": "1.3", "metadata": {},
+    doc = {"schema_version": "2.0", "metadata": {},
            "findings": [dict(base, evidence={"source": "datasheet"})]}
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(doc, _SCHEMA)          # evidence.datasheet missing

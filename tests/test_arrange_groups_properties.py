@@ -44,7 +44,7 @@ def _seed_grouped(tmp_path: Path, *, interleaved: bool = True) -> Path:
         {"op": "add_net_label", "name": "MIDB", "at": "R4.1"},
         {"op": "add_net_label", "name": "GND", "at": "R4.2"},
     ]
-    d = {"protocol_version": 1, "target_format": "kicad",
+    d = {"protocol_version": 2, "target_format": "kicad",
          "groups": {"block_a": {"origin": [0, 0]}, "block_b": {"origin": [0, 0]}},
          "ops": ops_list}
     rs = kw.apply(ops.resolve_groups(d), str(tgt), apply=True, sources=[DEVICE])
@@ -88,7 +88,7 @@ def test_arrange_groups_frames_refreshes_borders(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["applied"] is True
     assert payload["frames_refreshed"] == 2
-    from akcli.groupframe import group_report
+    from akcli.arrange.frames import group_report
     assert all(r["has_frame"] for r in group_report(tgt))
 
 
@@ -110,7 +110,7 @@ def test_layout_lint_frame_stale_fires_and_clears(tmp_path):
     assert layout.LAYOUT_FRAME_STALE not in {f.code for f in layout.run(tgt)}
 
     # drag one member out of its frame
-    mv = {"protocol_version": 1, "target_format": "kicad", "ops": [
+    mv = {"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "move_component", "designator": "R2",
          "x_mil": 3500, "y_mil": 3500, "carry_labels": True}]}
     rs = kw.apply(mv, str(tgt), apply=True, sources=[DEVICE])
@@ -125,7 +125,7 @@ def test_layout_lint_frame_stale_fires_and_clears(tmp_path):
 
 def test_layout_lint_textbox_over_symbol(tmp_path):
     tgt = _seed_grouped(tmp_path, interleaved=False)
-    box = {"protocol_version": 1, "target_format": "kicad", "ops": [
+    box = {"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "add_text_box", "text": "note", "at": [900, 900],
          "size": [400, 400]}]}
     rs = kw.apply(box, str(tgt), apply=True)
@@ -134,7 +134,7 @@ def test_layout_lint_textbox_over_symbol(tmp_path):
     assert "LAYOUT_TEXTBOX_OVER_SYMBOL" in codes  # covers R1 at (1000,1000)
 
     # move it clear -> lint gone
-    rs = kw.apply({"protocol_version": 1, "target_format": "kicad", "ops": [
+    rs = kw.apply({"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "delete_object", "match": {"kind": "text_box"}},
         {"op": "add_text_box", "text": "note", "at": [8000, 8000],
          "size": [400, 400]}]}, str(tgt), apply=True)

@@ -117,7 +117,7 @@ def test_cli_validate_roundtrip(tmp_path, capsys):
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
                    '(uuid "77777777-8888-9999-aaaa-bbbbbbbbbbbb") (paper "A4"))\n')
-    rs = kw.apply({"protocol_version": 1, "target_format": "kicad", "ops": [
+    rs = kw.apply({"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
          "x_mil": 2000, "y_mil": 1000, "value": "10k"},
         {"op": "add_net_label", "name": "SIG", "at": "R1.2"},
@@ -190,7 +190,7 @@ def _seed_divider_sheet(tmp_path):
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
                    '(uuid "88888888-9999-aaaa-bbbb-cccccccccccc") (paper "A4"))\n')
-    rs = kw.apply({"protocol_version": 1, "target_format": "kicad", "ops": [
+    rs = kw.apply({"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
          "x_mil": 2000, "y_mil": 1000, "value": "10k"},
         {"op": "place_component", "lib_id": "Device:R", "designator": "R2",

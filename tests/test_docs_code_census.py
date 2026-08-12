@@ -103,6 +103,10 @@ _NOT_A_CODE = {
                                   # LLM candidates mint free-form REVIEW_* codes
                                   # by design (G4 only bans registered-rule
                                   # collisions)
+    "POWER_PIN", "SHEET_PIN",   # rungs of EESCHEMA's own driver-priority
+                                # ladder (mirrored in netbuild.py's comment),
+                                # quoted by docs/SPEC.md's naming-priority
+                                # row — eeschema enum names, not akcli codes
     "BOM_LCSC_MISMATCH",        # deliberately NOT a Finding: a BOM-line note
                                 # string (parts/bom_jlc.py) — docs describe it
                                 # as such; drop this entry if it is ever

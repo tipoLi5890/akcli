@@ -24,7 +24,7 @@ _BLANK = """(kicad_sch (version 20230121) (generator eeschema)
 )"""
 
 _OPS = {
-    "protocol_version": 1,
+    "protocol_version": 2,
     "target_format": "kicad",
     "ops": [{"op": "add_text", "text": "hello", "at": [1000, 1000]}],
 }

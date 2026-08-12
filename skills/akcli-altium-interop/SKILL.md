@@ -78,7 +78,7 @@ exit-1 failure rather than a quiet empty result.
 ## Getting designs OUT of Altium
 
 ```bash
-akcli read main.SchDoc --json > model.json        # full normalized model (schema_version "1.3")
+akcli read main.SchDoc --json > model.json        # full normalized model (schema_version "2.0")
 akcli net main.SchDoc --json > netlist.json       # structured netlist (stable_id per net)
 akcli export main.SchDoc --format protel -o board.net   # Altium/Protel .NET for other EDA tools
 akcli export main.SchDoc --format kicad -o board.net.kicad   # KiCad legacy eeschema netlist

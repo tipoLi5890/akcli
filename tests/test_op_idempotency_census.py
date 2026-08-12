@@ -27,7 +27,7 @@ project-specific parts) so this file runs without any real KiCad install,
 exactly like ``tests/test_macros2.py``'s ``_MIN_SYM``.
 
 The census assertion at the bottom is fail-closed: a future op added to
-``src/akcli/ops.py`` without a matching entry HERE (exercised or explicitly
+``src/akcli/opspec.py`` without a matching entry HERE (exercised or explicitly
 excluded with a reason) fails the suite.
 """
 
@@ -55,7 +55,7 @@ from ._cli_harness import blank_sheet, run_cli
 # readers/kicad_lib.py). One file can therefore serve every nickname below.
 #
 # `place_led_indicator` / `place_crystal` hardcode "Device:LED" /
-# "Device:Crystal" internally (ops.py `_expand_led_indicator` /
+# "Device:Crystal" internally (ops/macros.py `_expand_led_indicator` /
 # `_expand_crystal`), so this library must define bare symbols named "LED"
 # and "Crystal" for those macros to resolve at all.
 _SYM_LIB = """\
@@ -255,7 +255,7 @@ _CASES: dict[str, _Case] = {
         # "OLD_NET" -> "NEW_NET" transition to perform, on both passes.
         context=[_r("R1", 1000, 1000),
                  {"op": "add_net_label", "name": "OLD_NET", "at": "R1.1"}],
-        target={"op": "rename_net", "from": "OLD_NET", "to": "NEW_NET"},
+        target={"op": "rename_net", "old_name": "OLD_NET", "new_name": "NEW_NET"},
     ),
     "place_gnd": _Case(target={"op": "place_gnd", "at": [1000, 1000]}),
     "place_vcc": _Case(target={"op": "place_vcc", "at": [1500, 1000]}),
@@ -352,6 +352,11 @@ def test_apply_twice_is_byte_identical(op_name: str, tmp_path: Path,
 
     rc1, out1, err1 = run_cli(argv)
     assert rc1 == EXIT["OK"], f"{op_name}: first apply refused\n{out1}\n{err1}"
+    # A contained handler crash surfaces as an INTERNAL op error; make it
+    # unmissable here even if exit-code mapping ever softens (this census is
+    # the smoke gate for handler-signature refactors).
+    assert "INTERNAL" not in out1 + err1, \
+        f"{op_name}: handler crashed (INTERNAL)\n{out1}\n{err1}"
     once = target.read_bytes()
 
     rc2, out2, err2 = run_cli(argv)

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "2.0",
   "metadata": {
     "passive_pin_ratio": 0.75,
     "no_erc_suppressed": 0,
@@ -14,10 +14,10 @@
     {
       "code": "ERC_NET_ALIAS",
       "severity": "note",
-      "message": "net carries 2 explicit names (MID, VOUT); merged into one net by name (informational, not an error)",
+      "message": "net carries 2 explicit names (VOUT, MID); merged into one net by name (informational, not an error)",
       "refs": [
-        "MID",
-        "VOUT"
+        "VOUT",
+        "MID"
       ]
     },
     {
@@ -49,17 +49,17 @@
     {
       "code": "POWER_RAIL",
       "severity": "info",
-      "message": "rail 'MID': 3 consumer(s): C1, R1, R2",
+      "message": "rail 'VOUT': 3 consumer(s): C1, R1, R2",
       "refs": [
-        "MID"
+        "VOUT"
       ]
     },
     {
       "code": "POWER_RAIL_NO_SOURCE",
       "severity": "warning",
-      "message": "rail 'MID' has 3 consumer(s) (C1, R1, R2) but no source: nothing on it (or on the nets it reaches through series parts) is a power_out/output pin, a PWR_FLAG, or a connector/battery/test point — check that the supply is actually wired",
+      "message": "rail 'VOUT' has 3 consumer(s) (C1, R1, R2) but no source: nothing on it (or on the nets it reaches through series parts) is a power_out/output pin, a PWR_FLAG, or a connector/battery/test point — check that the supply is actually wired",
       "refs": [
-        "MID",
+        "VOUT",
         "C1",
         "R1",
         "R2"

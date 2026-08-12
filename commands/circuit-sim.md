@@ -10,6 +10,10 @@ Arguments: `$ARGUMENTS`
 - `--sim <sim.json>` is the assertion spec (stimuli, analyses, asserts). Without it, ask the
   user what behavior to verify, then author a minimal spec (see `docs/sim.md` for the schema).
 - `--deck-only` emits the SPICE deck without running — works with no ngspice installed.
+- Deck node names are the CANONICAL net names (eeschema driver priority: global >
+  power > local); a `.meas` written against an alias fails with "no such vector".
+  `--probe`/`--gnd` DO resolve aliases — check `akcli nets` first, or see the
+  `akcli-net-naming` skill.
 - `--sweep NAME=v1,v2,...` runs corner sweeps (component values or `temp=...`; repeatable).
 - `--gnd NET` names the SPICE ground node when it is not `GND`.
 

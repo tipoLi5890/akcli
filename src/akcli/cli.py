@@ -15,7 +15,7 @@ and delegates subcommand registration to one module per family under
 ``.commands`` (``query checks drawing calc jlc view``); shared helpers live in
 ``.commands._shared``. ``main()`` backfills global-flag defaults and maps
 handler exceptions to exit codes. A handful of names are re-exported here as
-stable test/patch seams (``_load_expected``, ``_easyeda_enrich``).
+stable test/patch seams (``_load_expected``).
 
 Conventions
 -----------
@@ -54,6 +54,7 @@ from .commands import sim as _sim_cmd
 from .commands import view as _view_cmd
 from .commands import _shared as _shared_mod
 from .commands._shared import _ExitWith
+from . import contract as _contract
 from .errors import (
     ERROR_CODES,
     EXIT,
@@ -66,7 +67,6 @@ from .ops import PROTOCOL_VERSION
 
 # Stable seams: tests reference/patch these on the ``cli`` module directly.
 from .commands.checks import _load_expected  # noqa: F401,E402
-from .commands.jlc import _easyeda_enrich  # noqa: F401,E402
 
 
 # --------------------------------------------------------------------------- #
@@ -319,11 +319,16 @@ def _emit_json_error(code: str, message: str, exit_code: int) -> None:
     ``EXIT`` table name (``USAGE``, ``UNSUPPORTED_FORMAT``, ...) or
     ``FILE_NOT_FOUND``. Skipped when the handler already emitted data, so a
     failure after partial output never yields two JSON documents.
+
+    ``akcli_version`` rides alongside the envelope's ``schema_version``: a bug
+    report pasted from an agent transcript is otherwise a code and a message
+    with no way to tell WHICH akcli produced them.
     """
     if _shared_mod._stdout_touched():
         return
     payload = {
-        "schema_version": "1",
+        "schema_version": _contract.SCHEMA_VERSIONS["envelope"],
+        "akcli_version": __version__,
         "error": {
             "code": code,
             "message": message,

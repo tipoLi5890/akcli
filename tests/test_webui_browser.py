@@ -57,7 +57,7 @@ def _overlap_target(tmp_path: Path) -> Path:
         '(kicad_sch (version 20231120) (generator "akcli") '
         '(uuid "11111111-2222-3333-4444-555555555555") (paper "A4"))\n')
     kw.apply(
-        {"protocol_version": 1, "target_format": "kicad", "ops": [
+        {"protocol_version": 2, "target_format": "kicad", "ops": [
             {"op": "place_component", "lib_id": "Device:R", "designator": "R1",
              "x_mil": 2000, "y_mil": 2000},
             {"op": "place_component", "lib_id": "Device:R", "designator": "R2",

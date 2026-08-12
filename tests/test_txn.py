@@ -26,7 +26,7 @@ def _sym_flags() -> list[str]:
 
 
 ROUTED_OPS = {
-    "protocol_version": 1,
+    "protocol_version": 2,
     "target_format": "kicad",
     "sheets": {"amp": {"file": "amp.kicad_sch"}},
     "ops": [
@@ -71,7 +71,7 @@ def test_undeclared_sheet_tag_is_refused(tmp_path, capsys):
     main_sch, _amp, _ = _setup(tmp_path, capsys)
     ops = tmp_path / "bad.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "add_text", "sheet": "nope", "at": [100, 100],
                  "text": "x"}]}), encoding="utf-8")
     assert _draw(main_sch, str(ops)) == EXIT["OPLIST"]
@@ -198,7 +198,7 @@ def test_undo_run_refuses_after_a_later_edit(tmp_path, capsys):
     # a later single-file edit changes amp: the swap would discard it
     later = tmp_path / "later.json"
     later.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "add_text", "at": [400, 400], "text": "later edit"}],
     }), encoding="utf-8")
     assert main(["draw", str(amp), "--ops", str(later), "--apply", "--no-erc",

@@ -35,7 +35,7 @@ def _copy_v8(tmp_path: Path, name: str = "board.kicad_sch") -> Path:
 def _mpn_ops(tmp_path: Path, mpn: str, name: str = "ops.json") -> Path:
     p = tmp_path / name
     p.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "target_file": "board.kicad_sch",
         "ops": [{"op": "set_component_parameters", "designator": "R1",
                  "parameters": {"MPN": mpn}}],
@@ -68,7 +68,7 @@ def test_new_draw_can_append_to_the_blank_sheet(tmp_path):
     assert main(["new", str(tgt)]) == EXIT["OK"]
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "target_file": "fresh.kicad_sch",
         "ops": [{"op": "place_decoupling", "x_mil": 4000, "y_mil": 2000,
                  "power_net": "+3V3", "designator": "C1"}],

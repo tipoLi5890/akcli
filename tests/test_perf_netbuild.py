@@ -31,7 +31,7 @@ from akcli.netbuild import (
     _on_seg_interior,
     build_nets,
 )
-from akcli.readers.sexpr import parse
+from akcli.sexpr.parser import parse
 from akcli.writers import connectivity
 
 ROOT_UUID = "8a000000-0000-4000-8000-000000000000"

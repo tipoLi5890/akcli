@@ -14,7 +14,7 @@ from pathlib import Path
 
 import jsonschema
 
-from akcli import cli
+from akcli import cli, ops
 from akcli.model import Component, Net, Pin, Schematic
 from akcli.review import diff as diffmod
 from akcli.review import engine, facts as fx, propose, topo, tree
@@ -257,7 +257,8 @@ def test_cli_propose_diff_tree(tmp_path, capsys, monkeypatch):
     capsys.readouterr()
     doc = json.loads(out.read_text(encoding="utf-8"))
     jsonschema.validate(doc, PROPOSALS_SCHEMA)
-    assert doc["proposals"][0]["oplist_draft"]["protocol_version"] == 1
+    assert (doc["proposals"][0]["oplist_draft"]["protocol_version"]
+            == ops.PROTOCOL_VERSION)
 
     # diff: fixed board (facts satisfied) vs original
     fixed, meta2 = engine.analyze(_fb_sch(), profile="fast",

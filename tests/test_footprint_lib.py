@@ -164,7 +164,7 @@ def test_cli_read_pcblib_json(tmp_path, capsys):
                       {"FP1": _footprint_stream("FP1", _pad_record("1"))})
     assert main(["read", str(p), "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
-    assert doc["schema_version"] == "1.3"
+    assert doc["schema_version"] == "2.0"
     assert doc["metadata"]["detected_format"] == "altium_pcblib"
     assert doc["metadata"]["object_counts"] == {"symbols": 0, "footprints": 1}
     assert doc["footprints"][0]["pads"][0]["number"] == "1"

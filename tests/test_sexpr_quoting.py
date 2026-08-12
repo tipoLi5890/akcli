@@ -8,7 +8,7 @@ the fourth. So: pin them all against one corpus, and fail the build when a
 seventh appears un-pinned.
 
 Why control characters must escape: akcli's own lexer is deliberately tolerant
-(``readers.sexpr._QUOTED_RE`` is DOTALL, so a raw newline inside a quoted atom
+(``akcli.sexpr._QUOTED_RE`` is DOTALL, so a raw newline inside a quoted atom
 round-trips through akcli fine) — eeschema's is not.
 """
 
@@ -20,14 +20,15 @@ from pathlib import Path
 
 import pytest
 
-from akcli import exporters
+from akcli import exporters, kicad_escape
 from akcli.drivers import kicad_cli
-from akcli.readers import sexpr
+from akcli.sexpr import build as sexpr_build
+from akcli.sexpr import parser as sexpr
 from akcli.writers import connectivity as wconn
 from akcli.writers import instances as winst
 from akcli.writers import kicad as wkicad
 from akcli.writers import lib_cache as wlib
-from akcli.writers import sexpr_writer
+from akcli.sexpr import writer as sexpr_writer
 
 from ._cli_harness import run_cli
 
@@ -38,7 +39,11 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "akcli"
 # writer -> lib cache -> netlist export) and a disagreement is a silent
 # corruption at the seam.
 QUOTERS = {
-    "writers.sexpr_writer.quote": sexpr_writer.quote,
+    "kicad_escape.quote_atom": kicad_escape.quote_atom,
+    "sexpr.writer.quote": sexpr_writer.quote,
+    "sexpr.build._q": sexpr_build._q,
+    # the writer's historical name for it — still the same function object,
+    # so this entry also pins the facade re-export in place.
     "writers.kicad._q": wkicad._q,
     "writers.connectivity._q": wconn._q,
     "writers.instances._q": winst._q,
@@ -59,6 +64,22 @@ CORPUS = [
     "\\n literal-looking",
     "unicode ohm Ω / 中文",
 ]
+
+
+def test_one_escape_implementation_many_names():
+    """The six historical quoter names are now ONE function (plus two thin
+    coercion wrappers whose only addition is str()/None handling)."""
+    assert sexpr_writer.quote is kicad_escape.quote_atom
+    assert wlib._quote is kicad_escape.quote_atom
+    assert wkicad._q is sexpr_build._q
+    assert wconn._q is sexpr_build._q
+    assert winst._q is sexpr_build._q
+
+
+def test_wrappers_add_only_coercion():
+    assert sexpr_build._q(42) == kicad_escape.quote_atom("42")
+    assert exporters._kicad_quote(None) == '""'
+    assert exporters._kicad_quote(3) == kicad_escape.quote_atom("3")
 
 
 @pytest.mark.parametrize("value", CORPUS)
@@ -87,12 +108,7 @@ def test_quoting_round_trips_through_the_parser(value):
 # Functions/expressions that escape a double-quote for an s-expression. Anything
 # NOT listed here that does `.replace('"', '\\"')` is a new un-pinned quoter.
 _KNOWN_ESCAPE_SITES = {
-    ("writers/sexpr_writer.py", "quote"),
-    ("writers/kicad.py", "_q"),
-    ("writers/connectivity.py", "_q"),
-    ("writers/instances.py", "_q"),
-    ("writers/lib_cache.py", "_quote"),
-    ("exporters.py", "_kicad_quote"),
+    ("kicad_escape.py", "quote_atom"),
 }
 
 
@@ -138,14 +154,25 @@ def test_no_unpinned_sexpr_escaper():
     extra = _escape_sites() - _KNOWN_ESCAPE_SITES
     assert not extra, (
         f"un-pinned s-expression escaper(s): {sorted(extra)} — route them "
-        "through writers.sexpr_writer.quote or add them to QUOTERS")
+        "through sexpr.writer.quote or add them to QUOTERS")
 
 
 def test_drawing_has_no_local_escaper():
-    """`akcli new` delegates to the writer's quoter (regression: it did not)."""
+    """`akcli new` delegates to the ONE quoter (regression: it did not).
+
+    0.21 R4 moved the blank-sheet emitter out of the command module into
+    ``writers/blank.py``, so the gate follows the code: the emitter takes its
+    quoter from ``sexpr.build`` (the authority pinned in ``QUOTERS`` above),
+    and the command module reaches for no quoter at all — neither the shared
+    one nor, as it once did, a hand-rolled fourth copy.
+    """
+    blank = (SRC / "writers" / "blank.py").read_text(encoding="utf-8")
+    assert "_sexpr_escape" not in blank
+    assert "from ..sexpr.build import _q" in blank
+
     text = (SRC / "commands" / "drawing.py").read_text(encoding="utf-8")
     assert "_sexpr_escape" not in text
-    assert "from ..writers.kicad import _q" in text
+    assert "_q" not in text
 
 
 # --------------------------------------------------------------------------- #

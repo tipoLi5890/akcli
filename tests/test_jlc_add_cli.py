@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from akcli import cli
+from akcli.commands import jlc as jlc_cmd
 from akcli._vendor.jlc2kicadlib import _http
 
 FIX = Path(__file__).parent / "fixtures" / "jlc"
@@ -57,7 +58,7 @@ class _FixtureOpener:
 def offline(monkeypatch):
     monkeypatch.setattr(_http, "opener", _FixtureOpener())
     # jlcsearch enrichment is a separate network path — keep the test offline.
-    monkeypatch.setattr(cli, "_easyeda_enrich", lambda lcsc: None)
+    monkeypatch.setattr(jlc_cmd, "_easyeda_enrich", lambda lcsc: None)
 
 
 def test_add_with_place_emits_oplist(tmp_path, offline, capsys):
@@ -92,7 +93,7 @@ def test_part_not_found_exits_4(tmp_path, monkeypatch):
             return _FakeResp(b'{"success": false, "result": []}')
 
     monkeypatch.setattr(_http, "opener", _NotFound())
-    monkeypatch.setattr(cli, "_easyeda_enrich", lambda lcsc: None)
+    monkeypatch.setattr(jlc_cmd, "_easyeda_enrich", lambda lcsc: None)
     assert cli.main(["jlc", "add", "C999999999", "--out", str(tmp_path)]) == 4
 
 
@@ -102,7 +103,7 @@ def test_network_error_exits_7(tmp_path, monkeypatch):
             raise OSError("no route")
 
     monkeypatch.setattr(_http, "opener", _Down())
-    monkeypatch.setattr(cli, "_easyeda_enrich", lambda lcsc: None)
+    monkeypatch.setattr(jlc_cmd, "_easyeda_enrich", lambda lcsc: None)
     assert cli.main(["jlc", "add", "C25804", "--out", str(tmp_path)]) == 7
 
 
@@ -153,7 +154,7 @@ def test_converted_passive_pins_keep_erc_clean(tmp_path, offline, capsys):
     target = tmp_path / "sheet.kicad_sch"
     assert cli.main(["new", str(target)]) == 0
     ops = tmp_path / "ops.json"
-    ops.write_text(json.dumps({"protocol_version": 1, "target_format": "kicad", "ops": [
+    ops.write_text(json.dumps({"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "place_component", "lib_id": lib_id, "designator": "R1",
          "x_mil": 2000, "y_mil": 1000},
         {"op": "place_component", "lib_id": lib_id, "designator": "R2",

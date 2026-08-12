@@ -11,11 +11,11 @@ from akcli.errors import AkcliError
 
 
 def _doc(op_list):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": op_list}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": op_list}
 
 
 def test_protocol_version_and_op_names():
-    assert ops.PROTOCOL_VERSION == 1
+    assert ops.PROTOCOL_VERSION == 2
     assert "place_component" in ops.OP_NAMES
     assert "place_gnd" in ops.OP_NAMES and "place_vcc" in ops.OP_NAMES
     # 13 original + delete_component / delete_object / move_component +
@@ -39,7 +39,7 @@ def test_valid_oplist_has_no_errors():
 
 def test_protocol_mismatch():
     doc = _doc([])
-    doc["protocol_version"] = 2
+    doc["protocol_version"] = ops.PROTOCOL_VERSION + 1
     errs = ops.validate_oplist(doc)
     assert any(e.code == "PROTOCOL_MISMATCH" for e in errs)
 
@@ -149,15 +149,63 @@ def test_field_type_table_enforced():
 
 def test_unknown_field_did_you_mean():
     errs = ops.validate_oplist(_doc([
-        {"op": "add_net_label", "name": "N1", "at": [0, 0], "orientatoin": 90},
+        {"op": "add_net_label", "name": "N1", "at": [0, 0], "rotatoin": 90},
     ]))
     assert len(errs) == 1
-    assert "unknown field 'orientatoin'" in errs[0].message
-    assert "did you mean 'orientation'" in errs[0].message
+    assert "unknown field 'rotatoin'" in errs[0].message
+    assert "did you mean 'rotation'" in errs[0].message
     # keys starting with "_" are annotation-safe
     assert ops.validate_oplist(_doc([
         {"op": "add_junction", "at": [0, 0], "_note": "T here"},
     ])) == []
+
+
+# --------------------------------------------------------------------------- #
+# protocol 2 field renames (docs/migration-1.0.md)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("op,old,new", [
+    ({"op": "add_net_label", "name": "N1", "at": [0, 0]},
+     "orientation", "rotation"),
+    ({"op": "set_component_parameters", "designator": "R1"},
+     "reference", "new_designator"),
+    ({"op": "set_component_parameters", "designator": "R1"},
+     "instance_references", "instance_designators"),
+    ({"op": "rename_net", "old_name": "A", "new_name": "B"},
+     "from", "old_name"),
+    ({"op": "rename_net", "old_name": "A", "new_name": "B"},
+     "to", "new_name"),
+])
+def test_v1_field_name_reports_the_rename(op, old, new):
+    """A protocol-1 spelling gets NAMED, not a bare unknown-field guess.
+
+    ``from`` -> ``old_name`` is invisible to difflib, so without the rename
+    table the most common upgrade error would arrive with no hint at all.
+    """
+    errs = ops.validate_oplist(_doc([{**op, old: 0}]))
+    assert len(errs) == 1
+    assert errs[0].code == "OP_UNSUPPORTED"
+    assert (f"field {old!r} was renamed to {new!r} in protocol "
+            f"{ops.PROTOCOL_VERSION}") in errs[0].message
+
+
+def test_rename_hints_are_scoped_to_the_op_that_moved():
+    """route_net/connect_and_label keep from/to; connect_and_label keeps
+    orientation — none of them may be reported as a stale v1 spelling."""
+    assert ops.validate_oplist(_doc([
+        {"op": "route_net", "from": "R1.1", "to": "R2.1"},
+        {"op": "connect_and_label", "from": "R1.2", "to": "R2.2", "net": "N",
+         "orientation": 90},
+    ])) == []
+
+
+def test_protocol_1_document_reports_both_the_envelope_and_the_renames():
+    """The whole upgrade is diagnosable from ONE run of the validator."""
+    doc = _doc([{"op": "add_net_label", "name": "N1", "at": [0, 0],
+                 "orientation": 90}])
+    doc["protocol_version"] = 1
+    errs = ops.validate_oplist(doc)
+    assert any(e.code == "PROTOCOL_MISMATCH" for e in errs)
+    assert any("renamed to 'rotation'" in e.message for e in errs)
 
 
 def test_unknown_op_did_you_mean():
@@ -230,13 +278,15 @@ def test_mid_anchor_accepted_for_labels_and_ports_only():
 
 def test_rename_net_validation():
     assert ops.validate_oplist(_doc([
-        {"op": "rename_net", "from": "A", "to": "B"},
-        {"op": "rename_net", "from": "A", "to": "B", "scope": "global"},
+        {"op": "rename_net", "old_name": "A", "new_name": "B"},
+        {"op": "rename_net", "old_name": "A", "new_name": "B",
+         "scope": "global"},
     ])) == []
-    errs = ops.validate_oplist(_doc([{"op": "rename_net", "from": "A"}]))
-    assert any("'to'" in e.message for e in errs)
+    errs = ops.validate_oplist(_doc([{"op": "rename_net", "old_name": "A"}]))
+    assert any("'new_name'" in e.message for e in errs)
     errs = ops.validate_oplist(_doc([
-        {"op": "rename_net", "from": "A", "to": "B", "scope": "power"}]))
+        {"op": "rename_net", "old_name": "A", "new_name": "B",
+         "scope": "power"}]))
     assert any("scope" in e.message for e in errs)
 
 
@@ -293,7 +343,7 @@ def test_duplicate_annotation_key_lint():
 def test_writer_annotation_key_collision_guard():
     from akcli.writers import kicad as kwriter
 
-    ctx: dict = {}
+    ctx = kwriter._ctx_new()
     uid1 = kwriter._annotation_uuid(
         "00000000-0000-0000-0000-000000000000", "text",
         {"key": "n"}, "0:0", 0, ctx)

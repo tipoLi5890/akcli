@@ -53,8 +53,8 @@ notice goes to stderr); `7` on a network/HTTP error (a single
 
 A `jlc` network error goes through the shared error path like every other
 command, so `--json` gets the standard envelope on stdout
-(`{"schema_version": "1", "error": {"code": "NETWORK", "message", "exit": 7,
-"remediation"}}`) with the plain `ERROR: NETWORK: …` line on stderr for humans.
+(`{"schema_version": "1", "akcli_version": "<version>", "error": {"code": "NETWORK",
+"message", "exit": 7, "remediation"}}`) with the plain `ERROR: NETWORK: …` line on stderr for humans.
 
 ### `akcli jlc bom <sch>... [--qty N] [--min-stock N] [--offline] [--suggest] [--fix|--fix-all] [--alternates] [--lock OUT.json] [--against-lock LOCK.json] [--csv OUT.csv] [--md [OUT.md]] [--exit-zero] [--json]`
 

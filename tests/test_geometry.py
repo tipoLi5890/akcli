@@ -1,4 +1,4 @@
-"""Tests for ``writers/geometry.py`` (SPEC §3.5).
+"""Tests for ``geometry/transform.py`` (SPEC §3.5).
 
 Covers the integer-nm point transform (rotations + mirrors, rotate-then-mirror
 order), the grid snap, the re-exports, and — the load-bearing bit — pin world
@@ -15,7 +15,7 @@ import pytest
 from akcli import units
 from akcli.model import Component
 from akcli.readers import kicad, kicad_lib
-from akcli.writers import geometry as g
+from akcli.geometry import transform as g
 
 FIXTURES = Path(__file__).parent / "fixtures" / "kicad"
 DEVICE_SYM = FIXTURES / "symbols" / "Device.kicad_sym"

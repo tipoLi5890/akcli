@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from akcli import cli, netdiff
-from akcli.groupframe import group_report, plan_frames
+from akcli.arrange.frames import group_report, plan_frames
 from akcli.readers import kicad as kreader
 from akcli.writers import kicad as kw
 
@@ -22,7 +22,7 @@ def _seed(tmp_path: Path) -> Path:
     tgt = tmp_path / "board.kicad_sch"
     tgt.write_text('(kicad_sch (version 20231120) (generator "akcli") '
                    '(uuid "33333333-4444-5555-6666-777777777777") (paper "A4"))\n')
-    d = {"protocol_version": 1, "target_format": "kicad",
+    d = {"protocol_version": 2, "target_format": "kicad",
          "groups": {"PWR": {"origin": [1000, 1000]},
                     "LOAD": {"origin": [4000, 1000]}},
          "ops": [
@@ -43,7 +43,7 @@ def _seed(tmp_path: Path) -> Path:
 
 def _rect_count(tgt: Path) -> int:
     """TOP-LEVEL rectangles only (symbol bodies in lib_symbols don't count)."""
-    from akcli.readers import sexpr
+    from akcli.sexpr import parser as sexpr
     root = sexpr.parse(tgt.read_text(encoding="utf-8"))
     return sum(1 for c in root.children or []
                if c.is_list and c.children and c.children[0].value == "rectangle")
@@ -115,7 +115,7 @@ def test_frame_refresh_replaces_in_place(tmp_path):
     assert tgt.read_text(encoding="utf-8") == first
 
     # move a LOAD part far away, then refresh
-    mv = {"protocol_version": 1, "target_format": "kicad", "ops": [
+    mv = {"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "move_component", "designator": "R2",
          "x_mil": 7000, "y_mil": 3000, "carry_labels": True}]}
     rs = kw.apply(mv, str(tgt), apply=True, sources=[DEVICE])

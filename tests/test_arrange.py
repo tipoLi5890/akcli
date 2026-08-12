@@ -26,7 +26,7 @@ def _pile(tmp_path, extra_ops=()):
         *extra_ops,
     ]
     opsfile = tmp_path / "ops.json"
-    opsfile.write_text(json.dumps({"protocol_version": 1,
+    opsfile.write_text(json.dumps({"protocol_version": 2,
                                    "target_format": "kicad",
                                    "target_file": "x", "ops": ops}))
     assert cli.main(["draw", str(work), "--ops", str(opsfile), "--apply"]) == 0

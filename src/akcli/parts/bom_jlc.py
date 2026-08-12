@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import contract
 from .. import bom_policy
 from ..checks.bom import _real_components
 from ..model import Component, Schematic
@@ -801,7 +802,7 @@ def totals(lines: list[BomLine], *, extended_fee: float = 3.0) -> dict:
 # --------------------------------------------------------------------------- #
 # BOM lockfile — reproducible orders + drift detection (P2-1)
 # --------------------------------------------------------------------------- #
-LOCK_SCHEMA_VERSION = "1"
+LOCK_SCHEMA_VERSION = contract.SCHEMA_VERSIONS["bom-lock"]
 
 
 def make_lock(lines: list[BomLine], *, qty: int) -> dict:

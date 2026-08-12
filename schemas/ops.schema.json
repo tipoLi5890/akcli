@@ -3,22 +3,42 @@
   "$id": "https://github.com/tipoLi5890/akcli/schemas/ops.schema.json",
   "title": "AkcliOpList",
   "type": "object",
-  "required": ["protocol_version", "target_format", "ops"],
+  "required": [
+    "protocol_version",
+    "target_format",
+    "ops"
+  ],
   "properties": {
-    "protocol_version": { "const": 1 },
-    "target_format": { "enum": ["kicad", "altium"] },
-    "target_file": { "type": "string" },
-    "run_id": { "type": "string", "description": "Optional transaction id (multi-sheet apply): recorded in the workspace journal and named by `akcli undo --run`. Auto-generated when absent." },
+    "protocol_version": {
+      "const": 2
+    },
+    "target_format": {
+      "enum": [
+        "kicad",
+        "altium"
+      ]
+    },
+    "target_file": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Optional transaction id (multi-sheet apply): recorded in the workspace journal and named by `akcli undo --run`. Auto-generated when absent."
+    },
     "sheets": {
       "type": "object",
       "description": "Multi-sheet routing map (0.20): declares the child .kicad_sch files a 'sheet'-tagged op may target. Keys are free names referenced by per-op 'sheet' tags; each 'file' resolves relative to the draw target's directory and must already exist (`akcli new` it first). One op-list can then edit the root and its children in ONE atomic transaction (all files verify before the first write; a partial commit rolls back).",
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "file": { "type": "string",
-                    "description": "The child .kicad_sch, relative to the draw target's directory." }
+          "file": {
+            "type": "string",
+            "description": "The child .kicad_sch, relative to the draw target's directory."
+          }
         },
-        "required": ["file"],
+        "required": [
+          "file"
+        ],
         "additionalProperties": false
       }
     },
@@ -28,22 +48,45 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "origin": { "$ref": "#/$defs/point",
-                      "description": "[x_mil, y_mil] world origin of the group's local coordinate frame." },
-          "title": { "type": "string",
-                     "description": "Human-readable module title (used by group frames)." },
-          "frame": { "type": "boolean",
-                     "description": "Hint that this group wants a visual border frame (see `akcli groups frame`)." }
+          "origin": {
+            "$ref": "#/$defs/point",
+            "description": "[x_mil, y_mil] world origin of the group's local coordinate frame."
+          },
+          "title": {
+            "type": "string",
+            "description": "Human-readable module title (used by group frames)."
+          },
+          "frame": {
+            "type": "boolean",
+            "description": "Hint that this group wants a visual border frame (see `akcli groups frame`)."
+          }
         },
-        "required": ["origin"],
+        "required": [
+          "origin"
+        ],
         "additionalProperties": false
       }
     },
-    "ops": { "type": "array", "items": { "$ref": "#/$defs/op" } }
+    "ops": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/op"
+      }
+    }
   },
   "$defs": {
-    "point": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
-    "pinref": { "type": "string", "pattern": "^[^.]+\\.[^.]+$" },
+    "point": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "pinref": {
+      "type": "string",
+      "pattern": "^[^.]+\\.[^.]+$"
+    },
     "midref": {
       "type": "string",
       "description": "mid(REF.PIN,REF.PIN): midpoint of two axis-aligned pins, snapped to the 50-mil grid along the wire axis.",
@@ -51,22 +94,65 @@
     },
     "endpoint": {
       "oneOf": [
-        { "$ref": "#/$defs/point" },
-        { "$ref": "#/$defs/pinref" }
+        {
+          "$ref": "#/$defs/point"
+        },
+        {
+          "$ref": "#/$defs/pinref"
+        }
       ]
     },
     "anchor": {
       "oneOf": [
-        { "$ref": "#/$defs/point" },
-        { "$ref": "#/$defs/pinref" },
-        { "$ref": "#/$defs/midref" }
+        {
+          "$ref": "#/$defs/point"
+        },
+        {
+          "$ref": "#/$defs/pinref"
+        },
+        {
+          "$ref": "#/$defs/midref"
+        }
       ]
     },
-    "rotation": { "enum": [0, 90, 180, 270] },
-    "mirror": { "enum": ["none", "x", "y"] },
-    "scope": { "enum": ["local", "global", "hierarchical"] },
-    "strpair": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
-    "strtriple": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 },
+    "rotation": {
+      "enum": [
+        0,
+        90,
+        180,
+        270
+      ]
+    },
+    "mirror": {
+      "enum": [
+        "none",
+        "x",
+        "y"
+      ]
+    },
+    "scope": {
+      "enum": [
+        "local",
+        "global",
+        "hierarchical"
+      ]
+    },
+    "strpair": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "strtriple": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
     "anchorref": {
       "type": "string",
       "description": "Relative-placement anchor: 'REF.PIN' (that pin's world coordinate) or bare 'REF' (the component origin). Resolved by the writer against the live document, so the anchor may be placed earlier in the SAME op-list. offset_mil is a world-frame [dx, dy] from the anchor; the result grid-snaps. Exactly one of x_mil/y_mil or anchor per op.",
@@ -74,521 +160,1359 @@
     },
     "op": {
       "type": "object",
-      "required": ["op"],
+      "required": [
+        "op"
+      ],
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_component" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "lib_id": { "type": "string" },
-            "designator": { "type": "string" },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "anchor": { "$ref": "#/$defs/anchorref" },
-            "offset_mil": { "$ref": "#/$defs/point" },
-            "rotation": { "$ref": "#/$defs/rotation" },
-            "mirror": { "$ref": "#/$defs/mirror" },
-            "unit": { "type": "integer", "minimum": 1,
-                      "description": "Unit of a multi-unit part to place (default 1); each unit is its own instance sharing the designator." },
-            "value": { "type": "string" },
-            "footprint": { "type": "string" },
-            "symbol_source": { "type": "string" },
-            "instance_designators": { "type": "object",
-                      "description": "Per-instance references for a sheet file instantiated more than once: {\"<instance path>\": \"<REF>\"} — pairwise-distinct values; 'designator' must be one of them (it seeds the uuid and is the displayed Reference). Required (INSTANCE_REFS_REQUIRED) when the target sheet has several instance paths." }
+            "op": {
+              "const": "place_component"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "lib_id": {
+              "type": "string"
+            },
+            "designator": {
+              "type": "string"
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "anchor": {
+              "$ref": "#/$defs/anchorref"
+            },
+            "offset_mil": {
+              "$ref": "#/$defs/point"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            },
+            "mirror": {
+              "$ref": "#/$defs/mirror"
+            },
+            "unit": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Unit of a multi-unit part to place (default 1); each unit is its own instance sharing the designator."
+            },
+            "value": {
+              "type": "string"
+            },
+            "footprint": {
+              "type": "string"
+            },
+            "symbol_source": {
+              "type": "string"
+            },
+            "instance_designators": {
+              "type": "object",
+              "description": "Per-instance references for a sheet file instantiated more than once: {\"<instance path>\": \"<REF>\"} — pairwise-distinct values; 'designator' must be one of them (it seeds the uuid and is the displayed Reference). Required (INSTANCE_REFS_REQUIRED) when the target sheet has several instance paths."
+            }
           },
-          "required": ["op", "lib_id", "designator"],
+          "required": [
+            "op",
+            "lib_id",
+            "designator"
+          ],
           "description": "Position is exactly one of x_mil+y_mil (absolute) or anchor (+offset_mil, relative to a placed pin/component)."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "delete_component" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "designator": { "type": "string" },
-            "cascade": { "type": "boolean",
-                         "description": "Also delete wires ending on a deleted pin plus labels/no_connects/junctions anchored there (cascaded uuids are reported)." }
-          },
-          "required": ["op", "designator"]
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "op": { "const": "delete_object" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "uuid": { "type": "string" },
-            "match": {
-              "type": "object",
-              "description": "Selector alternative to uuid; must match exactly one object (0 = replay-safe note, >1 = error listing candidates).",
-              "properties": {
-                "kind": { "enum": ["wire", "bus", "label", "global_label", "hierarchical_label", "junction", "no_connect", "text", "bus_entry", "rectangle", "text_box"] },
-                "name": { "type": "string" },
-                "at": { "$ref": "#/$defs/point" }
-              },
-              "required": ["kind"],
-              "additionalProperties": false
+            "op": {
+              "const": "delete_component"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "designator": {
+              "type": "string"
+            },
+            "cascade": {
+              "type": "boolean",
+              "description": "Also delete wires ending on a deleted pin plus labels/no_connects/junctions anchored there (cascaded uuids are reported)."
             }
           },
-          "required": ["op"],
-          "oneOf": [
-            { "required": ["uuid"] },
-            { "required": ["match"] }
+          "required": [
+            "op",
+            "designator"
           ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "move_component" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "designator": { "type": "string" },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "anchor": { "$ref": "#/$defs/anchorref" },
-            "offset_mil": { "$ref": "#/$defs/point" },
-            "unit": { "type": "integer", "minimum": 1 },
-            "carry_labels": { "type": "boolean" },
-            "carry_wires": { "type": "boolean" }
+            "op": {
+              "const": "delete_object"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "uuid": {
+              "type": "string"
+            },
+            "match": {
+              "type": "object",
+              "description": "Selector alternative to uuid; must match exactly one object (0 = replay-safe note, >1 = error listing candidates).",
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "wire",
+                    "bus",
+                    "label",
+                    "global_label",
+                    "hierarchical_label",
+                    "junction",
+                    "no_connect",
+                    "text",
+                    "bus_entry",
+                    "rectangle",
+                    "text_box"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "at": {
+                  "$ref": "#/$defs/point"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            }
           },
-          "required": ["op", "designator"],
+          "required": [
+            "op"
+          ],
+          "oneOf": [
+            {
+              "required": [
+                "uuid"
+              ]
+            },
+            {
+              "required": [
+                "match"
+              ]
+            }
+          ]
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "move_component"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "designator": {
+              "type": "string"
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "anchor": {
+              "$ref": "#/$defs/anchorref"
+            },
+            "offset_mil": {
+              "$ref": "#/$defs/point"
+            },
+            "unit": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "carry_labels": {
+              "type": "boolean"
+            },
+            "carry_wires": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "designator"
+          ],
           "description": "Destination is exactly one of x_mil+y_mil (absolute) or anchor (+offset_mil)."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "set_component_transform" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "designator": { "type": "string" },
-            "rotation": { "$ref": "#/$defs/rotation" },
-            "mirror": { "$ref": "#/$defs/mirror" }
+            "op": {
+              "const": "set_component_transform"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "designator": {
+              "type": "string"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            },
+            "mirror": {
+              "$ref": "#/$defs/mirror"
+            }
           },
-          "required": ["op", "designator"]
+          "required": [
+            "op",
+            "designator"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "set_component_parameters" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "designator": { "type": "string" },
-            "reference": { "type": "string" },
-            "value": { "type": "string" },
-            "footprint": { "type": "string" },
-            "parameters": { "type": "object" },
-            "instance_references": { "type": "object",
-                      "description": "Per-instance rename for a symbol on a multiply-instantiated sheet: {\"<instance path>\": \"<REF>\"} (a scalar 'reference' on such a symbol refuses with INSTANCE_REFS_REQUIRED — it would smash the per-path references into one duplicate refdes)." }
+            "op": {
+              "const": "set_component_parameters"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "designator": {
+              "type": "string"
+            },
+            "new_designator": {
+              "type": "string",
+              "description": "Rename the component: the NEW reference designator."
+            },
+            "value": {
+              "type": "string"
+            },
+            "footprint": {
+              "type": "string"
+            },
+            "parameters": {
+              "type": "object"
+            },
+            "instance_designators": {
+              "type": "object",
+              "description": "Per-instance rename for a symbol on a multiply-instantiated sheet: {\"<instance path>\": \"<REF>\"} (a scalar 'new_designator' on such a symbol refuses with INSTANCE_REFS_REQUIRED — it would smash the per-path references into one duplicate refdes)."
+            }
           },
-          "required": ["op", "designator"]
+          "required": [
+            "op",
+            "designator"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_wire" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "vertices": { "type": "array", "items": { "$ref": "#/$defs/endpoint" }, "minItems": 2 }
+            "op": {
+              "const": "add_wire"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "vertices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/endpoint"
+              },
+              "minItems": 2
+            }
           },
-          "required": ["op", "vertices"]
+          "required": [
+            "op",
+            "vertices"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "route_net" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "from": { "$ref": "#/$defs/endpoint" },
-            "to": { "$ref": "#/$defs/endpoint" },
-            "style": { "enum": ["auto", "hv", "vh", "z"],
-                       "description": "Corner style: hv = horizontal-first L, vh = vertical-first L, z = 3 segments; auto (default) picks hv unless its corner lands on a pin tip, then vh, then z." },
-            "label": { "type": "string",
-                       "description": "Optional net name placed ONCE at the longest segment's midpoint (the wire_net pattern for non-coaxial pins)." },
-            "scope": { "$ref": "#/$defs/scope" }
+            "op": {
+              "const": "route_net"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "from": {
+              "$ref": "#/$defs/endpoint"
+            },
+            "to": {
+              "$ref": "#/$defs/endpoint"
+            },
+            "style": {
+              "enum": [
+                "auto",
+                "hv",
+                "vh",
+                "z"
+              ],
+              "description": "Corner style: hv = horizontal-first L, vh = vertical-first L, z = 3 segments; auto (default) picks hv unless its corner lands on a pin tip, then vh, then z."
+            },
+            "label": {
+              "type": "string",
+              "description": "Optional net name placed ONCE at the longest segment's midpoint (the wire_net pattern for non-coaxial pins)."
+            },
+            "scope": {
+              "$ref": "#/$defs/scope"
+            }
           },
-          "required": ["op", "from", "to"],
+          "required": [
+            "op",
+            "from",
+            "to"
+          ],
           "description": "Deterministic orthogonal auto-route between two endpoints: coaxial -> straight wire; otherwise an L/Z whose corner provably avoids every placed pin tip (a coincident corner would silently merge nets)."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_junction" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "at": { "$ref": "#/$defs/point" }
+            "op": {
+              "const": "add_junction"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "at": {
+              "$ref": "#/$defs/point"
+            }
           },
-          "required": ["op", "at"]
+          "required": [
+            "op",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_no_connect" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "pin": { "$ref": "#/$defs/endpoint" }
+            "op": {
+              "const": "add_no_connect"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "pin": {
+              "$ref": "#/$defs/endpoint"
+            }
           },
-          "required": ["op", "pin"]
+          "required": [
+            "op",
+            "pin"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_net_label" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "name": { "type": "string" },
-            "at": { "$ref": "#/$defs/anchor" },
-            "scope": { "$ref": "#/$defs/scope" },
-            "orientation": { "$ref": "#/$defs/rotation" }
+            "op": {
+              "const": "add_net_label"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "name": {
+              "type": "string"
+            },
+            "at": {
+              "$ref": "#/$defs/anchor"
+            },
+            "scope": {
+              "$ref": "#/$defs/scope"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            }
           },
-          "required": ["op", "name", "at"]
+          "required": [
+            "op",
+            "name",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_power_port" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "lib_id": { "type": "string" },
-            "net_name": { "type": "string" },
-            "at": { "$ref": "#/$defs/anchor" },
-            "rotation": { "$ref": "#/$defs/rotation" }
+            "op": {
+              "const": "place_power_port"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "lib_id": {
+              "type": "string"
+            },
+            "net_name": {
+              "type": "string"
+            },
+            "at": {
+              "$ref": "#/$defs/anchor"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            }
           },
-          "required": ["op", "lib_id", "net_name", "at"]
+          "required": [
+            "op",
+            "lib_id",
+            "net_name",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_gnd" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "lib_id": { "type": "string" },
-            "net_name": { "type": "string" },
-            "at": { "$ref": "#/$defs/anchor" },
-            "rotation": { "$ref": "#/$defs/rotation" }
+            "op": {
+              "const": "place_gnd"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "lib_id": {
+              "type": "string"
+            },
+            "net_name": {
+              "type": "string"
+            },
+            "at": {
+              "$ref": "#/$defs/anchor"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            }
           },
-          "required": ["op", "at"]
+          "required": [
+            "op",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_vcc" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "lib_id": { "type": "string" },
-            "net_name": { "type": "string" },
-            "at": { "$ref": "#/$defs/anchor" },
-            "rotation": { "$ref": "#/$defs/rotation" }
+            "op": {
+              "const": "place_vcc"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "lib_id": {
+              "type": "string"
+            },
+            "net_name": {
+              "type": "string"
+            },
+            "at": {
+              "$ref": "#/$defs/anchor"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            }
           },
-          "required": ["op", "at"]
+          "required": [
+            "op",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "rename_net" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "from": { "type": "string" },
-            "to": { "type": "string" },
-            "scope": { "$ref": "#/$defs/scope",
-                       "description": "Restrict the rewrite to one label kind; omitted = all label kinds + power-port net Values." }
+            "op": {
+              "const": "rename_net"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "old_name": {
+              "type": "string"
+            },
+            "new_name": {
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/scope",
+              "description": "Restrict the rewrite to one label kind; omitted = all label kinds + power-port net Values."
+            }
           },
-          "required": ["op", "from", "to"]
+          "required": [
+            "op",
+            "old_name",
+            "new_name"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_bus" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "vertices": { "type": "array", "items": { "$ref": "#/$defs/point" }, "minItems": 2 }
+            "op": {
+              "const": "add_bus"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "vertices": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/point"
+              },
+              "minItems": 2
+            }
           },
-          "required": ["op", "vertices"]
+          "required": [
+            "op",
+            "vertices"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_bus_entry" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "at": { "$ref": "#/$defs/point" },
-            "size": { "$ref": "#/$defs/point" }
+            "op": {
+              "const": "add_bus_entry"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "at": {
+              "$ref": "#/$defs/point"
+            },
+            "size": {
+              "$ref": "#/$defs/point"
+            }
           },
-          "required": ["op", "at"]
+          "required": [
+            "op",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_text" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "text": { "type": "string" },
-            "at": { "$ref": "#/$defs/point" },
-            "angle": { "type": "number" },
-            "key": { "type": "string", "description": "Stable replacement handle: re-emitting the same key replaces this node in place regardless of coordinates or op-list position (group titles use group_title:<name>)." }
+            "op": {
+              "const": "add_text"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "text": {
+              "type": "string"
+            },
+            "at": {
+              "$ref": "#/$defs/point"
+            },
+            "angle": {
+              "type": "number"
+            },
+            "key": {
+              "type": "string",
+              "description": "Stable replacement handle: re-emitting the same key replaces this node in place regardless of coordinates or op-list position (group titles use group_title:<name>)."
+            }
           },
-          "required": ["op", "text", "at"]
+          "required": [
+            "op",
+            "text",
+            "at"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_rectangle" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "start": { "$ref": "#/$defs/point", "description": "One corner [x, y] mil of the box." },
-            "end": { "$ref": "#/$defs/point", "description": "The opposite corner [x, y] mil." },
-            "stroke_width_mil": { "type": "number", "description": "Border line width in mils (0 = KiCad default)." },
-            "fill": { "enum": ["none", "outline", "background"] },
-            "key": { "type": "string", "description": "Stable replacement handle: re-emitting the same key replaces this node in place regardless of coordinates or op-list position (group frames use group_frame:<name>)." }
+            "op": {
+              "const": "add_rectangle"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "start": {
+              "$ref": "#/$defs/point",
+              "description": "One corner [x, y] mil of the box."
+            },
+            "end": {
+              "$ref": "#/$defs/point",
+              "description": "The opposite corner [x, y] mil."
+            },
+            "stroke_width_mil": {
+              "type": "number",
+              "description": "Border line width in mils (0 = KiCad default)."
+            },
+            "fill": {
+              "enum": [
+                "none",
+                "outline",
+                "background"
+              ]
+            },
+            "key": {
+              "type": "string",
+              "description": "Stable replacement handle: re-emitting the same key replaces this node in place regardless of coordinates or op-list position (group frames use group_frame:<name>)."
+            }
           },
-          "required": ["op", "start", "end"],
+          "required": [
+            "op",
+            "start",
+            "end"
+          ],
           "description": "Top-level graphic rectangle (pure annotation, connectivity-neutral): module borders / group frames. Delete by uuid or by kind (it has no `at` anchor, so the match `at` selector never hits a rectangle)."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_text_box" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "text": { "type": "string", "description": "Note content; \\n for line breaks." },
-            "at": { "$ref": "#/$defs/point", "description": "TOP-LEFT corner [x, y] mil of the box." },
-            "size": { "$ref": "#/$defs/point", "description": "[width, height] mil." },
-            "angle": { "type": "number" },
-            "key": { "type": "string", "description": "Stable replacement handle (see add_rectangle.key)." }
+            "op": {
+              "const": "add_text_box"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "text": {
+              "type": "string",
+              "description": "Note content; \\n for line breaks."
+            },
+            "at": {
+              "$ref": "#/$defs/point",
+              "description": "TOP-LEFT corner [x, y] mil of the box."
+            },
+            "size": {
+              "$ref": "#/$defs/point",
+              "description": "[width, height] mil."
+            },
+            "angle": {
+              "type": "number"
+            },
+            "key": {
+              "type": "string",
+              "description": "Stable replacement handle (see add_rectangle.key)."
+            }
           },
-          "required": ["op", "text", "at", "size"],
+          "required": [
+            "op",
+            "text",
+            "at",
+            "size"
+          ],
           "description": "Bordered multi-line note box (module notes / design rationale). Pure annotation, connectivity-neutral; grammar fixture-verified against a real KiCad."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "add_sheet" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "name": { "type": "string", "description": "Sheetname property value." },
-            "file": { "type": "string", "description": "Sheetfile property value; the referenced child .kicad_sch is NOT created by this op." },
-            "at": { "$ref": "#/$defs/point", "description": "Top-left corner [x, y] mil of the sheet box." },
-            "size": { "$ref": "#/$defs/point", "description": "[width, height] mil of the sheet box." },
+            "op": {
+              "const": "add_sheet"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "name": {
+              "type": "string",
+              "description": "Sheetname property value."
+            },
+            "file": {
+              "type": "string",
+              "description": "Sheetfile property value; the referenced child .kicad_sch is NOT created by this op."
+            },
+            "at": {
+              "$ref": "#/$defs/point",
+              "description": "Top-left corner [x, y] mil of the sheet box."
+            },
+            "size": {
+              "$ref": "#/$defs/point",
+              "description": "[width, height] mil of the sheet box."
+            },
             "pins": {
               "type": "array",
               "description": "Sheet pins on the box edges; each pin's edge coordinate is at + offset_mil along its side, wire endpoints attach to that coordinate.",
               "items": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
-                  "type": { "enum": ["input", "output", "bidirectional", "tri_state", "passive"] },
-                  "side": { "enum": ["left", "right", "top", "bottom"] },
-                  "offset_mil": { "type": "number" }
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "input",
+                      "output",
+                      "bidirectional",
+                      "tri_state",
+                      "passive"
+                    ]
+                  },
+                  "side": {
+                    "enum": [
+                      "left",
+                      "right",
+                      "top",
+                      "bottom"
+                    ]
+                  },
+                  "offset_mil": {
+                    "type": "number"
+                  }
                 },
-                "required": ["name", "type", "side", "offset_mil"],
+                "required": [
+                  "name",
+                  "type",
+                  "side",
+                  "offset_mil"
+                ],
                 "additionalProperties": false
               }
             }
           },
-          "required": ["op", "name", "file", "at", "size"],
+          "required": [
+            "op",
+            "name",
+            "file",
+            "at",
+            "size"
+          ],
           "description": "Emit a hierarchical (sheet ...) node with Sheetname/Sheetfile, sheet pins at computed edge coordinates and the (instances) block; the child file is authored separately."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "set_title_block" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "title": { "type": "string" },
-            "date": { "type": "string" },
-            "rev": { "type": "string" },
-            "company": { "type": "string" },
-            "comment1": { "type": "string" },
-            "comment2": { "type": "string" },
-            "comment3": { "type": "string" },
-            "comment4": { "type": "string" },
-            "comment5": { "type": "string" },
-            "comment6": { "type": "string" },
-            "comment7": { "type": "string" },
-            "comment8": { "type": "string" },
-            "comment9": { "type": "string" }
+            "op": {
+              "const": "set_title_block"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "title": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "rev": {
+              "type": "string"
+            },
+            "company": {
+              "type": "string"
+            },
+            "comment1": {
+              "type": "string"
+            },
+            "comment2": {
+              "type": "string"
+            },
+            "comment3": {
+              "type": "string"
+            },
+            "comment4": {
+              "type": "string"
+            },
+            "comment5": {
+              "type": "string"
+            },
+            "comment6": {
+              "type": "string"
+            },
+            "comment7": {
+              "type": "string"
+            },
+            "comment8": {
+              "type": "string"
+            },
+            "comment9": {
+              "type": "string"
+            }
           },
-          "required": ["op"],
+          "required": [
+            "op"
+          ],
           "minProperties": 2,
           "description": "Set/replace title-block fields (at least one required). Find-or-create keeps the node where eeschema expects it (after paper, before lib_symbols); connectivity-neutral; unchanged values replay as a no-op note."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_divider" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "top_net": { "type": "string" },
-            "mid_net": { "type": "string" },
-            "bottom_net": { "type": "string" },
-            "designators": { "$ref": "#/$defs/strpair" },
-            "values": { "$ref": "#/$defs/strpair" },
-            "spacing_mil": { "type": "number" },
-            "lib_id": { "type": "string" }
+            "op": {
+              "const": "place_divider"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "top_net": {
+              "type": "string"
+            },
+            "mid_net": {
+              "type": "string"
+            },
+            "bottom_net": {
+              "type": "string"
+            },
+            "designators": {
+              "$ref": "#/$defs/strpair"
+            },
+            "values": {
+              "$ref": "#/$defs/strpair"
+            },
+            "spacing_mil": {
+              "type": "number"
+            },
+            "lib_id": {
+              "type": "string"
+            }
           },
-          "required": ["op", "x_mil", "y_mil", "top_net", "mid_net", "bottom_net"]
+          "required": [
+            "op",
+            "x_mil",
+            "y_mil",
+            "top_net",
+            "mid_net",
+            "bottom_net"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_decoupling" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "anchor": { "$ref": "#/$defs/anchorref" },
-            "offset_mil": { "$ref": "#/$defs/point" },
-            "power_net": { "type": "string" },
-            "designator": { "type": "string" },
-            "value": { "type": "string" },
-            "gnd_net": { "type": "string" },
-            "lib_id": { "type": "string" }
+            "op": {
+              "const": "place_decoupling"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "anchor": {
+              "$ref": "#/$defs/anchorref"
+            },
+            "offset_mil": {
+              "$ref": "#/$defs/point"
+            },
+            "power_net": {
+              "type": "string"
+            },
+            "designator": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "gnd_net": {
+              "type": "string"
+            },
+            "lib_id": {
+              "type": "string"
+            }
           },
-          "required": ["op", "power_net"],
+          "required": [
+            "op",
+            "power_net"
+          ],
           "description": "Macro: one bypass cap + rail/gnd labels on its pins. Position is exactly one of x_mil+y_mil or anchor (+offset_mil) — e.g. anchor 'U1.VCC' drops the cap next to the pin it decouples."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_pullup" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "anchor": { "$ref": "#/$defs/anchorref" },
-            "offset_mil": { "$ref": "#/$defs/point" },
-            "net": { "type": "string" },
-            "rail_net": { "type": "string" },
-            "designator": { "type": "string" },
-            "value": { "type": "string" },
-            "lib_id": { "type": "string" }
+            "op": {
+              "const": "place_pullup"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "anchor": {
+              "$ref": "#/$defs/anchorref"
+            },
+            "offset_mil": {
+              "$ref": "#/$defs/point"
+            },
+            "net": {
+              "type": "string"
+            },
+            "rail_net": {
+              "type": "string"
+            },
+            "designator": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "lib_id": {
+              "type": "string"
+            }
           },
-          "required": ["op", "net", "rail_net"],
+          "required": [
+            "op",
+            "net",
+            "rail_net"
+          ],
           "description": "Macro: one pull-up/-down resistor + labels. Position is exactly one of x_mil+y_mil or anchor (+offset_mil)."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_led_indicator" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "net": { "type": "string" },
-            "designators": { "$ref": "#/$defs/strpair" },
-            "r_value": { "type": "string" },
-            "gnd_net": { "type": "string" },
-            "mid_net": { "type": "string" },
-            "spacing_mil": { "type": "number" }
+            "op": {
+              "const": "place_led_indicator"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "net": {
+              "type": "string"
+            },
+            "designators": {
+              "$ref": "#/$defs/strpair"
+            },
+            "r_value": {
+              "type": "string"
+            },
+            "gnd_net": {
+              "type": "string"
+            },
+            "mid_net": {
+              "type": "string"
+            },
+            "spacing_mil": {
+              "type": "number"
+            }
           },
-          "required": ["op", "x_mil", "y_mil", "net"]
+          "required": [
+            "op",
+            "x_mil",
+            "y_mil",
+            "net"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_rc_filter" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "in_net": { "type": "string" },
-            "out_net": { "type": "string" },
-            "designators": { "$ref": "#/$defs/strpair" },
-            "r_value": { "type": "string" },
-            "c_value": { "type": "string" },
-            "gnd_net": { "type": "string" },
-            "spacing_mil": { "type": "number" }
+            "op": {
+              "const": "place_rc_filter"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "in_net": {
+              "type": "string"
+            },
+            "out_net": {
+              "type": "string"
+            },
+            "designators": {
+              "$ref": "#/$defs/strpair"
+            },
+            "r_value": {
+              "type": "string"
+            },
+            "c_value": {
+              "type": "string"
+            },
+            "gnd_net": {
+              "type": "string"
+            },
+            "spacing_mil": {
+              "type": "number"
+            }
           },
-          "required": ["op", "x_mil", "y_mil", "in_net", "out_net"]
+          "required": [
+            "op",
+            "x_mil",
+            "y_mil",
+            "in_net",
+            "out_net"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_crystal" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "in_net": { "type": "string" },
-            "out_net": { "type": "string" },
-            "designators": { "$ref": "#/$defs/strtriple" },
-            "value": { "type": "string" },
-            "load_c": { "type": "string" },
-            "gnd_net": { "type": "string" },
-            "spacing_mil": { "type": "number" }
+            "op": {
+              "const": "place_crystal"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "in_net": {
+              "type": "string"
+            },
+            "out_net": {
+              "type": "string"
+            },
+            "designators": {
+              "$ref": "#/$defs/strtriple"
+            },
+            "value": {
+              "type": "string"
+            },
+            "load_c": {
+              "type": "string"
+            },
+            "gnd_net": {
+              "type": "string"
+            },
+            "spacing_mil": {
+              "type": "number"
+            }
           },
-          "required": ["op", "x_mil", "y_mil", "in_net", "out_net"]
+          "required": [
+            "op",
+            "x_mil",
+            "y_mil",
+            "in_net",
+            "out_net"
+          ]
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_array" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "lib_id": { "type": "string" },
-            "designator_prefix": { "type": "string" },
-            "count": { "type": "integer", "minimum": 1, "maximum": 200 },
-            "x_mil": { "type": "number" },
-            "y_mil": { "type": "number" },
-            "start_index": { "type": "integer", "minimum": 0 },
-            "pitch_mil": { "type": "number" },
-            "direction": { "enum": ["right", "down", "left", "up"] },
-            "value": { "type": "string" },
-            "values": { "type": "array", "items": { "type": "string" }, "minItems": 1,
-                        "description": "Per-element values; length must equal count (checked at expansion)." },
-            "rotation": { "$ref": "#/$defs/rotation" },
-            "footprint": { "type": "string" }
+            "op": {
+              "const": "place_array"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "lib_id": {
+              "type": "string"
+            },
+            "designator_prefix": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "x_mil": {
+              "type": "number"
+            },
+            "y_mil": {
+              "type": "number"
+            },
+            "start_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pitch_mil": {
+              "type": "number"
+            },
+            "direction": {
+              "enum": [
+                "right",
+                "down",
+                "left",
+                "up"
+              ]
+            },
+            "value": {
+              "type": "string"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "Per-element values; length must equal count (checked at expansion)."
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            },
+            "footprint": {
+              "type": "string"
+            }
           },
-          "required": ["op", "lib_id", "designator_prefix", "count", "x_mil", "y_mil"],
+          "required": [
+            "op",
+            "lib_id",
+            "designator_prefix",
+            "count",
+            "x_mil",
+            "y_mil"
+          ],
           "description": "Macro: N identical parts in a row/column at a fixed pitch, named <prefix><start_index>.. — placement sugar; labels/wiring stay explicit."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "connect_and_label" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "from": { "$ref": "#/$defs/endpoint" },
-            "to": { "$ref": "#/$defs/endpoint" },
-            "net": { "type": "string" },
-            "orientation": { "$ref": "#/$defs/rotation" },
-            "scope": { "$ref": "#/$defs/scope" }
+            "op": {
+              "const": "connect_and_label"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "from": {
+              "$ref": "#/$defs/endpoint"
+            },
+            "to": {
+              "$ref": "#/$defs/endpoint"
+            },
+            "net": {
+              "type": "string"
+            },
+            "orientation": {
+              "$ref": "#/$defs/rotation"
+            },
+            "scope": {
+              "$ref": "#/$defs/scope"
+            }
           },
-          "required": ["op", "from", "to", "net"],
+          "required": [
+            "op",
+            "from",
+            "to",
+            "net"
+          ],
           "description": "Macro: pin-to-pin wire + ONE net label mid-wire (the fix for facing-pin label collisions)."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "place_pwr_flag" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "at": { "$ref": "#/$defs/anchor" },
-            "rotation": { "$ref": "#/$defs/rotation" }
+            "op": {
+              "const": "place_pwr_flag"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "at": {
+              "$ref": "#/$defs/anchor"
+            },
+            "rotation": {
+              "$ref": "#/$defs/rotation"
+            }
           },
-          "required": ["op", "at"],
+          "required": [
+            "op",
+            "at"
+          ],
           "description": "Macro: power:PWR_FLAG placed MID-WIRE (on-pin placement overlaps symbol bodies); default rotation 90 turns the flag body off the wire axis."
         },
         {
           "additionalProperties": false,
           "properties": {
-            "op": { "const": "terminate_unused_unit" },
-            "group": { "type": "string", "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)." },
-            "sheet": { "type": "string", "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)." },
-            "designator": { "type": "string" },
-            "lib_id": { "type": "string" },
-            "unit": { "type": "integer", "minimum": 1 },
-            "at": { "$ref": "#/$defs/point" },
-            "in_plus": { "type": "string" },
-            "in_minus": { "type": "string" },
-            "out": { "type": "string" },
-            "vcc": { "type": "string" },
-            "gnd": { "type": "string" }
+            "op": {
+              "const": "terminate_unused_unit"
+            },
+            "group": {
+              "type": "string",
+              "description": "Optional functional-group tag; coordinates become group-local (see top-level groups)."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Optional sheet-routing tag: apply this op to the child file the envelope's 'sheets' map declares under this key (0.20 multi-sheet envelope; absent = the draw target itself)."
+            },
+            "designator": {
+              "type": "string"
+            },
+            "lib_id": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "at": {
+              "$ref": "#/$defs/point"
+            },
+            "in_plus": {
+              "type": "string"
+            },
+            "in_minus": {
+              "type": "string"
+            },
+            "out": {
+              "type": "string"
+            },
+            "vcc": {
+              "type": "string"
+            },
+            "gnd": {
+              "type": "string"
+            }
           },
-          "required": ["op", "designator", "lib_id", "unit", "at", "in_plus", "in_minus", "out"],
+          "required": [
+            "op",
+            "designator",
+            "lib_id",
+            "unit",
+            "at",
+            "in_plus",
+            "in_minus",
+            "out"
+          ],
           "description": "Macro: place an unused op-amp/comparator unit and terminate it (gnd on in_plus, vcc on in_minus, no-connect on out)."
         }
       ]

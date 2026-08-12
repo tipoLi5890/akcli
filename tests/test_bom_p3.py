@@ -58,7 +58,7 @@ def test_cli_diff_bom_flag(tmp_path, capsys):
     ops = [{"op": "set_component_parameters", "designator": "R1",
             "value": "22k"}]
     opsfile = tmp_path / "ops.json"
-    opsfile.write_text(json.dumps({"protocol_version": 1,
+    opsfile.write_text(json.dumps({"protocol_version": 2,
                                    "target_format": "kicad",
                                    "target_file": "x", "ops": ops}),
                        encoding="utf-8", newline="\n")

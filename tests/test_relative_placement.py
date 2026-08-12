@@ -29,7 +29,7 @@ def _blank_sch(tmp_path: Path) -> Path:
 
 
 def _doc(*ops_list, **envelope):
-    return {"protocol_version": 1, "target_format": "kicad",
+    return {"protocol_version": 2, "target_format": "kicad",
             "ops": list(ops_list), **envelope}
 
 

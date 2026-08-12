@@ -53,7 +53,7 @@ fix before any check is built on top.
         ┌──────────────── format-agnostic core (the "analysis brain") ────────────────┐
         │  model.py (Schematic/Component/Pin/Net/Pcb/Library + PinType enum)           │
         │  netbuild.py  ◀─ NetPrimitives ─┐    checks/{erc,power,bom,diff,pinmap}.py    │
-        │  ops.py (op-list vocab + validator)   report.py   config.py   units.py        │
+        │  opspec.py + ops/ (vocab + validator)  report.py   config.py   units.py      │
         │  errors.py (ERROR codes + exit codes)  safety.py (limits, safe_path, atomic)  │
         └──────────────────────────────────────────────────────────────────────────────┘
             ▲ primitives                         ▲ primitives                    │ op-list
@@ -99,7 +99,7 @@ before any coordinate is trusted. Conversion: `mil = (intval + frac/100000.0) * 
 All dataclasses; `from __future__ import annotations`. `PinRef = tuple[str, str]` = `(designator, pin_number)`.
 
 ```python
-SCHEMA_VERSION = "1.3"          # 1.1 Pcb tracks/vias; 1.2 pad-level nets; 1.3 finding evidence envelope
+SCHEMA_VERSION = "2.0"          # 1.1 Pcb tracks/vias; 1.2 pad-level nets; 1.3 finding evidence envelope; 2.0 eeschema-aligned canonical net names (see docs/migration-1.0.md)
                                 # 1.0 -> 1.1: Pcb gained tracks/vias/arcs/pads (binary .PcbDoc copper)
 
 class PinType(enum.Enum):       # canonical, format-agnostic
@@ -279,7 +279,7 @@ implement. Altium is import-only — there is no Altium write executor and none 
 |---|---|---|---|
 | `place_component` | place a symbol instance (optional `instance_designators`: per-instance references when the target sheet is instantiated more than once) | ✅ | ✅ |
 | `set_component_transform` | rotate/mirror an existing component | ✅ | ✅ |
-| `set_component_parameters` | set ref/value/footprint/params (optional `instance_references`: per-instance rename on a multiply-instantiated sheet) | ✅ | ✅ |
+| `set_component_parameters` | set ref/value/footprint/params (`new_designator` renames; optional `instance_designators`: per-instance rename on a multiply-instantiated sheet) | ✅ | ✅ |
 | `add_wire` | draw orthogonal wire (may emit many segments) | ✅ | ✅ |
 | `add_junction` | explicit junction dot | ✅ | ✅ |
 | `add_no_connect` | NC flag on a pin | ✅ | ✅ |
@@ -316,8 +316,8 @@ unit owns the pin, and a pin on an unplaced unit fails loudly).
 
 **Per-instance references (0.20, additive).** A sheet file instantiated more than once is
 annotated per instance in KiCad, so one scalar designator would write the SAME refdes onto
-every instance. `place_component` accepts `instance_designators` and
-`set_component_parameters` accepts `instance_references` — both
+every instance. `place_component` and
+`set_component_parameters` both accept `instance_designators` — both
 `{"<instance path>": "<REF>"}` with pairwise-distinct values; `designator` stays the scalar
 uuid seed, so per-instance references never re-identify the node. A scalar reference on such
 a symbol is refused with `INSTANCE_REFS_REQUIRED`, whose message lists the instance paths the
@@ -341,7 +341,7 @@ gained `buses` and `bus_entries` (both default-empty, so the Altium reader is un
 
 ```json
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "target_format": "kicad",
   "target_file": "board.kicad_sch",
   "run_id": "uuid-or-stable-key",
@@ -356,7 +356,9 @@ this op-list may edit: `{NAME: {file: "<child>.kicad_sch"}}`, each resolved rela
 draw target's directory and required to exist already. Any op may carry `"sheet": "<NAME>"`
 and is then applied to that child instead of the target (absent = the target itself; an
 undeclared tag is `SHEET_UNKNOWN` with a did-you-mean; a tagged macro propagates the tag onto
-every op it expands into). `protocol_version` stays `1` — both fields are purely additive.
+every op it expands into). Both fields were purely additive — they did not move
+`protocol_version` (which reached `2` with the 1.0 field renames, see
+[docs/migration-1.0.md](migration-1.0.md)).
 A routed run is ONE transaction (`writers/txn.py`, §3.5): every dirty file is staged and
 connectivity-verified before the first replace, and a partial commit rolls back. `run_id`
 names that transaction — it is recorded in the journal, echoed in the `draw --json` payload
@@ -389,7 +391,7 @@ without an origin), both exit 6.
   "type": "object",
   "required": ["protocol_version", "target_format", "ops"],
   "properties": {
-    "protocol_version": { "const": 1 },
+    "protocol_version": { "const": 2 },
     "target_format": { "enum": ["kicad", "altium"] },
     "target_file": { "type": "string" },
     "run_id": { "type": "string" },                  // transaction id: journalled, named by `undo --run`
@@ -428,10 +430,10 @@ without an origin), both exit 6.
             "rotation": { "$ref": "#/$defs/rotation" }, "mirror": { "$ref": "#/$defs/mirror" } },
           "required": ["op", "designator"] },
         { "properties": { "op": { "const": "set_component_parameters" },
-            "designator": { "type": "string" }, "reference": { "type": "string" },
+            "designator": { "type": "string" }, "new_designator": { "type": "string" },
             "value": { "type": "string" }, "footprint": { "type": "string" },
             "parameters": { "type": "object" },
-            "instance_references": { "type": "object" } },
+            "instance_designators": { "type": "object" } },
           "required": ["op", "designator"] },
         { "properties": { "op": { "const": "add_wire" },
             "vertices": { "type": "array", "items": { "$ref": "#/$defs/endpoint" }, "minItems": 2 } },
@@ -442,7 +444,7 @@ without an origin), both exit 6.
           "required": ["op", "pin"] },
         { "properties": { "op": { "const": "add_net_label" }, "name": { "type": "string" },
             "at": { "$ref": "#/$defs/point" }, "scope": { "enum": ["local", "global", "hierarchical"] },
-            "orientation": { "$ref": "#/$defs/rotation" } },
+            "rotation": { "$ref": "#/$defs/rotation" } },
           "required": ["op", "name", "at"] },
         { "properties": { "op": { "const": "place_power_port" }, "lib_id": { "type": "string" },
             "net_name": { "type": "string" }, "at": { "$ref": "#/$defs/point" },
@@ -475,7 +477,16 @@ without an origin), both exit 6.
 | File | Purpose | Public API (signatures) | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
 | `model.py` | LOCKED dataclasses + `PinType` enum + Altium/KiCad type maps + `NetPrimitives` | (all of §1.3) `to_json(obj)->dict`, `Schematic.export()->dict` | stdlib `dataclasses,enum,hashlib` | `Net.stable_id` = sha1 of sorted membership; `to_json` stamps `schema_version` | `test_model.py` |
-| `ops.py` | op-list vocab constants, `PROTOCOL_VERSION=1`, hand-rolled validator | `PROTOCOL_VERSION:int`; `OP_NAMES:frozenset`; `validate_oplist(doc:dict)->list[OpError]`; `load_oplist(path)->dict`; `Op` typed accessors | `errors`, `schemas/*` (read at import) | Zero-dep structural validator mirroring `ops.schema.json` (`jsonschema` only in dev); rejects free angles, odd wire arrays, unknown ops with `ERROR` codes | `test_ops.py` |
+| `opspec.py` | THE op vocabulary as data: one `OpSpec` per core/sugar/macro op (fields, kinds, required-ness, template placeholders, constraints, designator roles, capability row) + the `ENUMS` value vocabularies | `CORE`, `MACROS`, `ALL`, `UNIVERSAL_FIELDS`, `ROLE_PREFIXES`, `ENUMS`; `core_names()/sugar_names()/macro_names()/op_names()/by_name()`; `class OpSpec/Field/Constraint` | stdlib `dataclasses,typing` only (imports NOTHING from akcli) | The single source the JSON schemas (`tools/schemas.py build`), the `akcli.ops` tables and the capability matrix are all views of; `mypy --strict` clean | `test_ops_kit.py` |
+| `ops/__init__.py` | package shim re-exporting the flat `akcli.ops.*` surface | `PROTOCOL_VERSION`, `OP_NAMES`, `MACRO_OPS`, `validate_oplist`, `prepare_oplist`, `PreparedOpList`, `load_oplist`, `op_template`, `expand_macros`, `resolve_groups`, `load_schema`, `load_capabilities`, `parse_mid_anchor`, `Op`, `OpError`, `GRID_MIL` | the sibling modules below | Strict DAG inside the package: `base`/`vocab` import no sibling; `validate` sits on top | `test_ops.py` |
+| `ops/base.py` | op-list primitives | `PROTOCOL_VERSION:int`; `GRID_MIL`; `class OpError`, `class Op` typed accessors; `parse_mid_anchor`; `_is_point/_is_endpoint/_is_anchor/_is_anchor_ref/_is_pin_ref`; `_in` | stdlib only | Value SHAPE only — never which ops exist | `test_ops.py` |
+| `ops/vocab.py` | every op/field/enum table, DERIVED from `opspec` at import | `OP_NAMES`, `MACRO_OPS`, `_OP_REQUIRED`, `_OP_FIELDS`, `_OP_OPTIONAL`, `MACRO_REQUIRED`, `MACRO_OPTIONAL`, `_MACRO_DESIGNATOR_ROLES`, `_ROLE_PREFIXES`, `_VALID_*`, `_MATCH_KINDS`, `_SHEET_PIN_*` | `opspec` | No hand-written vocabulary left: adding an op touches `opspec.py` and a handler/expander only | `test_ops_kit.py` |
+| `ops/lints.py` | document-level lints shared by validator + expander | `_duplicate_placements`, `_duplicate_power_ports`, `_ANNOTATION_KEY_TAGS`, `_POWER_PORT_OPS` | `ops/base` | One definition of "duplicate" for both callers | `test_ops.py` |
+| `ops/template.py` | `akcli ops template` skeletons | `op_template(name,*,include_optional=True)->dict` | `opspec`, `ops/vocab` | Placeholders are `Field.template` — declared per field per op | `test_ops_kit.py` |
+| `ops/macros.py` | the 10 macro expanders + expansion pass | `expand_macros(doc,*,origins=None)->dict`; `_MACRO_EXPANDERS` | `errors`, `ops/base`, `ops/lints`, `ops/vocab` | Label-on-pin connectivity; macros never reach the schema or the executors | `test_macros2.py`, `test_macro_validation.py` |
+| `ops/groups.py` | group-local → absolute coordinate resolution | `resolve_groups(doc)->dict`; `is_resolved(doc)->bool`; `_GROUP_XY_OPS/_GROUP_AT_OPS/_GROUP_VERTEX_OPS` (derived from `Field.coord`) | `opspec`, `errors`, `ops/base` | Pure vector add; the resolved document's TYPE (`_ResolvedDoc`, a `dict` subclass) makes a second call a no-op — never a marker KEY, which would leak into echoed payloads | `test_groups.py` |
+| `ops/validate.py` | the zero-dependency structural validator | `validate_oplist(doc:dict)->list[OpError]`; `prepare_oplist(doc)->PreparedOpList` (frozen `doc`/`errors`/`groups_resolved`); `load_oplist(path)->dict` | `classify`, `errors`, `ops/base|vocab|lints|macros|groups` | Mirrors `ops.schema.json` (`jsonschema` only in dev) because both are views of `opspec`; rejects free angles, odd wire arrays, unknown ops with `ERROR` codes; `_RENAMED_IN_V2` turns a protocol-1 field spelling into a named rename instead of a did-you-mean guess | `test_ops.py`, `test_fuzz_oplist.py` |
+| `ops/schema_io.py` | reads the published JSON schemas | `load_schema()->dict`; `load_capabilities()->dict` | stdlib `importlib.resources` | Packaged mirror first, repo-root `schemas/` fallback | `test_schema_exports.py` |
 | `errors.py` | ERROR-code registry + exit-code table + `AkcliError`; top-level `as_error()` wrapper | `class AkcliError(Exception)`; `EXIT:dict[str,int]`; `ERROR_CODES:frozenset`; `def fail(code:str,msg:str)->NoReturn`; `def to_exit(exc)->int` | stdlib only | Codes: `ALTIUM_BAD_MAGIC, ALTIUM_FAT_CYCLE, ALTIUM_OOB_SECTOR, ALTIUM_BAD_SECTOR_SHIFT, ALTIUM_ALLOC_GUARD, ALTIUM_MALFORMED, ALTIUM_UNSUPPORTED, KICAD_SEXPR_DEPTH, KICAD_SEXPR_UNTERMINATED, KICAD_SEXPR_TOOBIG, KICAD_SEXPR_BAD_NUMBER, KICAD_BAD_ENCODING, INTERNAL, SYMBOL_NOT_FOUND, BAD_ANGLE, NON_ORTHOGONAL_WIRE, OFF_GRID, OVERLAP, VERIFY_FAILED, OP_UNSUPPORTED, HIERARCHICAL_UNSUPPORTED, DESIGN_UNSUPPORTED, PROTOCOL_MISMATCH, TARGET_LOCKED, PATH_OUTSIDE_ROOT, FILE_UNREADABLE, GROUP_UNKNOWN, GROUP_NO_ORIGIN, POWER_PORT_STACKED, SHEET_FILE_MISSING, PROJECT_ROOT_AMBIGUOUS, PROJECT_ROOT_MISMATCH, SHEET_UNKNOWN, INSTANCE_REFS_REQUIRED, TXN_ROLLBACK_FAILED, KICAD_CLI_TIMEOUT, KICAD_CLI_MISSING, NGSPICE_MISSING, NGSPICE_FAILED, NETWORK, SIM_NO_GROUND, SIM_NODE_COLLISION, SIM_NODE_COUNT_MISMATCH, SIM_VALUE_INVALID, SIM_OP_ASSERT_UNSUPPORTED, BINFETCH_DOWNLOAD, BINFETCH_CHECKSUM, BAD_CONFIG, BRIDGE_BUSY, BRIDGE_TIMEOUT` (the `BRIDGE_*` pair is reserved/unraised). `TARGET_LOCKED` (→ exit 6) is raised when a `~<name>.lck` GUI lock is present and `--allow-open` was not passed — by the KiCad writer, and by the `relink-symbols`/`library repair` apply paths (`safety.refuse_if_gui_locked`). Exit table: `docs/cli-reference.md` §"Exit codes" | `test_errors.py` |
 | `safety.py` | hard limits + safe IO helpers used everywhere | `MAX_FILE_BYTES, MAX_SECTORS, MAX_RECORDS, MAX_DIR_ENTRIES, MAX_DECODED_BYTES, MAX_SEXPR_DEPTH, MAX_ATOM_BYTES, MAX_NODES`; `safe_path(base,cand)->Path`; `run_subprocess(argv,timeout,maxout)->CompletedProcess`; `atomic_write_with_backup(path,data,backup_dir)->None`; `refuse_if_gui_locked(paths,*,allow_open,what)->None` | stdlib `os,subprocess,resource,signal,pathlib,shutil` | `read_text_guarded`: the ONE UTF-8 text reader for KiCad documents — strict decode (`KICAD_BAD_ENCODING`), OSError family → `FILE_UNREADABLE`, size cap → `KICAD_SEXPR_TOOBIG`, so a corrupt file gets ONE answer across `read`/`arrange`/`groups`/`check`; `safe_path`: realpath both, reject escapes/symlinks, never expand env from untrusted files; `refuse_if_gui_locked`: the ONE `~<name>.lck` guard shared by `draw`/`arrange`/`undo`/`relink-symbols`/`library repair` apply paths → `TARGET_LOCKED`; `run_subprocess`: `shell=False`, abs exe, `--` before paths, timeout, output cap; `atomic_write`: snapshot→temp-in-same-dir→fsync→`os.replace` | `test_safety.py`, `test_fuzz_safety.py` |
 | `units.py` | all coordinate conversions + grid + tolerance | `ALTIUM_SCH_MIL_PER_UNIT=10.0`; `MIL_PER_MM=1/0.0254`; `NM_PER_MIL=25400`; `NM_PER_MM=1_000_000`; `altium_to_mil(i,frac)->float`; `mil_to_nm(m)->int`; `nm_to_mm_str(nm)->str`; `snap_mil(m,grid=50)->float`; `approx_eq(a,b,tol_nm)->bool` | stdlib | `nm_to_mm_str` strips trailing zeros/dot (KiCad float style); integer-nm math only | `test_units.py` |
@@ -501,13 +512,13 @@ without an origin), both exit 6.
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
-| `netbuild.py` | format-agnostic net inference (the STAT fix) | `build_nets(prims:NetPrimitives)->list[Net]` | `model`, `units` | **Pipeline (LOCKED):** (1) exact-integer geometric union-find on wire segments (coords in fine-int from `_Frac`); (2) union each **junction(29)** point onto every segment it lies on; (3) **T-junction**: union every wire vertex lying on another wire's mid-span; (4) union pins/labels lying on a segment (`on_seg`, exact integer cross-product) — **pins connect at segment endpoints or junction-marked points only** (a bare mid-span touch does not connect: eeschema's rule, and Altium's editor inserts a junction record for every pin tap); labels connect anywhere along the wire; (5) **GLOBAL same-name merge:** group all label/power-port names per component, `name→set(roots)`, union every pair sharing any name — *this stitches the two STAT clusters and aliases STAT≡LED1_GPIO_RD*; (6) naming priority: power-port > net-label > auto, honor `power_priority`; keep all names as `aliases`, emit confidence<1 + a NOTE on multi-name nets; (7) **stable synthetic ids from sorted membership**, never `N$x_y`; (8) record `merge_reasons` for explainability; (9) multi-sheet: union by Port/SheetEntry name (net labels are sheet-local, power ports global) | `test_netbuild.py` (+ STAT/alias, junction, T-junction, NoERC, two-same-name-GND fixtures) |
+| `netbuild.py` | format-agnostic net inference (the STAT fix) | `build_nets(prims:NetPrimitives)->list[Net]` | `model`, `units` | **Pipeline (LOCKED):** (1) exact-integer geometric union-find on wire segments (coords in fine-int from `_Frac`); (2) union each **junction(29)** point onto every segment it lies on; (3) **T-junction**: union every wire vertex lying on another wire's mid-span; (4) union pins/labels lying on a segment (`on_seg`, exact integer cross-product) — **pins connect at segment endpoints or junction-marked points only** (a bare mid-span touch does not connect: eeschema's rule, and Altium's editor inserts a junction record for every pin tap); labels connect anywhere along the wire; (5) **GLOBAL same-name merge:** group all label/power-port names per component, `name→set(roots)`, union every pair sharing any name — *this stitches the two STAT clusters and aliases STAT≡LED1_GPIO_RD*; (6) naming priority: KiCad sources follow eeschema's driver ladder (GLOBAL > POWER_PIN > LOCAL_LABEL > HIER_LABEL > SHEET_PIN > auto, alphabetical tie-break); Altium sources keep power-port vs net-label ordered by `power_priority`; keep all names as `aliases`, emit confidence<1 + a NOTE on multi-name nets; (7) **stable synthetic ids from sorted membership**, never `N$x_y`; (8) record `merge_reasons` for explainability; (9) multi-sheet: union by Port/SheetEntry name (net labels are sheet-local, power ports global) | `test_netbuild.py` (+ STAT/alias, junction, T-junction, NoERC, two-same-name-GND fixtures) |
 
 ### 3.4 KiCad readers (`src/akcli/readers/`)
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
-| `sexpr.py` | iterative, depth/size-capped S-expr tokenizer+parser (shared by readers + writer) | `parse(text:str)->SNode`; `dumps(node:SNode)->str`; `class SNode` (preserves untouched atom text + child order) | `safety`, `errors` | **Explicit-stack** (no recursion; `setrecursionlimit` banned); enforce `MAX_SEXPR_DEPTH/MAX_ATOM_BYTES/MAX_NODES`; bounded quote/escape scan; unterminated/over-deep → `KICAD_SEXPR_*`. `SNode` keeps original token text so untouched nodes reserialize byte-identical | `test_sexpr.py`, `test_fuzz_safety.py` |
+| `sexpr/parser.py` | iterative, depth/size-capped S-expr tokenizer+parser (shared by readers + writer) | `parse(text:str)->SNode`; `dumps(node:SNode)->str`; `class SNode` (preserves untouched atom text + child order) | `safety`, `errors` | **Explicit-stack** (no recursion; `setrecursionlimit` banned); enforce `MAX_SEXPR_DEPTH/MAX_ATOM_BYTES/MAX_NODES`; bounded quote/escape scan; unterminated/over-deep → `KICAD_SEXPR_*`. `SNode` keeps original token text so untouched nodes reserialize byte-identical | `test_sexpr.py`, `test_fuzz_safety.py` |
 | `kicad.py` | `.kicad_sch`/`.kicad_pcb` → `Schematic`/`Pcb` | `read_sch(path)->Schematic`; `read_pcb(path)->Pcb`; `read_primitives(path)->NetPrimitives` | `sexpr`, `kicad_lib`, `model`, `netbuild`, `units` | Resolve **pin electrical types from `lib_symbols` at read time** (KiCad pins on instances carry no type); parse `(wire)`,`(junction)`,`(no_connect)`,`(label/global_label/hierarchical_label)`,`(symbol …)` with `(instances)` refdes; **recurse into `(sheet …)` children** (per-instance namespaces; designators from the matching instances path; sheet-pin↔hier-label pairs via synthetic never-naming "hier" connectors; cycle/depth-guarded); coords mm→mil (no Y flip; KiCad already +Y down); → `NetPrimitives` → `netbuild` | `test_kicad_reader.py` |
 | `altium_prj.py` | `.PrjPcb` project → top-sheet `Schematic` | `read(path)->Schematic`; `read_project(path)->dict` | `altium_sch`, `errors` | INI-ish parse (configparser, strict=False); document list (backslash paths resolved), `PowerPortNamesTakePriority` → `NetPrimitives.power_priority`; top sheet = the schematic no sheet symbol references | `test_altium_hierarchy.py` |
 | `kicad_lib.py` | `.kicad_sym` + inline `lib_symbols` → `Library` | `read(path)->Library`; `resolve(lib_id, sources)->SymbolDef`; `pin_offsets(sym)->list` | `sexpr`, `model` | Resolve `(extends ...)` (load base); keep `body_sexpr` for writer's lib_cache; pin offsets in symbol-local coords for world-coord computation | `test_kicad_lib.py` |
@@ -516,14 +527,14 @@ without an origin), both exit 6.
 
 | File | Purpose | Public API | Imports | Algorithm notes | Tested by |
 |---|---|---|---|---|---|
-| `geometry.py` | coord/transform core (the module that makes wires hit pins) | `pin_world(sym,inst,pin)->tuple[int,int]` (nm); `transform_point(pt,rot,mirror,origin)->...`; `grid_snap_nm(pt,grid)->...`; `mil_to_nm/nm_to_mm_str` re-exports | `units`, `model` | Integer-nm; rotation 0/90/180/270 + mirror (x/y) matrices, **rotate-then-mirror**, Y-down; transform child `(property)` positions/angles too | `test_geometry.py` |
-| `sexpr_writer.py` | KiCad-faithful serializer | `serialize(node:SNode)->str` | `sexpr`, `units` | 2-space indent, KiCad string quoting/escaping, float via `nm_to_mm_str`, preserve untouched-node text + child order. **Gate:** byte-identical no-op round-trip | `test_roundtrip_byte_identity.py` |
+| `geometry/transform.py` | coord/transform core (the module that makes wires hit pins; package also holds `boxes.py` box primitives + `segments.py` integer segment/union-find) | `pin_world(sym,inst,pin)->tuple[int,int]` (nm); `transform_point(pt,rot,mirror,origin)->...`; `grid_snap_nm(pt,grid)->...`; `mil_to_nm/nm_to_mm_str` re-exports | `units`, `model` | Integer-nm; rotation 0/90/180/270 + mirror (x/y) matrices, **rotate-then-mirror**, Y-down; transform child `(property)` positions/angles too | `test_geometry.py` |
+| `sexpr/writer.py` | atom-construction helpers (quoting + nm float rendering) | `quote(value:str)->str` (alias of `kicad_escape.quote_atom`); `atom_for_token/atom_for_value/atom_for_nm(...)->SNode` | `sexpr`, `units`, `kicad_escape` | The ONE serializer is `sexpr.dumps` (parser module); this module only builds atoms. String quoting/escaping delegates to `kicad_escape.quote_atom` (single implementation, every historical alias pinned `is`-identical by `test_sexpr_quoting.py`). **Gate:** byte-identical no-op round-trip via `dumps` | `test_roundtrip_byte_identity.py` |
 | `txn.py` | multi-file op-list transaction (0.20): envelope `sheets` map + per-op `sheet` tags route ops across the target's child files | `apply_project(oplist,target,apply,*,sources,file_map,verify_out,allow_open,run_id)->(results,report)`; `resolve_sheet_files(oplist,target)->dict`; `sheet_routed(oplist)->bool` | `atomic`, `connectivity`, `instances`, `kicad` (`run_ops`/`envelope_gate`), `journal`, `safety` | Per-file doc/ctx (each file seeds uuids from its OWN root uuid), per-op routing through the shared `run_ops` loop, every dirty file verified then STAGED (`atomic.prepare`) before the first `os.replace`; pre-write bytes + manifest under `.akcli/backups/runs/<run_id>/` (journal-independent recovery unit); partial commit auto-rolls-back (`VERIFY_FAILED`), rollback failure is loud (`TXN_ROLLBACK_FAILED` + `undo --run`); `file_map` = shadow-tree dry-apply (no locks/backups/journal) | `test_txn.py` |
 | `atomic.py` | atomic-write primitives shared by the executor and the project transaction | `prepare(p,text,snap_sha,verify)->PreparedWrite`; `commit(pw,backup_dir,backup_depth)`; `abort(pw)`; `atomic_write(...)`; `backup_name(name,level)`; `rotate_backups(bd,name,depth)`; `check_snapshot(p,snap_sha)` | `errors` (stdlib otherwise) | The historical single-shot atomic write decomposed into prepare/commit/abort so a multi-file caller can stage EVERY temp (written+fsync'd+verified) before the first `os.replace` — two-phase-commit shape; binary write (`os.fdopen(fd,"wb")`), snapshot-guarded optimistic lock, rotated `.bak` stack with crash-safe pending→rotate→promote | `test_ops.py` / `test_op_idempotency_census.py` (via `apply`) |
 | `lib_cache.py` | `lib_symbols` cache resolution & copy | `ensure_cached(doc,lib_id,sources)->None`; `SYMBOL_NOT_FOUND` on miss | `kicad_lib`, `sexpr`, `errors`, `config` | Requalify parent → `Nick:Name`, keep child unit names unqualified (`Name_0_1`); **flatten** an `(extends)`-derived symbol into one standalone entry (base inlined under the derived name, units renamed, derived properties overlaid, `extends` dropped — KiCad's own save behavior; its loader will not resolve a bare `(extends "Base")` against a qualified cached base); **dedup by lib_id**; copy full pin electrical types (ERC needs them); symbol source = config `.kicad_sym` paths and/or template `.kicad_sch` | `test_lib_cache.py` (incl. `C_Polarized` extends fixture) |
 | `instances.py` | refdes/instances/sheet-path + `#PWR` allocation | `write_instance(doc,sym,ref:str\|Mapping[str,str],path)->None`; `symbol_references(sym)->dict[str,str]`; `primary_reference(sym)->str\|None`; `alloc_pwr_ref(doc)->str`; `alloc_pwr_refs(doc,count)->list[str]`; `instances_path(doc,sheet)->str`; `sibling_paths(doc,exclude)->list[str]` | `sexpr`, `errors` | Write BOTH `(property "Reference")` AND `(instances (project … (path … (reference …)(unit …))+))`, in sync; derive project name + root-sheet uuid; `instances_path` writes onto the target file's OWN root sheet only — an op naming a sub-sheet path → `HIERARCHICAL_UNSUPPORTED` (a child `.kicad_sch` is instead authored as its own draw target; the connectivity gate accepts its parent-hierarchy path). In a CHILD file the flat path is not the truth: when the symbols already there carry multi-segment hierarchy paths, a newly placed one JOINS that exact set (one `(path …)` entry per instantiation) — the single-segment form made kicad-cli report annotation errors. **Per-path references (0.20):** `ref` may be a `{instance path: reference}` mapping (values pairwise-distinct, insertion order preserved, the first pair shown in the `Reference` property); a scalar `ref` on a symbol sitting on several instance paths is refused `INSTANCE_REFS_REQUIRED` listing those paths, and `symbol_references`/`primary_reference` read the per-path set back so a lookup by refdes matches ANY instance's reference; `#PWR0xx` unique alloc (`alloc_pwr_refs` hands out one per instance); **deterministic UUIDv5** = `uuid5(sheet_uuid, designator+":0")` for idempotency (op-index-free: inserting/reordering ops must not change untouched parts' identity) | `test_instances.py` |
 | `connectivity.py` | pure-Python ERC-lite — **primary** post-write gate | `verify(doc,*,path=None)->list[Finding]`; `auto_junctions(doc)->None` | `model`, `geometry`, `errors` | Exact-coincidence of every new wire endpoint vs pin/label/junction/port/another wire ENDPOINT — a mid-span T conducts only with a `(junction)`, netbuild's rule (`t_midspan_connects=False`), pinned by `test_engine_parity.py`; auto-insert `(junction)` at 3+ way meets; honor `(no_connect)`; `DUPLICATE_UUID` + `DUPLICATE_DESIGNATOR` (same `(reference, unit)` counted per PATH ENTRY — two symbol nodes, or one symbol carrying the same ref on two instance paths of a reused sheet; the re-apply/uuid-seed-mismatch symptom; `?` placeholders of an unannotated sheet are NOT duplicates) + `UNRESOLVED_LIB_ID` + `INVALID_INSTANCES_PATH` (accepts `/<own-root>` **or** a multi-segment `/<top-root>/<sheet>…` parent-hierarchy path, so a child sheet file is writable) + `POWER_PORT_STACKED` (two net-naming power symbols on one coordinate; `PWR_FLAG` exempt, as in netbuild) + `SHEET_FILE_MISSING` (needs `path`) + `NO_CONNECT_CONFLICT`. Also exposed read-only as `check --integrity` over any `.kicad_sch`. **Runs with no KiCad installed** | `test_writer_connectivity.py` |
-| `kicad.py` | op-list executor → surgical `.kicad_sch` edits | `apply(oplist:dict,path:str,apply:bool)->list[OpResult]`; `envelope_gate(oplist)->None`; `run_ops(oplist,src_libs,resolve)->tuple[list[OpResult],bool]` | all writers (incl. `atomic`) + `ops`,`safety`,`errors` | Per op: snap pin-ref endpoints to `pin_world`; emit per-pin `(pin "N" (uuid …))`. The document-level gates (higher major `protocol_version` → `PROTOCOL_MISMATCH`, structural validation, non-`kicad` `target_format`) live in `envelope_gate` and the per-op dispatch loop (with per-op containment, SPEC §2.4) in `run_ops` — **both shared verbatim with the multi-file transaction** (`txn.py`), which passes a sheet-routed `resolve(op)` where the single-file executor passes a constant one. The write itself is `atomic.py`'s primitives, not a private copy: snapshot/hash optimistic lock → temp+fsync → re-parse + connectivity verify on TEMP → `os.replace` only on pass, with the rotated `.bak` stack; `--dry-run` emits ops+verify, no write | `test_kicad_writer.py` |
+| `kicad.py` (facade over `executor/registry/context/anchors/properties/placement/handlers/*`) | op-list executor → surgical `.kicad_sch` edits | `apply(oplist:dict,path:str,apply:bool)->list[OpResult]`; `envelope_gate(oplist)->None`; `run_ops(oplist,src_libs,resolve)->tuple[list[OpResult],bool]` | all writers (incl. `atomic`) + `ops`,`safety`,`errors` | Per op: snap pin-ref endpoints to `pin_world`; emit per-pin `(pin "N" (uuid …))`. The document-level gates (higher major `protocol_version` → `PROTOCOL_MISMATCH`, structural validation, non-`kicad` `target_format`) live in `envelope_gate` and the per-op dispatch loop (with per-op containment, SPEC §2.4) in `run_ops` — **both shared verbatim with the multi-file transaction** (`txn.py`), which passes a sheet-routed `resolve(op)` where the single-file executor passes a constant one. The write itself is `atomic.py`'s primitives, not a private copy: snapshot/hash optimistic lock → temp+fsync → re-parse + connectivity verify on TEMP → `os.replace` only on pass, with the rotated `.bak` stack; `--dry-run` emits ops+verify, no write | `test_kicad_writer.py` |
 
 ### 3.6 Checks (`src/akcli/checks/`)
 
@@ -611,7 +622,9 @@ neither copied nor consulted.
 | `hooks/hooks.json` | SessionStart Python-version warning | §5.4 — stderr only, exit 0 | `jq . hooks/hooks.json` in CI |
 | `pyproject.toml` | PyPI dist + console_scripts | §7 — setuptools backend, `packages.find where=["src"]`, EDA classifier | `python -m build && twine check dist/*` |
 | `tools/sync_version.py` | stamp plugin.json/marketplace.json from pyproject version | `main()`; CI fails on drift | `test_sync_version.py` |
-| `tools/sync_schemas.py` | sync `schemas/*.json` into the packaged mirror `src/akcli/schemas/`, pruning orphans (`--check` = drift only, no write) | `main()`; the mirrors must be byte-identical, and the two directories must hold the same set of names | `test_schema_exports.py` |
+| `tools/schemas.py` | the ONE schema entry point: `build` regenerates `schemas/ops.schema.json` + `ops.capabilities.json` from `akcli.opspec` AND refreshes the packaged mirror `src/akcli/schemas/` (pruning orphans); `check` reports both drifts without writing | `build_schema()`, `build_capabilities()`, `render()`, `generate(check=)`, `sync(check=)`, `main(argv)`; generated output is byte-exact, and the two schema directories must hold the same set of names | `test_ops_kit.py`, `test_schema_exports.py` |
+| `tools/gen_ops_schema.py` | thin compatibility entry point onto the GENERATE half of `tools/schemas.py` | `main(argv)` | — |
+| `tools/sync_schemas.py` | thin compatibility entry point onto the MIRROR half of `tools/schemas.py` | `main(argv)` | — |
 | `.gitattributes` | binary/text fixture rules | §6 — `tests/fixtures/** binary`, golden/`*.kicad_sch text eol=lf` | implicit (Windows CI) |
 | `.github/workflows/ci.yml` | CI matrix + validators | §6.4 | self |
 | `examples/akcli.toml.example` | tested reference config incl. `[[erc_waiver]]` | §3.11 | `test_config.py` |
@@ -712,7 +725,7 @@ and in the packaged mirror (`tests/test_schema_exports.py`).
 
 **FOUNDATION (Group F) — authored FIRST and FROZEN before any other group starts.** No other group may edit
 these; they are the contract everyone codes against:
-`model.py, ops.py, errors.py, safety.py, units.py, config.py, report.py, __main__.py`,
+`model.py, opspec.py, ops/, errors.py, safety.py, units.py, config.py, report.py, __main__.py`,
 `schemas/{ops,ops.capabilities,schematic,netlist}.schema.json`,
 `.claude-plugin/{plugin,marketplace}.json, bin/akcli, bin/akcli, hooks/hooks.json, pyproject.toml,
 .gitattributes`, `tests/fixtures/_gen/{altium_fixture.py,ole_writer.py,cfbf_builder.py}`,
@@ -943,7 +956,7 @@ where = ["src"]
 | 5 | S-expr recursion → uncatchable SIGSEGV | iterative parser, depth/atom/node caps, ban `setrecursionlimit` | ✅ |
 | 6 | KiCad wires don't connect (geometry/units) | integer-nm math, pin-world snapping, `connectivity.verify` primary gate, byte-identity gate | ✅ (no KiCad needed for primary gate) |
 | 7 | Non-deterministic UUIDs → non-idempotent writes; an edited op-list re-identifying untouched nodes → the design duplicated downstream of the edit | UUIDv5 from sheet-uuid + **content** for EVERY created node — designator (parts), endpoints (wires), name+written anchor (labels), file+name (sheets), coordinates (graphics) — with **no op index anywhere**; `#PWR` refs recovered by position (+species, so a `PWR_FLAG` may share a port's point); two ops seeding one uuid are refused naming both indices; in a multi-sheet transaction every routed file seeds from its OWN root uuid, so the namespaces stay per-file and each file replays byte-identically; byte-identity re-apply gate, and `DUPLICATE_DESIGNATOR`/`POWER_PORT_STACKED` as ERRORs in the write gate / `check --integrity` | ✅ |
-| 8 | `(instances)` path / `#PWR` wrong → empty netlist / R? | write both legacy + instances path; ops target one file's own root sheet (sub-sheet path → `HIERARCHICAL_UNSUPPORTED`), while the gate accepts a child file's parent-hierarchy path so child sheets are writable — a part placed INTO a child copies its siblings' full sheet-path set (both entries of a twice-instantiated sheet), since the child cannot derive its parents' uuids; on such a sheet the reference is written PER path (`instance_designators`/`instance_references`) and a scalar designator is refused `INSTANCE_REFS_REQUIRED` rather than stamping one refdes onto every instance, with `DUPLICATE_DESIGNATOR` counting per path entry; `INVALID_INSTANCES_PATH` in the write gate and `check --integrity` | ✅ |
+| 8 | `(instances)` path / `#PWR` wrong → empty netlist / R? | write both legacy + instances path; ops target one file's own root sheet (sub-sheet path → `HIERARCHICAL_UNSUPPORTED`), while the gate accepts a child file's parent-hierarchy path so child sheets are writable — a part placed INTO a child copies its siblings' full sheet-path set (both entries of a twice-instantiated sheet), since the child cannot derive its parents' uuids; on such a sheet the reference is written PER path (`instance_designators`) and a scalar designator is refused `INSTANCE_REFS_REQUIRED` rather than stamping one refdes onto every instance, with `DUPLICATE_DESIGNATOR` counting per path entry; `INVALID_INSTANCES_PATH` in the write gate and `check --integrity` | ✅ |
 | 9 | `bin/akcli` `$CLAUDE_PLUGIN_ROOT` empty / python 3.9 | self-locating wrapper + interpreter discovery | ✅ |
 | 10 | DIFF noise (coordinate-named nets) | match by membership/UniqueID, never display name | ✅ |
 | 11 | Licensing: proprietary header + false "clean-room" | relicense parser to MIT (strip `LicenseRef-Proprietary`); own schema namespace; `THIRD_PARTY_NOTICES` crediting altium-mcp chain | ✅ |
@@ -968,7 +981,7 @@ where = ["src"]
 
 ## 9. Build order
 
-**Frozen-first set (author + freeze before anything else):** `model.py, ops.py, errors.py, safety.py,
+**Frozen-first set (author + freeze before anything else):** `model.py, opspec.py, ops/, errors.py, safety.py,
 units.py, config.py, schemas/*.json, pyproject.toml, .claude-plugin/plugin.json,
 .claude-plugin/marketplace.json, bin/akcli, hooks/hooks.json` + the fixture generators. Everything else codes
 against these signatures and never edits them. After the foundation, the ownership groups in §4 proceed in

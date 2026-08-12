@@ -24,10 +24,16 @@ FIXTURES = ROOT / "tests" / "fixtures"
 
 
 def test_missing_file_emits_json_error_envelope():
+    from akcli import __version__
+
     rc, out, err = run_cli(["read", "/nonexistent/board.kicad_sch", "--json"])
     assert rc == 4
     doc = json.loads(out)
     assert doc["schema_version"]
+    # the build that produced the failure is part of the envelope: a code and
+    # a message pasted out of an agent transcript are otherwise unversioned
+    assert doc["akcli_version"] == __version__
+    assert list(doc) == ["schema_version", "akcli_version", "error"]
     assert doc["error"]["code"] == "FILE_NOT_FOUND"
     assert doc["error"]["exit"] == 4
     assert doc["error"]["remediation"]      # EXIT-name pseudo-codes hint too
@@ -72,7 +78,7 @@ def test_exitwith_wrapped_error_code_is_recovered(tmp_path):
 def _bad_opslist(tmp_path, target, ops_body) -> Path:
     ops = tmp_path / "bad.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "target_file": target.name, "ops": ops_body,
     }), encoding="utf-8")
     return ops

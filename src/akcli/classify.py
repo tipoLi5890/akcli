@@ -39,7 +39,8 @@ from __future__ import annotations
 import re
 
 __all__ = [
-    "refdes_prefix",
+    "refdes_prefix", "split_refdes",
+    "natkey",
     "norm",
     "implied_voltage",
     "rail_matches",
@@ -68,6 +69,23 @@ __all__ = [
 _PREFIX_RX = re.compile(r"[A-Za-z]+")
 
 
+_SPLIT_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
+
+
+def split_refdes(ref: str) -> tuple[str, int] | None:
+    """``(alpha-prefix, int-suffix)`` of a SIMPLE refdes, or None if compound.
+
+    The second refdes question (the first is :func:`refdes_prefix`): a
+    sortable sequence key.  ``R12`` -> ``("R", 12)``; a compound manual name
+    (``J_USB_C``) or a synthesized ``$U7`` returns None — such refs have no
+    numeric sequence, so gap/duplicate checks skip them.  Case is preserved
+    (``refdes_prefix`` upper-cases; a sequence key must not fold ``r1``/``R1``
+    onto each other silently — the caller decides).
+    """
+    m = _SPLIT_RE.match(ref.strip())
+    return (m.group(1), int(m.group(2))) if m else None
+
+
 def refdes_prefix(designator: str | None) -> str:
     """Leading alpha run of a refdes, upper-cased (``$U3`` -> ``U``, ``IC2`` -> ``IC``).
 
@@ -85,6 +103,21 @@ def refdes_prefix(designator: str | None) -> str:
     """
     m = _PREFIX_RX.match((designator or "").strip().lstrip("$"))
     return m.group(0).upper() if m else ""
+
+
+_NAT_RE = re.compile(r"(\d+)")
+
+
+def natkey(s: str) -> tuple[int | str, ...]:
+    """Natural-sort key: digit runs compare numerically (``U2`` < ``U10``).
+
+    The ordering every designator/pin listing sorts by (``intentgen``,
+    ``commands.doc``, ``arrange.propose``): it decides op ORDER in generated
+    op-lists, so the three former copies had to agree byte-for-byte — one
+    definition here is how they keep agreeing.
+    """
+    return tuple(int(part) if part.isdigit() else part
+                 for part in _NAT_RE.split(s))
 
 
 # --------------------------------------------------------------------------- #

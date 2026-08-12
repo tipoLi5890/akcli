@@ -17,12 +17,13 @@ Scope: the root file only (the writer is flat) and ``.kicad_sch`` only.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
+
 from pathlib import Path
 
 from ..readers import kicad as _krd
-from ..readers import kicad_lib, sexpr
+from .. import sexpr
+from ..sexpr import query as _sq
+from ..readers import kicad_lib
 from ..report import Finding, Severity, anchor
 from ..safety import read_text_guarded
 
@@ -38,130 +39,27 @@ LAYOUT_GROUP_CLEARANCE = "LAYOUT_GROUP_CLEARANCE"  # groups closer than the conf
 LAYOUT_FRAME_STALE = "LAYOUT_FRAME_STALE"          # a group frame no longer contains its members
 LAYOUT_TEXTBOX_OVER_SYMBOL = "LAYOUT_TEXTBOX_OVER_SYMBOL"  # note box drawn over a part
 
-# Text metrics (mil). KiCad default field/label text is 1.27 mm = 50 mil tall;
-# the stroke font advances roughly 0.9 * height per character. A global label
-# adds its bubble outline + input/output arrow (~1.6 character widths).
-_TEXT_H = 50.0
-_CHAR_ADV = 0.9 * _TEXT_H
-_PAD_GLOBAL = 1.6 * _CHAR_ADV
-_PAD_LOCAL = 0.4 * _CHAR_ADV
-_HALF_H_GLOBAL = 0.75 * _TEXT_H
-_HALF_H_LOCAL = 0.6 * _TEXT_H
+# Box primitives live in geometry.boxes (rank 40); private aliases keep the
+# lint body unchanged.  _CROSS_MIN stays here: it is lint policy, not geometry.
+from ..geometry.boxes import (  # noqa: E402
+    Box as _Box,
+    label_box as _label_box,
+    on_seg_f as _on_seg_f,
+    overlaps as _overlaps,
+    seg_in_box as _seg_in_box,
+    world_box as _world_box,
+)
 
-# Two boxes must interpenetrate by more than this to count (touching is fine).
-_TOL = 1.0
 # A wire must run at least this far (mil) INSIDE a box before it is "through"
 # it — half a grid step, so pin-stub touches and corner grazes never fire.
 _CROSS_MIN = 25.0
 
-
-@dataclass
-class _Box:
-    x0: float
-    y0: float
-    x1: float
-    y1: float
-    name: str                  # designator or label text
-    at: tuple[float, float]    # anchor (mil), for the finding message
-
-
-def _overlaps(a: _Box, b: _Box) -> bool:
-    return (
-        a.x0 < b.x1 - _TOL and b.x0 < a.x1 - _TOL
-        and a.y0 < b.y1 - _TOL and b.y0 < a.y1 - _TOL
-    )
+child_mil = _sq.child_mil          # the ONE numeric-child accessor (rank 30)
 
 
 def _key(x: float, y: float) -> tuple[float, float]:
     """Coordinate key robust to mm->mil float noise (0.1-mil buckets)."""
     return (round(x, 1), round(y, 1))
-
-
-def _seg_in_box(
-    a: tuple[float, float], b: tuple[float, float], box: _Box, shrink: float = _TOL
-) -> float:
-    """Length (mil) of segment ``a->b`` strictly INSIDE ``box`` shrunk by
-    ``shrink`` (Liang–Barsky clip); 0 for a miss or a boundary graze."""
-    x0, y0 = box.x0 + shrink, box.y0 + shrink
-    x1, y1 = box.x1 - shrink, box.y1 - shrink
-    if x0 >= x1 or y0 >= y1:
-        return 0.0
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    t0, t1 = 0.0, 1.0
-    for p, q in ((-dx, a[0] - x0), (dx, x1 - a[0]), (-dy, a[1] - y0), (dy, y1 - a[1])):
-        if p == 0:
-            if q < 0:
-                return 0.0  # parallel and outside this edge
-            continue
-        t = q / p
-        if p < 0:
-            t0 = max(t0, t)
-        else:
-            t1 = min(t1, t)
-    if t0 >= t1:
-        return 0.0
-    return math.hypot(dx, dy) * (t1 - t0)
-
-
-def _on_seg_f(
-    p: tuple[float, float], a: tuple[float, float], b: tuple[float, float],
-    tol: float = 0.5,
-) -> bool:
-    """Float point-on-segment (inclusive of endpoints) within ``tol`` mil."""
-    if not (min(a[0], b[0]) - tol <= p[0] <= max(a[0], b[0]) + tol
-            and min(a[1], b[1]) - tol <= p[1] <= max(a[1], b[1]) + tol):
-        return False
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    length = math.hypot(dx, dy)
-    if length == 0:
-        return math.hypot(p[0] - a[0], p[1] - a[1]) <= tol
-    return abs(dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / length <= tol
-
-
-def child_mil(node: sexpr.SNode | None, idx: int) -> float:
-    return _krd._mm_to_mil(_krd._fnum(node, idx))
-
-
-def _world_box(
-    ext: tuple[float, float, float, float],
-    px: float, py: float, rot: int, mirror: str,
-    name: str,
-) -> _Box:
-    """Instance-transform a lib-frame extent to a world (mil, +Y down) box."""
-    (x0, y0, x1, y1) = ext
-    pts = [
-        _krd._pin_world(x, y, px, py, rot, mirror)
-        for (x, y) in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))
-    ]
-    wx = [p[0] for p in pts]
-    wy = [p[1] for p in pts]
-    return _Box(min(wx), min(wy), max(wx), max(wy), name, (px, py))
-
-
-def label_text_extent_mil(text: str, *, is_global: bool = False) -> tuple[float, float]:
-    """Estimated ``(length, half_height)`` of a label's rendered text, in mils.
-
-    The stroke-font approximation this lint boxes labels with (see the module
-    constants above) — promoted as the ONE label-metric authority so the
-    op-list generator (:mod:`akcli.intentgen`) sizes its cells with exactly
-    the metrics this lint will later judge the drawn sheet by.
-    """
-    length = len(text) * _CHAR_ADV + (_PAD_GLOBAL if is_global else _PAD_LOCAL)
-    half_h = _HALF_H_GLOBAL if is_global else _HALF_H_LOCAL
-    return length, half_h
-
-
-def _label_box(text: str, x: float, y: float, angle: int, is_global: bool) -> _Box:
-    """Estimated world box of a label's text (+bubble for global labels)."""
-    length, half_h = label_text_extent_mil(text, is_global=is_global)
-    a = int(angle) % 360
-    if a == 0:      # text extends +X
-        return _Box(x, y - half_h, x + length, y + half_h, text, (x, y))
-    if a == 180:    # -X
-        return _Box(x - length, y - half_h, x, y + half_h, text, (x, y))
-    if a == 90:     # up-screen (-Y)
-        return _Box(x - half_h, y - length, x + half_h, y, text, (x, y))
-    return _Box(x - half_h, y, x + half_h, y + length, text, (x, y))
 
 
 def _fmt(p: tuple[float, float]) -> str:
@@ -509,7 +407,7 @@ def run(path: str | Path, *, group_clearance_mil: float = 0.0) -> list[Finding]:
                         pos=(ua.x0, ua.y0),
                     ))
     if group_union:
-        from ..groupframe import frame_uuid
+        from ..arrange.frames import frame_uuid
         from ..writers.kicad import root_uuid as doc_root_uuid
         root_uuid = doc_root_uuid(root)
         expect = {frame_uuid(root_uuid, g): g for g in group_union}

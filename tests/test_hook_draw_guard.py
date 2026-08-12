@@ -25,12 +25,12 @@ HOOK = Path(__file__).parent.parent / "hooks" / "pretooluse_draw_guard.py"
 SRC = str(Path(__file__).parent.parent / "src")
 
 GOOD_OPS = {
-    "protocol_version": 1, "target_format": "kicad",
+    "protocol_version": 2, "target_format": "kicad",
     "target_file": "board.kicad_sch",
     "ops": [{"op": "add_text", "at": [1000, 1000], "text": "hi"}],
 }
 BAD_OPS = {
-    "protocol_version": 1, "target_format": "kicad",
+    "protocol_version": 2, "target_format": "kicad",
     "target_file": "board.kicad_sch",
     "ops": [{"op": "add_wire", "from": [1, 2]}],
 }

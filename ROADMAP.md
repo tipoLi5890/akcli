@@ -39,7 +39,7 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   `.kicad_pro` (or named via `--root`/`--flat`). A `sheets` envelope routes one op-list across
   several files inside a single atomic transaction, recoverable with `akcli undo <target> --run
   <run_id>`, and a sheet instantiated more than once now takes per-instance references
-  (`instance_designators`/`instance_references`), refusing a duplicate refdes with the new
+  (`instance_designators` on both ops), refusing a duplicate refdes with the new
   `INSTANCE_REFS_REQUIRED`.
   **Modular authoring (v0.10)**: functional-group envelope with group-local coordinates and a
   persisted `Group` property, `akcli groups`/`--frame` self-refreshing module borders,
@@ -101,7 +101,7 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   (`Tracks6`/`Vias6`/`Arcs6`/`Pads6`, cross-validated against KiCad's importer), **`.PcbLib`**
   footprint libraries → `FootprintDef`/`FootprintPad` (also `.kicad_mod`/`.pretty`), and a
   **RS-274X/Excellon gerber** directory reader (0.8.0) feeding the fab-package checks.
-- **Agent surface:** Claude Code / Codex plugin (`akcli`), 12 skills, 8 slash commands, `akcli view`
+- **Agent surface:** Claude Code / Codex plugin (`akcli`), 13 skills, 8 slash commands, `akcli view`
   dashboard (hub + calc + live watch with SSE, ERC markers, lint overlay, BOM panel), stable exit
   codes 0–8, `schema_version`-stamped JSON, and a `--json` error envelope (`{"error": {code,
   message, exit, remediation}}`) on every failing exit path so stdout always parses as JSON even
@@ -338,13 +338,15 @@ Goal: the public surface is stable enough to promise.
 - [ ] Contract freeze audit: `schema_version`/`protocol_version` review, deprecation policy
       documented; extend the docs-conformance gate to the frozen contracts (S). Started in 0.17:
       every op schema branch now rejects unknown keys (`additionalProperties: false`) and
-      `tools/sync_schemas.py --check` gates the packaged mirrors against `schemas/`. 0.18 added
+      `tools/schemas.py check` gates the generated schemas against `opspec` and the packaged mirrors against `schemas/`. 0.18 added
       field-kind and enum-table assertions against `ops.schema.json` (only field *names* were
       compared), two-way mirror pruning so an orphan in `src/akcli/schemas/` cannot hide, and a
       gate asserting the shipped `pyproject` version has a non-empty CHANGELOG section. 0.20 added
-      the `sheets` envelope as a purely additive change (`protocol_version` stays 1) and the
-      manifest's `constraints.hierarchy` now reports `hierarchical_write_v2`/`sheet_reuse: true`;
-      `SCHEMA_VERSION` stays 1.3
+      the `sheets` envelope as a purely additive change (`protocol_version` stayed 1 through
+      0.20) and the manifest's `constraints.hierarchy` now reports
+      `hierarchical_write_v2`/`sheet_reuse: true`. 0.21 spent both numbers deliberately:
+      `protocol_version` 2 (four op-field renames) and `SCHEMA_VERSION` 2.0
+      (eeschema-aligned canonical net names) — see `docs/migration-1.0.md`
 - [x] First PyPI release (`pip install akcli-kicad`) — **shipped in 0.15.0**; dist name is `akcli-kicad`; PyPI publishing opted in 2026-07-22 via the
       `publish-pypi` job in `release.yml`, gated on the **repository** variable
       `PYPI_TRUSTED_PUBLISHING` (must be repo-scoped, not environment-scoped — a job-level `if:`

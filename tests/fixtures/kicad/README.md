@@ -47,7 +47,8 @@ path** of its driver, unless the driver is a global label or a power pin.
 Every net here carries exactly **one** name, so the fixture tests the qualification rule
 without depending on how ties between several names on one net are broken (akcli's pick is
 priority-then-alphabetical; eeschema's is GLOBAL > POWER_PIN > LOCAL_LABEL > HIER_LABEL —
-they disagree on the `MID`/`VOUT` node of `board_v8` below).
+they historically disagreed on the `MID`/`VOUT` node of `board_v8` below;
+since 0.21 both name it `VOUT`).
 
 The child sheets live in a subdirectory on purpose: `tests/test_roundtrip_netlist.py` globs
 `tests/fixtures/kicad/*.kicad_sch` and copies each file **alone** into a temp dir, which a
@@ -86,7 +87,7 @@ A resistor divider with a decoupling cap — small but enough for net inference:
           |
          R1  10k   (Device:R @ 50.8,50.8)
           |
-    MID──+────VOUT──── C1.1            <- net "MID", local label + global_label "VOUT"
+    MID──+────VOUT──── C1.1            <- net "VOUT" (global wins), local label "MID"
           |            |
          R2  10k      C1  100n          (R2 @ 50.8,63.5 ; C1 @ 66.04,63.5)
           |            |
@@ -100,14 +101,14 @@ Expected nets (component-pin membership):
 | net | source | members |
 |---|---|---|
 | `+3V3` | power port `#PWR01` | `R1.1` |
-| `MID` (aka `VOUT`) | local `label` + `global_label` | `R1.2`, `R2.1`, `C1.1` |
+| `VOUT` (aka `MID`) | local `label` + `global_label` | `R1.2`, `R2.1`, `C1.1` |
 | `GND` | power port `#PWR02` | `R2.2`, `C1.2` |
 
 Each file contains: an inline `(lib_symbols ...)` cache, 5 symbol instances (R1, R2, C1
 plus the two `#PWR` power symbols) each with a `(lib_id ...)` and a synced
 `(instances ... (path ... (reference ...)))`, five `(wire ...)` segments, two
 `(junction ...)` dots, one `(label ...)`, one `(global_label ...)`, and the GND/+3V3
-power symbols. The `MID` net carries both a local label (`MID`) and a global label
+power symbols. The `VOUT` net carries both a local label (`MID`) and a global label
 (`VOUT`) on the same node, so it doubles as a multi-name / alias case for netbuild.
 
 `tests/test_kicad_fixtures.py` validates these files structurally (balanced

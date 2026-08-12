@@ -333,124 +333,19 @@ def _net_same(args: argparse.Namespace, path: Path, sch,
     return EXIT["OK"]
 
 
-def _off_grid_50(v: float) -> bool:
-    r = v % 50.0
-    return min(r, 50.0 - r) > 0.01
-
-
 def _net_why(args: argparse.Namespace, path: Path, sch, spec: str) -> int:
     """``net --why REF.PIN`` — pin-centric attachment diagnosis.
 
-    Answers the question `component` cannot: WHY a pin shows ``(no net)`` —
-    junction/wire-end attachment status, the nearest wire end / label / other
-    pin with mil distances, and the off-grid trap. Same quantized helpers as
-    ``netbuild``, so the verdict never disagrees with the net engine.
+    Thin CLI wrapper: resolve the pin (miss envelope + did-you-mean), hand the
+    diagnosis to :func:`akcli.explain.net_why`, render the payload.
     """
-    import math
-
     resolved = _pin_or_miss(args, path, sch, spec)
     if resolved is None:
         return EXIT["QUERY_MISS"]
-    ref, pin = resolved
+    from .. import explain
     net = _pin_net_index(sch).get(resolved)
-    payload: dict = {
-        "source": path.as_posix(),
-        "pin": f"{ref}.{pin}",
-        "net": _net_json(net, rich=True) if net else None,
-    }
-    hints: list[str] = []
-
-    if path.suffix.lower() != ".kicad_sch":
-        hints.append("geometry diagnosis needs a .kicad_sch (this input only "
-                     "answers net membership)")
-        payload.update({"at": None, "attachment": None, "nearest": None,
-                        "off_grid_50mil": None, "hints": hints})
-        return _emit_why(args, payload, net)
-
-    from .. import netbuild
-    from ..readers import kicad as _krd
-    prims = _krd.read_primitives(path)
-    ph = next((p for p in prims.pins if p.ref == resolved), None)
-    if ph is None:
-        hints.append("no placed pin handle found (is this unit placed on the "
-                     "root sheet?)")
-        payload.update({"at": None, "attachment": None, "nearest": None,
-                        "off_grid_50mil": None, "hints": hints})
-        return _emit_why(args, payload, net)
-
-    q, on_seg = netbuild.quantize, netbuild.on_segment
-    qp = q(ph.at)
-    segs = [(w.a, w.b) for w in prims.wires if w.sheet == ph.sheet]
-    qsegs = [(q(a), q(b)) for a, b in segs]
-    at_junction = any(q(j.at) == qp for j in prims.junctions
-                      if j.sheet == ph.sheet)
-    at_wire_end = any(qp in (qa, qb) for qa, qb in qsegs)
-    midspan = (not at_wire_end and not at_junction
-               and any(on_seg(qp, qa, qb) for qa, qb in qsegs))
-    label_on_tip = any(
-        q(lb.at) == qp for lb in prims.labels
-        if lb.sheet == ph.sheet and lb.scope != "hier" and lb.text)
-
-    def _dist(pt: tuple[float, float]) -> float:
-        return math.hypot(pt[0] - ph.at[0], pt[1] - ph.at[1])
-
-    def _nearest(candidates):
-        best, best_d = None, None
-        for tag, pt in candidates:
-            d = _dist(pt)
-            if best_d is None or d < best_d:
-                best, best_d = (tag, pt), d
-        if best is None or best_d is None:
-            return None
-        (tag, pt) = best
-        entry = {"at": [round(pt[0], 1), round(pt[1], 1)],
-                 "dist_mil": round(best_d, 1)}
-        if tag:
-            entry.update(tag)
-        return entry
-
-    near_wire = _nearest(
-        (None, e) for seg in segs for e in seg)
-    near_label = _nearest(
-        ({"text": lb.text}, lb.at) for lb in prims.labels
-        if lb.sheet == ph.sheet and lb.scope != "hier" and lb.text)
-    near_pin = _nearest(
-        ({"pin": f"{p.ref[0]}.{p.ref[1]}"}, p.at) for p in prims.pins
-        if p.sheet == ph.sheet and p.ref != resolved)
-
-    off_grid = _off_grid_50(ph.at[0]) or _off_grid_50(ph.at[1])
-
-    if midspan:
-        hints.append(f"pin tip at ({round(ph.at[0])},{round(ph.at[1])}) "
-                     "touches a wire MID-SPAN with no junction — not "
-                     "connected; add an add_junction there or end the wire "
-                     "on the pin tip")
-    # a single-member net is electrically the same as "not connected" —
-    # the pin only nets with itself, so the near-miss hints still apply.
-    unconnected = net is None or len(net.members) <= 1
-    if unconnected:
-        if near_wire and 0 < near_wire["dist_mil"] <= 100:
-            hints.append(f"nearest wire end is {near_wire['dist_mil']} mil "
-                         f"away at ({near_wire['at'][0]},{near_wire['at'][1]})"
-                         " — extend it to the pin tip")
-        if near_label and 0 < near_label["dist_mil"] <= 100:
-            hints.append(f"label '{near_label['text']}' floats "
-                         f"{near_label['dist_mil']} mil away — anchor it "
-                         "exactly on the pin tip")
-    if off_grid:
-        hints.append("pin tip is OFF the 50-mil grid — grid-snapped wires "
-                     "cannot land on it; move the component onto the grid")
-
-    payload.update({
-        "at": [round(ph.at[0], 1), round(ph.at[1], 1)],
-        "sheet": ph.sheet,
-        "attachment": {"at_junction": at_junction, "at_wire_end": at_wire_end,
-                       "midspan_touch": midspan, "label_on_tip": label_on_tip},
-        "nearest": {"wire_end": near_wire, "label": near_label,
-                    "pin": near_pin},
-        "off_grid_50mil": off_grid,
-        "hints": hints,
-    })
+    payload = explain.net_why(path, resolved, net,
+                              _net_json(net, rich=True) if net else None)
     return _emit_why(args, payload, net)
 
 
@@ -668,7 +563,7 @@ def _cmd_pins(args: argparse.Namespace) -> int:
     from .. import model as _model
     from .. import units as _units
     from ..readers import kicad_lib
-    from ..writers import geometry
+    from ..geometry import transform as geometry
     from ..writers.lib_cache import _coerce_sources
 
     cfg = _load_cfg(args, None)
@@ -726,7 +621,8 @@ def _cmd_bbox(args: argparse.Namespace) -> int:
     chain as the writer (``geometry.world_box_from_extent`` / ``pin_world``),
     so the boxes can never disagree with where ``draw`` puts the part.
     Pin-only symbols (no drawn body, e.g. power stubs) fall back to the pin
-    bounding box and say so via ``pin_only``.
+    bounding box and say so via ``pin_only``. The union itself lives in
+    ``geometry.boxes.placement_boxes_nm``.
     """
     lib_id = getattr(args, "lib_id", None)
     if not lib_id:
@@ -735,7 +631,8 @@ def _cmd_bbox(args: argparse.Namespace) -> int:
     from .. import model as _model
     from .. import units as _units
     from ..readers import kicad_lib
-    from ..writers import geometry
+    from ..geometry import boxes as _boxes
+    from ..geometry import transform as geometry
     from ..writers.lib_cache import _coerce_sources
 
     cfg = _load_cfg(args, None)
@@ -762,16 +659,10 @@ def _cmd_bbox(args: argparse.Namespace) -> int:
     units_out: list[dict] = []
     for unit in range(1, part_count + 1):
         ext = kicad_lib.body_extent_mil(sym, unit)
-        body_nm = (None if ext is None
-                   else geometry.world_box_from_extent(ext, rot, mirror, origin_nm))
         pts = [geometry.pin_world(sym, inst, p)
                for p in kicad_lib.unit_pins(sym, unit)]
-        boxes = ([body_nm] if body_nm is not None else []) + [
-            (x, y, x, y) for (x, y) in pts]
-        if not boxes:                       # neither body nor pins: origin point
-            boxes = [(origin_nm[0], origin_nm[1], origin_nm[0], origin_nm[1])]
-        full_nm = (min(b[0] for b in boxes), min(b[1] for b in boxes),
-                   max(b[2] for b in boxes), max(b[3] for b in boxes))
+        body_nm, full_nm = _boxes.placement_boxes_nm(
+            ext, pts, rot, mirror, origin_nm)
         full = _box_mil(full_nm)
         units_out.append({
             "unit": unit,
@@ -820,7 +711,7 @@ def _cmd_groups(args: argparse.Namespace) -> int:
     path = _require_path(args.path, "schematic .kicad_sch")
     if not str(path).lower().endswith(".kicad_sch"):
         raise _ExitWith(EXIT["USAGE"], "ERROR: groups works on .kicad_sch")
-    from ..groupframe import group_report
+    from ..arrange.frames import group_report
     if getattr(args, "frame", False):
         return _cmd_groups_frame(args, path)
     rows = group_report(path)
@@ -844,33 +735,20 @@ def _cmd_groups(args: argparse.Namespace) -> int:
 
 
 def _cmd_groups_frame(args: argparse.Namespace, path) -> int:
-    from ..groupframe import FRAME_MARGIN_MIL, plan_frames
+    from ..arrange.frames import FRAME_MARGIN_MIL, plan_frames
     margin = getattr(args, "margin", None) or FRAME_MARGIN_MIL
     ops_list = plan_frames(path, margin_mil=margin)
     do_apply = bool(getattr(args, "apply", False))
     if not ops_list:
         _emit("no functional groups to frame")
         return EXIT["OK"]
-    from .. import journal as _journal_mod
-    from ..writers import kicad as kwriter
-    oplist = {"protocol_version": 1, "target_format": "kicad",
-              "target_file": path.name, "ops": ops_list}
+    from ..pipeline import arrange_apply
     cfg = _load_cfg(args, path)
-    findings: list = []
-    results = kwriter.apply(
-        oplist, str(path), apply=do_apply,
-        sources=_draw_symbol_sources(args, cfg), verify_out=findings,
-        backup_dir=(_journal_mod.backups_dir(path) if do_apply else None),
-        allow_open=bool(getattr(args, "allow_open", False)))
     from ..errors import EXIT as _EXIT
-    ok = (all(r.status == "ok" for r in results)
-          and not any(f.severity.value in ("error", "critical") for f in findings))
-    if do_apply and ok:
-        _journal_mod.record(
-            path, "groups-frame", "applied", op_count=len(ops_list),
-            backup=f"{_journal_mod.DIR_NAME}/{_journal_mod.BACKUP_DIR_NAME}/"
-                   f"{path.name}.bak")
-    frames = len(ops_list) // 2
+    applied = arrange_apply.apply_group_frames(
+        path, ops_list, sources=_draw_symbol_sources(args, cfg),
+        apply=do_apply, allow_open=bool(getattr(args, "allow_open", False)))
+    ok, results, frames = applied.ok, applied.results, applied.frames
     if args.json:
         _emit(_dumps(_stamp({
             "source": str(path), "applied": bool(do_apply and ok),

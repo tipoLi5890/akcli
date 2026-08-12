@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .. import contract
 from ..calc.si import fmt_eng
 
 
@@ -36,7 +37,8 @@ def _snap(value: float, series: str) -> tuple[float, str]:
 
 
 def _oplist(*ops: dict) -> dict:
-    return {"protocol_version": 1, "target_format": "kicad",
+    return {"protocol_version": contract.PROTOCOL_VERSIONS["oplist"],
+            "target_format": "kicad",
             "target_file": "<board.kicad_sch>", "ops": list(ops)}
 
 
@@ -224,7 +226,7 @@ def build_proposals(doc: dict, source: str = "<findings>") -> dict:
             **body,
             "status": "proposed",
         })
-    return {"proposals_version": "1.0",
+    return {"proposals_version": contract.SCHEMA_VERSIONS["proposals"],
             "source": {"findings": str(source), "count": len(findings)},
             "proposals": proposals}
 

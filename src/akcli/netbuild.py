@@ -31,7 +31,9 @@ LOCKED pipeline (``build_nets``):
    clusters sharing any name. This stitches the two STAT clusters AND collapses
    same-name ``GND`` ports. Net labels are sheet-local; power ports / ports /
    sheet-entries / global labels merge across sheets.
-6. Naming priority power-port > net-label > auto (honoring ``power_priority``);
+6. Naming priority: KiCad sources use eeschema's driver ladder (global >
+   power > local > hier-label > sheet-entry > auto); Altium sources keep
+   power-port vs net-label ordered by ``power_priority``;
    keep all names as aliases, lower confidence + record merge_reasons on
    multi-name nets.
 7. Stable membership-hash ids (``model.Net.stable_id``) — NEVER coordinate-derived.
@@ -66,7 +68,7 @@ _POWER_SCOPES = frozenset({"power"})
 # connectors: unique per (sheet instance, pin name), so the global merge joins
 # exactly that pair — and NOTHING else. They never name a net (see below).
 _GLOBAL_SCOPES = frozenset({"global", "power", "port", "sheet_entry", "hier"})
-_LABEL_SCOPES = frozenset({"local", "global", "port", "sheet_entry"})
+_LABEL_SCOPES = frozenset({"local", "global", "port", "sheet_entry", "hier_label"})
 # Scopes whose net NAME is sheet-qualified when exported to a KiCad netlist.
 # eeschema prefixes a net name with the sheet path unless its driver is a
 # global label or a power pin (kicad-cli 10.0.4-verified: a root-sheet `(label
@@ -74,7 +76,7 @@ _LABEL_SCOPES = frozenset({"local", "global", "port", "sheet_entry"})
 # "GND"/"VOUT"). akcli maps KiCad's hierarchical labels onto "local" too, and
 # eeschema prefixes those the same way. Altium's cross-sheet Port/SheetEntry
 # names merge globally in this engine, so they are treated as global here.
-_SHEET_SCOPED_SCOPES = frozenset({"local"})
+_SHEET_SCOPED_SCOPES = frozenset({"local", "hier_label"})
 
 # Confidence assigned to a net that carries more than one distinct explicit name.
 _MULTI_NAME_CONFIDENCE = 0.8
@@ -275,13 +277,37 @@ def expand_bus_vector(text: str) -> list[str]:
     return [f"{prefix}{i}" for i in range(a, b + step, step)]
 
 
-def _name_priority(scope: str, power_priority: bool) -> int:
+# eeschema's CONNECTION_SUBGRAPH::PRIORITY (connection_graph.h, KiCad 7-10):
+# PIN(1) < SHEET_PIN(2) < HIER_LABEL(3) < LOCAL_LABEL(4) < POWER_PIN(5) <
+# GLOBAL(6); equal priority tie-breaks alphabetically (ResolveDrivers).
+# akcli's synthetic "hier" connectors merge clusters but never name them, so
+# the parent-side SHEET_PIN driver has no akcli counterpart: a net whose only
+# eeschema driver is a sheet pin still auto-names here (documented residual).
+_EESCHEMA_DRIVER_PRIORITY = {
+    "sheet_entry": 2,
+    "hier_label": 3, "port": 3,
+    "local": 4,
+    "power": 5,
+    "global": 6,
+}
+
+
+def _name_priority(scope: str, power_priority: bool, eeschema: bool) -> int:
     """Rank an explicit name's scope. Higher wins as the canonical net name.
 
-    Power ports outrank net labels when ``power_priority`` (PrjPcb
-    ``PowerPortNamesTakePriority``) is set; otherwise net labels outrank power
-    ports (the realistic Altium default). Both always outrank auto-names.
+    KiCad sources (``eeschema=True``) use eeschema's driver-priority ladder —
+    a power port outranks a differently-named local label, a global label
+    outranks everything, a hierarchical label ranks below a local one —
+    matching what ``kicad-cli sch export netlist`` writes
+    (``tests/test_kicad_parity.py`` name-choice fixtures).
+
+    Altium sources keep the legacy two-mode rule: power ports outrank net
+    labels only when ``power_priority`` (PrjPcb
+    ``PowerPortNamesTakePriority``) is set; otherwise labels win (the
+    realistic Altium default). Both always outrank auto-names.
     """
+    if eeschema:
+        return _EESCHEMA_DRIVER_PRIORITY.get(scope, 0)
     if scope in _POWER_SCOPES:
         return 3 if power_priority else 1
     if scope in _LABEL_SCOPES:
@@ -593,7 +619,8 @@ def build_nets(
         if order:
             ranked = sorted(
                 order,
-                key=lambda t: (-_name_priority(scope_of[t], prims.power_priority), t),
+                key=lambda t: (-_name_priority(scope_of[t], prims.power_priority,
+                                        prims.eeschema_naming), t),
             )
             canonical = ranked[0]
             all_names = sorted(order)

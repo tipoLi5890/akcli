@@ -19,7 +19,8 @@ from akcli._vendor.jlc2kicadlib import _http, _kmt
 from akcli._vendor.jlc2kicadlib.symbol import symbol as symbol_mod
 from akcli._vendor.jlc2kicadlib.symbol import symbol_handlers
 from akcli.drivers import jlc2kicad
-from akcli.readers import kicad_lib, sexpr
+from akcli.readers import kicad_lib
+from akcli.sexpr import parser as sexpr
 
 FIX = Path(__file__).parent / "fixtures" / "jlc"
 SVGS = FIX / "C25804_svgs.json"

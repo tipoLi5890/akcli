@@ -54,7 +54,7 @@ coincident stacked pins on different nets, and bus-syntax net names.
 
 ```json
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "target_format": "kicad",
   "target_file": "board.kicad_sch",
   "groups": { "POWER": { "origin": [1000, 1000], "title": "Power supply" } },
@@ -111,7 +111,7 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 |---|---|---|
 | `place_component` | `lib_id, designator` + position | position is exactly ONE of `x_mil`+`y_mil` (absolute) or `anchor` (+`offset_mil`): `"anchor": "U1.3"` is that pin's world tip, bare `"U1"` the component origin — resolved at execution time, so the anchor may be placed earlier in the SAME list; `offset_mil` is a world-frame `[dx, dy]`, the result grid-snaps. Optional `unit` places ONE unit of a multi-unit part; `value`/`footprint` set the properties; the symbol must resolve from `--symbols`/config/`symbol_source`; optional `instance_designators` supplies per-instance references on a reused sheet (see [Multi-sheet op-lists](#multi-sheet-op-lists-sheets-map--per-op-sheet-020)) |
 | `set_component_transform` | `designator` | rotation/mirror of an existing instance |
-| `set_component_parameters` | `designator` | `reference`, `value`, `footprint`, free-form `parameters` map; optional `instance_references` renames per instance on a reused sheet (mirrors `place_component`'s `instance_designators`) |
+| `set_component_parameters` | `designator` | `new_designator` (rename), `value`, `footprint`, free-form `parameters` map; optional `instance_designators` renames per instance on a reused sheet (same field name `place_component` uses) |
 | `add_wire` | `vertices` | even, orthogonal list of `[x,y]` / `"REF.PIN"`; one segment per consecutive pair |
 | `route_net` | `from, to` | deterministic orthogonal auto-route between two endpoints: coaxial -> straight; else an L whose corner provably avoids every placed pin tip (a coincident corner silently merges nets), falling back to a 3-segment z. `style: auto\|hv\|vh\|z`; optional `label` names the net ONCE at the longest segment's midpoint — the non-coaxial `connect_and_label` |
 | `add_bus` | `vertices` | as `add_wire`, bus graphics |
@@ -125,7 +125,7 @@ optional. Run `akcli ops template <op>` for a full skeleton.
 | `add_rectangle` | `start, end` | top-level graphic border box (module frames); optional `stroke_width_mil`/`fill` (`none\|outline\|background`) and `key`. Connectivity-neutral; delete by uuid or kind (it has no `at`) |
 | `add_text_box` | `text, at, size` | bordered multi-line note box (`at` = TOP-LEFT, `\n` for line breaks); optional `angle`/`key`. Connectivity-neutral; grammar fixture-verified against a real KiCad |
 | `set_title_block` | at least one of `title, date, rev, company, comment1..9` | find-or-create edit of the title block (kept after `paper`, before `lib_symbols`); unchanged values replay as a no-op note |
-| `rename_net` | `from, to` | rewrites matching label texts (`label`/`global_label`/`hierarchical_label`) **and** power-port net Values; optional `scope` restricts to one label kind (power Values only rewritten when unscoped); 0 matches = replay-safe note; the match count is reported. KiCad only (`altium: false`) |
+| `rename_net` | `old_name, new_name` | rewrites matching label texts (`label`/`global_label`/`hierarchical_label`) **and** power-port net Values; optional `scope` restricts to one label kind (power Values only rewritten when unscoped); 0 matches = replay-safe note; the match count is reported. KiCad only (`altium: false`) |
 | `delete_component` | `designator` | removes ALL instances; attached wires are left for the connectivity gate to flag — delete them explicitly, or set `"cascade": true` to also delete wires ending on any deleted pin's coordinate plus labels/no-connects anchored there; an anchored junction is removed only when fewer than two surviving wires still pass through it (a pure-X crossing of untouched wires keeps its junction — deleting it would silently split their net). Cascaded uuids are reported; absent target = replay-safe no-op |
 | `delete_object` | `uuid` **or** `match` | remove ONE top-level object (wire/label/junction/text/...). `match: {kind, name?, at?}` addresses it without a uuid — exactly-one semantics (0 matches = replay-safe note, >1 = error listing the candidate uuids); `match.at` is exact mils, NOT grid-snapped |
 | `move_component` | `designator` + position | destination is `x_mil`+`y_mil` OR `anchor` (+`offset_mil`), like `place_component`. One instance (optional `unit`); its properties travel along; wires do NOT stretch unless `carry_wires`, and labels anchored on the moved pins are left behind unless `carry_labels` (the two flags are independent) |
@@ -144,7 +144,7 @@ label (the facing-pin pattern below).
 
 | Macro | Required | Expands to |
 |---|---|---|
-| `connect_and_label` | `from, to, net` | `add_wire [from, to]` + ONE `add_net_label` at the wire's midpoint — the canonical fix for facing-pin label collisions. `from`/`to` must BOTH be pin refs (label lands at `mid(from,to)`) or BOTH `[x,y]` points; `orientation`/`scope` optional |
+| `connect_and_label` | `from, to, net` | `add_wire [from, to]` + ONE `add_net_label` at the wire's midpoint — the canonical fix for facing-pin label collisions. `from`/`to` must BOTH be pin refs (label lands at `mid(from,to)`) or BOTH `[x,y]` points; `orientation`/`scope` optional (this macro kept the name `orientation`; the `add_net_label` it expands into takes `rotation`) |
 | `place_pwr_flag` | `at` | `place_power_port power:PWR_FLAG` at `at` (`[x,y]` or `mid(REF.PIN,REF.PIN)`), default `rotation: 90`. Place it **MID-WIRE** — on-pin placement overlaps the other symbol's body (`check --layout` flags `LAYOUT_POWER_ON_PIN`). The flag never names a net |
 | `terminate_unused_unit` | `designator, lib_id, unit, at, in_plus, in_minus, out` | `place_component` of the given unit + `power:<gnd>` port on `REF.<in_plus>` + `power:<vcc>` port on `REF.<in_minus>` + `add_no_connect` on `REF.<out>` (`vcc` default `VCC`, `gnd` default `GND`) — silences KiCad's `missing_input_pin` on spare op-amp/comparator units |
 | `place_divider` | `x_mil, y_mil, top_net, mid_net, bottom_net` | 2 resistors (`designators`/`values`/`spacing_mil`/`lib_id` optional) + 4 pin-anchored labels; the shared `mid_net` label on both inner pins IS the connection |
@@ -184,7 +184,7 @@ authoring model:
 
 ```json
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "target_format": "kicad",
   "target_file": "board.kicad_sch",
   "groups": {
@@ -261,7 +261,7 @@ silently place nothing:
   reported ok. The error names both op indices; the writer guards the same
   collision after macro expansion.
 - **Enum slots are TypeError-safe**: a list/dict where an enum belongs
-  (`op` name, `target_format`, rotation/orientation, mirror, `scope`, a
+  (`op` name, `target_format`, `rotation`, mirror, `scope`, a
   sheet-pin `type`/`side`, …) yields a clean `OpError` naming the field, never
   an internal `TypeError` from an unhashable value.
 - A crashing op handler surfaces as a per-op result with error code
@@ -395,11 +395,11 @@ unedited list once, or roll back with `akcli undo`, before editing the list.
   `"at": "REF.PIN"`** — the anchor snaps to that pin's exact world coordinate,
   making label-on-pin first-class (no `akcli pins` arithmetic needed).
 - **On-pin labels auto-orient.** When a label's anchor is a pin (via `"REF.PIN"`
-  or a raw coordinate that hits a pin tip) and no `orientation` is given, the
+  or a raw coordinate that hits a pin tip) and no `rotation` is given, the
   writer rotates the text AWAY from the symbol body and emits the matching
   `(justify ...)` — KiCad ignores a bare 180° angle, so without the justify the
-  text renders straight over the part it names. An explicit `orientation` always
-  wins. For a stub-end label, set `orientation` to the stub's direction
+  text renders straight over the part it names. An explicit `rotation` always
+  wins. For a stub-end label, set `rotation` to the stub's direction
   (0=right, 90=up, 180=left, 270=down).
 - **Verify the graphics too:** `akcli check <file> --layout` (also in the
   default check set for `.kicad_sch`) lints for symbol bodies drawn over each
@@ -509,7 +509,7 @@ One op-list can edit the root AND its children in **one atomic transaction**:
 
 ```json
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "target_format": "kicad",
   "sheets": { "amp": { "file": "amp.kicad_sch" } },
   "ops": [
@@ -555,7 +555,7 @@ lists the instance paths). Pass per-instance references instead:
 
 (`designator` must be one of the map's values — it seeds the symbol's uuid
 and is the displayed Reference. `set_component_parameters` renames per
-instance with the mirror field `instance_references`; power ports need no
+instance with the same field `instance_designators`; power ports need no
 map — the writer auto-allocates one `#PWR0n` per instance.)
 
 ## Bus authoring (stage 2 semantics — labeled rips)
@@ -665,7 +665,7 @@ its own section below.
 ## Worked example
 
 ```json
-{ "protocol_version": 1, "target_format": "kicad", "target_file": "board.kicad_sch",
+{ "protocol_version": 2, "target_format": "kicad", "target_file": "board.kicad_sch",
   "ops": [
     { "op": "place_component", "lib_id": "Device:R", "designator": "R1",
       "x_mil": 2000, "y_mil": 1000, "value": "10k" },

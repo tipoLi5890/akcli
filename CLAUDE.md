@@ -66,20 +66,26 @@ regardless.
 
 ## Op-vocabulary lockstep (adding/changing an op or macro)
 
-CI enforces all of these together; change them in ONE commit:
+**`src/akcli/opspec.py` is the ONE vocabulary source.** The JSON schemas, the
+`akcli.ops` validator/template tables and the capability matrix are all
+generated or derived views of it — there is nothing to keep in sync by hand.
+Three steps, ONE commit:
 
-1. `src/akcli/ops.py` tables: `_CORE_OPS`/`MACRO_OPS`, `_OP_REQUIRED`,
-   `_OP_FIELDS` (must equal the schema branch's properties exactly),
-   `_OP_OPTIONAL`/`MACRO_OPTIONAL` (feeds `ops template`), placeholders.
-2. `schemas/ops.schema.json` branch (macros too; branches carry
-   `additionalProperties: false` + the universal `group` field) + capabilities
-   entry in `schemas/ops.capabilities.json` (core ops only) — then run
-   `python3 tools/sync_schemas.py` (mirrors in `src/akcli/schemas/` must be
-   byte-identical; `--check` for drift).
-3. Writer handler + `_HANDLERS` in `src/akcli/writers/kicad.py`
-   (`tests/test_ops.py` census asserts `_HANDLERS`/`_MACRO_EXPANDERS` match
-   the registry).
-4. Docs count gates: every "N ops"/"N macros" claim (English + 中文 regexes) in
+1. Add/edit the `OpSpec` in `src/akcli/opspec.py`: fields (`name`, `kind`,
+   `required`, `template`, `coord` for group-local coordinates, `doc`),
+   cross-field `Constraint`s, capability flags (`kicad`/`altium`/`caps_note`,
+   core ops only), and the wiring name — `handler` for a core/sugar op
+   (a `@op`-decorated function in `src/akcli/writers/handlers/`, registered in
+   `writers/registry.py`) or `expander` for a macro (`src/akcli/ops/macros.py`).
+   A new `Field.kind` also needs a `_KIND_SCHEMA` row in `tools/schemas.py`
+   and a `_KIND_CHECKS` predicate in `src/akcli/ops/validate.py`; a new
+   enumerated vocabulary goes in `opspec.ENUMS` (order is load-bearing —
+   it is rendered straight into the schema).
+2. `python3 tools/schemas.py build` — regenerates `schemas/ops.schema.json`
+   + `ops.capabilities.json` from opspec AND refreshes the packaged mirror
+   `src/akcli/schemas/`. `python3 tools/schemas.py check` is the CI drift
+   gate (and `tests/test_ops_kit.py` runs the same comparison).
+3. Docs count gates: every "N ops"/"N macros" claim (English + 中文 regexes) in
    README×3 / ROADMAP / docs/ / skills/ / commands/ must match the registry
    (`tests/test_docs_conformance.py`); `tests/test_ops.py` census; the op-name
    list in `commands/circuit-draw.md`. Also update the op-pattern prose in
@@ -87,8 +93,9 @@ CI enforces all of these together; change them in ONE commit:
    `skills/akcli-circuit-design/SKILL.md`) in the same commit — the count gate
    can't see a missing pattern writeup, and the skills have drifted behind
    `commands/circuit-draw.md` before.
-5. New error codes need `errors.py` `ERROR_CODES` + `_CODE_EXIT` +
-   `REMEDIATION` (1:1, enforced) + the census in `tests/test_errors.py`.
+
+New error codes need `errors.py` `ERROR_CODES` + `_CODE_EXIT` +
+`REMEDIATION` (1:1, enforced) + the census in `tests/test_errors.py`.
 
 ## New top-level CLI command checklist (adding an `akcli <verb>`)
 
@@ -145,7 +152,8 @@ ships a command that is undiscoverable or untested:
 
 ## Key layout
 
-`src/akcli/ops.py` (vocabulary/validator/macros/groups resolution) ·
+`src/akcli/opspec.py` (THE op vocabulary, as data) · `src/akcli/ops/`
+(`vocab` derived from opspec · `validate` · `macros` · `groups` · `template`) ·
 `writers/kicad.py` (executor) · `writers/geometry.py` (transform core —
 `pin_world` is canonical) · `readers/sexpr.py` + `readers/kicad*.py` ·
 `netbuild.py`/`netdiff.py` (net engine + diff rails) · `checks/` ·

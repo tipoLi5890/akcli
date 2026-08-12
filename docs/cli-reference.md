@@ -720,7 +720,7 @@ Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 22 ops + 10 m
   `akcli undo <target> --run <run_id> --apply` restores it). The `--json` payload carries
   `run_id` + per-file `files[]` on these runs (absent on single-file runs). A sheet
   instantiated more than once refuses a scalar designator (`INSTANCE_REFS_REQUIRED`) — pass
-  `instance_designators` / `instance_references` maps; see
+  `instance_designators` maps; see
   [docs/op-list-authoring.md](op-list-authoring.md).
 - `--strict-nets` (with `--apply`): **refuse to write** (exit `6`, evidence lines on stderr)
   when the diff shows a split or merge touching a *named* net on either side — splits/merges of
@@ -1247,8 +1247,9 @@ ERROR: ALTIUM_FAT_CYCLE: FAT chain revisits sector 42 (cycle); aborting
 ```
 
 - With `--json`, a failing command that would otherwise leave stdout empty instead emits a JSON
-  error envelope on stdout: `{"schema_version": "1", "error": {"code", "message", "exit",
-  "remediation"}}` — `remediation` is an actionable next step from the frozen `errors.REMEDIATION`
+  error envelope on stdout: `{"schema_version": "1", "akcli_version": "<version>", "error":
+  {"code", "message", "exit", "remediation"}}` — `akcli_version` names the build that failed,
+  and `remediation` is an actionable next step from the frozen `errors.REMEDIATION`
   table (covering every error code); the plain `ERROR:` line still goes to stderr for humans. The
   envelope is skipped when the handler already wrote data on stdout, so a failure after partial
   output never yields two JSON documents.

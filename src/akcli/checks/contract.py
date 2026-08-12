@@ -50,6 +50,8 @@ Pin names: ``REF.PIN`` matches the pin *number* first, then the pin *name*
 
 from __future__ import annotations
 
+from .. import contract as _contract
+
 import datetime as _dt
 import os
 
@@ -59,7 +61,7 @@ from ..report import Finding, Severity, anchor
 
 __all__ = ["load", "run"]
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = _contract.PROTOCOL_VERSIONS["contract-check"]
 
 _SEVERITIES = {
     "info": Severity.INFO, "note": Severity.NOTE,

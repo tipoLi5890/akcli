@@ -31,13 +31,10 @@ CLASSES: tuple[str, ...] = ("fitted", "dnp", "external", "no-part")
 # equality, so "H3" matches but a heatsink "HS1" does not).
 DEFAULT_NO_PART_PREFIXES: tuple[str, ...] = ("TP", "FID", "MH", "H", "LOGO")
 
-_PREFIX_RE = re.compile(r"^([A-Za-z]+)")
-
-
-def refdes_prefix(ref: str | None) -> str:
-    """The alpha prefix of a refdes, uppercased (``TP12`` -> ``TP``)."""
-    m = _PREFIX_RE.match((ref or "").strip())
-    return m.group(1).upper() if m else ""
+# The ONE refdes-prefix implementation (strips synthesized ``$`` — the copy
+# that used to live here returned "" for ``$U7``, silently unclassifying
+# every Altium part whose designator record was missing).
+from .classify import refdes_prefix  # noqa: E402
 
 
 def is_no_part_ref(ref: str | None,

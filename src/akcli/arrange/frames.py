@@ -18,9 +18,12 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from .readers import kicad as _krd
-from .readers import sexpr
-from .safety import read_text_guarded
+from .. import sexpr
+from ..readers import kicad as _krd
+from ..safety import read_text_guarded
+from ..sexpr.query import root_uuid as doc_root_uuid
+from ..writers import identity
+from .collect import collect as _collect
 
 FRAME_MARGIN_MIL = 200.0
 TITLE_LIFT_MIL = 100.0
@@ -37,8 +40,8 @@ def _title_key(name: str) -> str:
 
 def frame_uuid(root_uuid: str | None, name: str) -> str:
     """The deterministic uuid ``add_rectangle {key: group_frame:<name>}`` gets."""
-    from .writers import instances
-    return instances.deterministic_uuid(root_uuid, f"rectangle:key:{_frame_key(name)}", 0)
+    return identity.node_uuid(
+        root_uuid, identity.seed_annotation_key("rectangle", _frame_key(name)))
 
 
 def _snap_out(v: float, *, up: bool) -> float:
@@ -54,10 +57,8 @@ def group_boxes(path: str | Path) -> dict[str, dict]:
     drawn body UNION pin tips (via ``arrange._collect``), so the union can
     never disagree with where wires actually land.
     """
-    from . import arrange as _arr
-
     root = sexpr.parse(read_text_guarded(path))
-    syms, _anchors = _arr._collect(root)
+    syms, _anchors = _collect(root)
     boxes_by_ref: dict[str, list] = {}
     for s in syms:
         b = boxes_by_ref.setdefault(s.ref, [s.box.x0, s.box.y0, s.box.x1, s.box.y1])
@@ -89,8 +90,6 @@ def group_boxes(path: str | Path) -> dict[str, dict]:
 
 def group_report(path: str | Path) -> list[dict]:
     """Per-group summary rows for ``akcli groups`` (members, box, frame state)."""
-    from .writers.kicad import root_uuid as doc_root_uuid
-
     root = sexpr.parse(read_text_guarded(path))
     root_uuid = doc_root_uuid(root)
     present: set[str] = set()

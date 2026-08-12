@@ -79,7 +79,7 @@ def test_pinmap_no_mcu_json_validates():
 def board(tmp_path: Path) -> Path:
     target = tmp_path / "board.kicad_sch"
     assert main(["new", str(target)]) == 0
-    ops = {"protocol_version": 1, "target_format": "kicad",
+    ops = {"protocol_version": 2, "target_format": "kicad",
            "target_file": "board.kicad_sch",
            "ops": [{"op": "add_text", "at": [1000, 1000], "text": "hi"}]}
     (tmp_path / "ops.json").write_text(json.dumps(ops), encoding="utf-8")
@@ -102,7 +102,7 @@ def test_draw_apply_json_validates(board: Path, capsys):
 
 
 def test_op_error_carries_remediation(board: Path, capsys):
-    missing = {"protocol_version": 1, "target_format": "kicad",
+    missing = {"protocol_version": 2, "target_format": "kicad",
                "target_file": "board.kicad_sch",
                "ops": [{"op": "place_component", "lib_id": "No:Such",
                         "designator": "U9", "x_mil": 1000, "y_mil": 1000}]}
@@ -117,7 +117,7 @@ def test_op_error_carries_remediation(board: Path, capsys):
 
 
 def test_draw_refused_json_validates(board: Path, capsys):
-    bad = {"protocol_version": 1, "target_format": "kicad",
+    bad = {"protocol_version": 2, "target_format": "kicad",
            "target_file": "board.kicad_sch",
            "ops": [{"op": "add_wire",
                     "vertices": [[1000, 1000], [1500, 1000]]}]}

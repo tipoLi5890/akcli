@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from akcli import ops
 from akcli.drivers import kicad_cli
 
 from tests._cli_harness import json_of, run_cli
@@ -64,7 +65,7 @@ def test_stdout_is_the_oplist(tmp_path):
                             "--symbols", GENERIC, "--symbols", DEVICE])
     assert rc == 0, err
     doc = json.loads(out)                 # stdout is pure op-list JSON
-    assert doc["protocol_version"] == 1 and doc["ops"]
+    assert doc["protocol_version"] == ops.PROTOCOL_VERSION and doc["ops"]
 
 
 def test_output_file_matches_stdout(tmp_path):

@@ -1,6 +1,6 @@
 """Functional groups — envelope ``groups`` + per-op ``group`` tag (SPEC §2.1).
 
-Covers the ops.py resolution pass (group-local -> absolute coordinates), the
+Covers the ops/groups.py resolution pass (group-local -> absolute coordinates), the
 macro interaction (children inherit the tag and stay group-local through
 expansion), the two error codes, and the writer's hidden ``Group`` property
 (membership persists in the sheet and round-trips through the reader).
@@ -9,6 +9,7 @@ expansion), the two error codes, and the writer's hidden ``Group`` property
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -17,13 +18,14 @@ from akcli import netdiff, ops
 from akcli.errors import AkcliError
 from akcli.readers import kicad as kreader
 from akcli.writers import kicad as kw
+from tests._cli_harness import run_cli
 
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
 POWER = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "power.kicad_sym"
 
 
 def _doc(*ops_list, groups=None):
-    d = {"protocol_version": 1, "target_format": "kicad", "ops": list(ops_list)}
+    d = {"protocol_version": 2, "target_format": "kicad", "ops": list(ops_list)}
     if groups is not None:
         d["groups"] = groups
     return d
@@ -98,8 +100,13 @@ def test_resolve_is_pure_and_marker_prevents_double_translate():
     before = copy.deepcopy(d)
     r = ops.resolve_groups(d)
     assert d == before                          # input never mutated
-    assert r["_groups_resolved"] is True
+    # the "already resolved" marker is the document's TYPE, never a key: an
+    # internal pipeline flag must not ride along into a caller's JSON
+    assert "_groups_resolved" not in r
+    assert dict(r) == {**before, "ops": [{"op": "add_junction", "group": "G",
+                                          "at": [100, 100]}]}
     r2 = ops.resolve_groups(r)                  # second call is a no-op
+    assert r2 is r
     assert r2["ops"][0]["at"] == [100, 100]
 
 
@@ -222,3 +229,39 @@ def test_group_property_is_netdiff_neutral_and_idempotent(tmp_path):
     assert all(r.status == "ok" for r in rs)
     d = netdiff.diff(kreader.read_sch(str(tgt2)).nets, nets_before)
     assert d.equivalent, netdiff.format_summary(d)
+
+
+def test_no_pipeline_marker_reaches_any_external_payload(tmp_path):
+    """``_groups_resolved`` is pipeline state, not document content.
+
+    It used to be written INTO the op-list dict, one echo away from every
+    ``--json`` payload and journal record. The flag now lives on
+    :class:`ops.PreparedOpList` / the resolved document's type, so no output
+    may mention it — and no stray ``_``-prefixed key may creep back in.
+    """
+    tgt = _blank_sch(tmp_path)
+    opsfile = tmp_path / "ops.json"
+    doc = _doc(
+        {"op": "place_component", "group": "G", "lib_id": "Device:R",
+         "designator": "R1", "x_mil": 100, "y_mil": 100, "value": "1k"},
+        groups={"G": {"origin": [1000, 1000]}})
+    opsfile.write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+
+    prepared = ops.prepare_oplist(doc)
+    assert prepared.ok and prepared.groups_resolved
+    assert "_groups_resolved" not in prepared.doc
+    assert "_groups_resolved" not in json.dumps(prepared.doc)
+
+    for argv in (["ops", "validate", str(opsfile), "--json"],
+                 ["plan", str(tgt), "--ops", str(opsfile), "--json",
+                  "--symbols", str(DEVICE)],
+                 ["draw", str(tgt), "--ops", str(opsfile), "--apply", "--json",
+                  "--symbols", str(DEVICE)]):
+        rc, out, err = run_cli(argv)
+        assert rc == 0, (argv, err)
+        assert "_groups_resolved" not in out, argv
+        json.loads(out)
+
+    journal = tmp_path / ".akcli" / "journal.jsonl"
+    if journal.exists():
+        assert "_groups_resolved" not in journal.read_text(encoding="utf-8")

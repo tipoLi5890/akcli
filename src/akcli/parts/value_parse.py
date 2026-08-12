@@ -18,6 +18,8 @@ as a match.
 from __future__ import annotations
 
 import re
+
+from .. import si_prefix
 from dataclasses import dataclass
 
 __all__ = ["ParsedValue", "parse", "extract_values", "same_value",
@@ -25,9 +27,13 @@ __all__ = ["ParsedValue", "parse", "extract_values", "same_value",
 
 # Decimal multiplier per prefix letter. "R" doubles as the ohms decimal mark
 # in IEC 60062 notation (4R7 = 4.7 Ω); µ/μ are the unicode micro spellings.
+# Derived from the ONE base table — restricted on purpose: no ``T`` (a
+# tera-ohm/farad BOM value is absurd; deriving the full ladder here would
+# silently make ``4T7`` parse as 4.7e12), and uppercase only for ``K``.
 _MULTIPLIERS: dict[str, float] = {
-    "p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "μ": 1e-6,
-    "m": 1e-3, "R": 1.0, "k": 1e3, "K": 1e3, "M": 1e6, "G": 1e9,
+    **{ch: mult for ch, mult in si_prefix.BASE_MULT.items() if ch != "T"},
+    **{sign: 1e-6 for sign in si_prefix.MICRO_SIGNS},
+    "K": si_prefix.BASE_MULT["k"],
 }
 
 # Unit suffix -> unit class. Bare "R"/ohm spellings pin the class to R the

@@ -1,7 +1,7 @@
 # Codex plugin (`.codex-plugin/`)
 
 This repo ships as an **OpenAI Codex plugin** in addition to a Claude Code plugin. A Codex
-plugin bundles the 12 `akcli` skills (and the Python-version session hook) so Codex can
+plugin bundles the 13 `akcli` skills (and the Python-version session hook) so Codex can
 discover, install, and load them as one unit — no manual copying of skill folders.
 
 Spec reference: <https://developers.openai.com/codex/plugins/build>
@@ -26,7 +26,7 @@ akcli/                 # ← plugin root
 │   └── plugin.json               # Codex manifest (this is what makes it a Codex plugin)
 ├── .agents/plugins/
 │   └── marketplace.json          # repo-scoped catalog for `codex plugin marketplace add`
-├── skills/                       # 12 skills, shared with Claude & OpenCode
+├── skills/                       # 13 skills, shared with Claude & OpenCode
 │   ├── akcli-circuit-design/SKILL.md   #   core read/analyze/draw mechanics (start here)
 │   ├── akcli-schematic-authoring/SKILL.md
 │   ├── akcli-schematic-review/SKILL.md

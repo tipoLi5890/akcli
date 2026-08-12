@@ -15,7 +15,7 @@ from pathlib import Path
 
 from akcli.checks import layout
 from akcli.readers import kicad_lib
-from akcli.writers import geometry
+from akcli.geometry import transform as geometry
 from akcli.writers import kicad as kw
 
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
@@ -49,7 +49,7 @@ _POWER_LIB = """(kicad_symbol_lib (version 20231120) (generator "test")
 
 
 def _oplist(*ops):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(ops)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(ops)}
 
 
 def _fresh(tmp_path: Path) -> Path:
@@ -126,7 +126,7 @@ def test_coordinate_anchor_on_pin_auto_orients(tmp_path):
             {"op": "add_net_label", "name": "N1", "at": [2000, 1850], "scope": "global"},
             # explicit orientation must always win
             {"op": "add_net_label", "name": "N2", "at": [2000, 2150],
-             "scope": "global", "orientation": 0},
+             "scope": "global", "rotation": 0},
         ),
         str(tgt), apply=True, sources=[str(DEVICE)],
     )
@@ -257,7 +257,7 @@ def test_layout_flags_label_into_body(tmp_path):
              "x_mil": 2000, "y_mil": 2000, "rotation": 90},
             # eeschema rotation: R1.1 is the LEFT pin of a rot-90 R
             {"op": "add_net_label", "name": "WRONGWAY", "at": "R1.1",
-             "scope": "global", "orientation": 0},
+             "scope": "global", "rotation": 0},
         ),
         str(tgt), apply=True, sources=[str(DEVICE)],
     )
@@ -392,7 +392,7 @@ def test_layout_flags_wire_through_symbol_body(tmp_path):
             # endpoint labels keep the writer's connectivity gate green
             {"op": "add_wire", "vertices": [[1800, 2000], [2200, 2000]]},
             {"op": "add_net_label", "name": "A", "at": [1800, 2000],
-             "scope": "global", "orientation": 180},
+             "scope": "global", "rotation": 180},
             {"op": "add_net_label", "name": "A", "at": [2200, 2000],
              "scope": "global"},
         ),
@@ -428,7 +428,7 @@ def test_layout_flags_label_over_foreign_wire(tmp_path):
             {"op": "add_net_label", "name": "SIG", "at": "R1.1", "scope": "global"},
             {"op": "add_wire", "vertices": [[1800, 1700], [2200, 1700]]},
             {"op": "add_net_label", "name": "W", "at": [1800, 1700],
-             "scope": "global", "orientation": 180},
+             "scope": "global", "rotation": 180},
             {"op": "add_net_label", "name": "W", "at": [2200, 1700],
              "scope": "global"},
         ),
@@ -448,9 +448,9 @@ def test_label_anchored_on_wire_is_exempt(tmp_path):
             # label at the wire's end, extending back over its own wire
             {"op": "add_wire", "vertices": [[2000, 1500], [2000, 1300]]},
             {"op": "add_net_label", "name": "S", "at": [2000, 1500],
-             "scope": "global", "orientation": 90},
+             "scope": "global", "rotation": 90},
             {"op": "add_net_label", "name": "S", "at": [2000, 1300],
-             "scope": "global", "orientation": 90},
+             "scope": "global", "rotation": 90},
         ),
         str(tgt), apply=True, sources=[str(DEVICE)],
     )

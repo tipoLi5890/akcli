@@ -8,7 +8,7 @@ format modernized) the cache silently drifts — KiCad only refreshes it when a
 ``(symbol "Name" ...)`` block from ``<libdir>/<Nick>.kicad_sym``, rename it to
 ``"Nick:Name"``, and splice it over the embedded block. This module automates
 exactly that procedure (the extraction is done by the lossless
-:mod:`.readers.sexpr` parser instead of hand-counted parens):
+:mod:`.sexpr.parser` parser instead of hand-counted parens):
 
 * :func:`plan` — compare every embedded ``(symbol "Nick:Name" ...)`` against the
   fresh definition from ``<libdir>/<Nick>.kicad_sym`` (``(extends ...)`` derived
@@ -29,7 +29,7 @@ exactly that procedure (the extraction is done by the lossless
 
 Whitespace: a replaced block keeps the library file's internal formatting,
 deepened one tab to sit at the cache's nesting level; untouched nodes round-trip
-byte-for-byte (the :class:`~.readers.sexpr.SNode` contract).
+byte-for-byte (the :class:`~.sexpr.parser.SNode` contract).
 """
 
 from __future__ import annotations
@@ -42,9 +42,10 @@ from pathlib import Path
 
 from . import model, safety
 from .errors import fail
-from .readers import kicad, kicad_lib, sexpr
+from . import sexpr
+from .readers import kicad, kicad_lib
 from .readers.kicad_lib import _read_text
-from .readers.sexpr import SNode
+from .sexpr import SNode
 from .report import Severity
 from .writers import connectivity, lib_cache
 

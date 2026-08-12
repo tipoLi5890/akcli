@@ -17,7 +17,7 @@ import pytest
 from akcli import cli, netdiff, ops
 from akcli.drivers import kicad_cli
 from akcli.readers import kicad as kreader
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 from akcli.writers import kicad as kw
 
 DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kicad_sym"
@@ -31,7 +31,7 @@ def _blank_sch(tmp_path: Path) -> Path:
 
 
 def _oplist(*ops_list, **envelope):
-    return {"protocol_version": 1, "target_format": "kicad",
+    return {"protocol_version": 2, "target_format": "kicad",
             "ops": list(ops_list), **envelope}
 
 

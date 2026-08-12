@@ -23,7 +23,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "kicad" / "board_v8.kicad_sch"
 
 
 def _oplist(ops):
-    return {"protocol_version": 1, "target_format": "kicad",
+    return {"protocol_version": 2, "target_format": "kicad",
             "target_file": "x", "ops": ops}
 
 

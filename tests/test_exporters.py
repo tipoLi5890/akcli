@@ -11,7 +11,7 @@ from akcli import exporters
 from akcli.errors import AkcliError
 from akcli.readers import altium_sch
 from akcli.readers import kicad as kreader
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CORPUS = FIXTURES / "corpus"
@@ -247,14 +247,13 @@ def test_kicad_netlist_qualifies_sheet_scoped_names_only():
     assert set(local) == {"/GND", "/VBAT", "/VBAT_F", "/VBUS", "/VBUS_ADC",
                           "/VBUS_SENSE", "/VSYS"}
     # board_v8 names its two rails with power symbols -> bare, no sheet path.
-    # (Its third net carries BOTH a local `MID` and a global `VOUT`; akcli's
-    # canonical pick is `MID`, eeschema's is `VOUT` — a net-engine naming gap
-    # that predates this emitter and is tracked in test_e2e_netlist.py's
-    # docstring. The qualification rule itself is applied consistently: `MID`
-    # is local-scoped, so it is qualified.)
+    # (Its third net carries BOTH a local `MID` and a global `VOUT`; the net
+    # engine now follows eeschema's driver priority, so the canonical name is
+    # the GLOBAL `VOUT` — emitted unqualified, exactly as kicad-cli writes
+    # it. `MID` survives as an alias.)
     v8 = _nets(exporters.to_kicad_netlist(
         kreader.read_sch(str(FIXTURES / "kicad" / "board_v8.kicad_sch"))))
-    assert set(v8) == {"+3V3", "GND", "/MID"}
+    assert set(v8) == {"+3V3", "GND", "VOUT"}
 
 
 def test_kicad_netlist_qualifies_child_sheets_with_the_sheet_NAME_path():

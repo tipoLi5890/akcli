@@ -96,11 +96,11 @@ def test_schema_ids_share_one_host():
 
 
 def test_sync_schemas_tool_sees_both_sides(tmp_path, monkeypatch, capsys):
-    """`tools/sync_schemas.py --check` must flag an orphaned mirror."""
+    """`tools/schemas.py sync --check` must flag an orphaned mirror."""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
-        "_sync_schemas", ROOT / "tools" / "sync_schemas.py")
+        "_tools_schemas", ROOT / "tools" / "schemas.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
@@ -110,14 +110,14 @@ def test_sync_schemas_tool_sees_both_sides(tmp_path, monkeypatch, capsys):
     (canonical / "a.json").write_text("{}\n", encoding="utf-8", newline="\n")
     (mirror / "a.json").write_text("{}\n", encoding="utf-8", newline="\n")
     (mirror / "gone.json").write_text("{}\n", encoding="utf-8", newline="\n")
-    monkeypatch.setattr(mod, "CANONICAL", canonical)
+    monkeypatch.setattr(mod, "SCHEMA_DIR", canonical)
     monkeypatch.setattr(mod, "MIRROR", mirror)
 
-    assert mod.main(["--check"]) == 1
+    assert mod.main(["sync", "--check"]) == 1
     assert "orphan" in capsys.readouterr().out
-    assert mod.main([]) == 0                    # sync mode prunes it
+    assert mod.main(["sync"]) == 0              # sync mode prunes it
     assert not (mirror / "gone.json").exists()
-    assert mod.main(["--check"]) == 0
+    assert mod.main(["sync", "--check"]) == 0
 
 
 def test_ops_loaders_use_packaged_or_root():

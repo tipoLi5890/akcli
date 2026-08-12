@@ -67,9 +67,10 @@ from ..errors import AkcliError
 from ..model import Component
 from ..netbuild import SegmentIndex
 from ..readers import kicad_lib
-from ..readers.sexpr import SNode
+from ..sexpr import SNode
+from ..sexpr.build import _q  # noqa: F401 - the ONE quoter (coercing form)
 from ..report import Finding, Severity
-from . import geometry
+from ..geometry import transform as geometry
 
 __all__ = ["verify", "auto_junctions"]
 
@@ -829,11 +830,6 @@ def auto_junctions(doc: SNode, *, tol_nm: int = 0) -> None:
 # --------------------------------------------------------------------------- #
 # SNode construction helpers
 # --------------------------------------------------------------------------- #
-def _q(value: object) -> str:
-    s = str(value)
-    s = s.replace("\\", "\\\\").replace('"', '\\"')
-    return '"' + s.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
-
 
 def _atom(text: str) -> SNode:
     return SNode.atom(text)

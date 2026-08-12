@@ -27,7 +27,7 @@ from ._cli_harness import blank_sheet, json_of, run_cli
 
 def _write(tmp_path: Path, *oplist_ops, name: str = "ops.json") -> Path:
     p = tmp_path / name
-    p.write_text(json.dumps({"protocol_version": 1, "target_format": "kicad",
+    p.write_text(json.dumps({"protocol_version": 2, "target_format": "kicad",
                              "ops": list(oplist_ops)}),
                  encoding="utf-8", newline="\n")
     return p
@@ -94,10 +94,11 @@ def test_draw_refuses_the_bad_macro_and_writes_nothing(tmp_path):
 
 def test_bad_macro_never_expands(tmp_path):
     """A rejected macro must not reach the expander (it would invent a part)."""
-    doc = {"protocol_version": 1, "target_format": "kicad", "ops": [
+    doc = {"protocol_version": 2, "target_format": "kicad", "ops": [
         {"op": "place_pullup", "net": "SDA", "rail_net": "3V3", "x_mil": 0,
          "y_mil": 0, "valu": "4.7k"}]}
-    expanded, errs = ops.prepare_oplist(doc)
+    prep = ops.prepare_oplist(doc)
+    expanded, errs = prep.doc, prep.errors
     assert errs and expanded["ops"][0]["op"] == "place_pullup"
 
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from akcli.readers.sexpr import parse
+from akcli.sexpr.parser import parse
 from akcli.report import Severity
 from akcli.writers import connectivity
 from akcli.writers import kicad as kw
@@ -33,7 +33,7 @@ ROOT_UUID = "8a000000-0000-4000-8000-000000000000"
 
 
 def _oplist(*ops):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(ops)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(ops)}
 
 
 def _seed(tmp_path: Path) -> Path:

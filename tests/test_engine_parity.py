@@ -41,7 +41,8 @@ from pathlib import Path
 
 import pytest
 
-from akcli.readers import kicad, sexpr
+from akcli.readers import kicad
+from akcli.sexpr import parser as sexpr
 from akcli.writers import connectivity
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -39,7 +39,7 @@ def _copy_v8(tmp_path: Path, name: str = "board.kicad_sch") -> Path:
 
 def _ops_file(tmp_path: Path, ops: list, name: str = "ops.json") -> Path:
     p = tmp_path / name
-    p.write_text(json.dumps({"protocol_version": 1, "target_format": "kicad",
+    p.write_text(json.dumps({"protocol_version": 2, "target_format": "kicad",
                              "target_file": "board.kicad_sch", "ops": ops}),
                  encoding="utf-8")
     return p
@@ -54,7 +54,7 @@ def test_nets_text(capsys):
     # one line per net, members sorted
     assert "+3V3: #PWR01.1, R1.1" in out
     assert "GND: #PWR02.1, C1.2, R2.2" in out
-    assert "MID: C1.1, R1.2, R2.1" in out
+    assert "VOUT: C1.1, R1.2, R2.1" in out
 
 
 def test_nets_json(capsys):
@@ -79,7 +79,7 @@ def test_intent_snapshot_roundtrip(tmp_path, capsys):
     capsys.readouterr()
     doc = json.loads(snap.read_text(encoding="utf-8"))
     assert doc["protocol_version"] == 1 and doc["mode"] == "exact"
-    assert set(doc["nets"]) == {"+3V3", "GND", "MID"}
+    assert set(doc["nets"]) == {"+3V3", "GND", "VOUT"}
 
     # --intent alone is a pure intent assertion: the round-trip is clean
     assert main(["check", str(V8), "--intent", str(snap)]) == EXIT["OK"]

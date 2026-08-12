@@ -36,7 +36,7 @@ from .. import model, units
 from ..errors import AkcliError, fail
 from ..kicad_escape import unescape_string
 from ..safety import read_text_guarded
-from . import sexpr
+from .. import sexpr
 
 __all__ = [
     "read",

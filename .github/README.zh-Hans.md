@@ -102,7 +102,7 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 会用一份 JSON 文档自描述整个 CLI 能力面——而且每个错误码都携带机器可读的 `remediation` 修复提示。
 
 - **Claude Code** — 安装随附插件，即可获得 8 个 `/akcli:circuit-*` 命令（review、pinmap、draw、
-  diff、parts、sim、datasheet、release）与 12 个 skills，涵盖设计、评审、电路编写、Altium 互通、元件选型、计算器与 release
+  diff、parts、sim、datasheet、release）与 13 个 skills，涵盖设计、评审、电路编写、Altium 互通、元件选型、计算器与 release
   把关。
 - **Codex** — 安装随附插件，或把 skills 文件夹放进 `.agents/skills/` 让其自动发现。见
   [docs/codex-plugin.md](../docs/codex-plugin.md)。

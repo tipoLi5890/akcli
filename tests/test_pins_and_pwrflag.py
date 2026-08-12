@@ -74,7 +74,7 @@ def _seed(tmp_path: Path) -> Path:
 
 def _ops(tmp_path: Path, ops: list) -> Path:
     p = tmp_path / "ops.json"
-    p.write_text(json.dumps({"protocol_version": 1, "target_format": "kicad", "ops": ops}))
+    p.write_text(json.dumps({"protocol_version": 2, "target_format": "kicad", "ops": ops}))
     return p
 
 

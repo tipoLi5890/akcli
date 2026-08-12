@@ -31,10 +31,11 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import contract
 from ..model import Component
 from ..report import Finding, Severity
 
-FACTS_VERSION = "1.0"
+FACTS_VERSION = contract.SCHEMA_VERSIONS["facts"]
 EXTRACTION_METHODS = ("manual", "pdftotext", "llm")
 
 # Component parameters that carry the exact MPN a facts file is keyed by.

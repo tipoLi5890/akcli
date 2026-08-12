@@ -104,7 +104,7 @@ def _write_tree(tmp_path: Path, child_dir: str = "") -> tuple[Path, Path]:
 # member the flat view cannot see. Device:R resolves from the child's own
 # embedded lib_symbols (--symbols <child>), so no KiCad install is needed.
 _EDIT_OPS = {
-    "protocol_version": 1,
+    "protocol_version": 2,
     "target_format": "kicad",
     "ops": [
         {"op": "place_component", "lib_id": "Device:R", "designator": "R3",

@@ -113,7 +113,7 @@ def test_cli_lock_write_and_against(tmp_path, capsys, monkeypatch):
     ops = [{"op": "set_component_parameters", "designator": "R1",
             "parameters": {"LCSC Part": "C25804"}}]
     opsfile = tmp_path / "ops.json"
-    opsfile.write_text(json.dumps({"protocol_version": 1,
+    opsfile.write_text(json.dumps({"protocol_version": 2,
                                    "target_format": "kicad",
                                    "target_file": "x", "ops": ops}),
                        encoding="utf-8", newline="\n")

@@ -21,7 +21,8 @@ literal text.
 
 from __future__ import annotations
 
-__all__ = ["escape_string", "unescape_string", "escape_lib_id", "unescape_lib_id"]
+__all__ = ["escape_string", "unescape_string", "escape_lib_id",
+           "unescape_lib_id", "quote_atom"]
 
 # {token} -> character (common/string.cpp UnescapeString)
 _UNESCAPE: dict[str, str] = {
@@ -97,3 +98,18 @@ def escape_lib_id(lib_id: str | None) -> str | None:
         nick, name = lib_id.split(":", 1)
         return f"{escape_string(nick)}:{escape_string(name)}"
     return escape_string(lib_id)
+
+
+def quote_atom(text: str) -> str:
+    """The ONE s-expression string-atom quoter (escape ``\\``, ``"``, controls).
+
+    Returns the KiCad source text INCLUDING the surrounding quotes.  Control
+    characters are not optional: akcli's own lexer tolerates a raw newline
+    inside a quoted atom, but eeschema does not — an unescaped one yields a
+    file KiCad refuses to open while every akcli gate passes.  The tree once
+    grew six hand-rolled copies of this; ``tests/test_sexpr_quoting.py`` pins
+    every public alias to THIS function object and fails on a seventh copy.
+    """
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return ('"' + escaped.replace("\n", "\\n").replace("\r", "\\r")
+                        .replace("\t", "\\t") + '"')

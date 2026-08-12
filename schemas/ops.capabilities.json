@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/tipoLi5890/akcli/schemas/ops.capabilities.json",
   "title": "AkcliOpCapabilities",
-  "protocol_version": 1,
+  "protocol_version": 2,
   "description": "Per-executor support matrix. true = supported; false = ERROR: OP_UNSUPPORTED.",
   "executors": [
     "kicad",

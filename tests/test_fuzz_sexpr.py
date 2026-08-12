@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from akcli.errors import AkcliError
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "kicad"
            / "board_v8.kicad_sch").read_text(encoding="utf-8")

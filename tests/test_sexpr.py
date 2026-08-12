@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 
 from akcli.errors import ERROR_CODES, AkcliError
-from akcli.readers import sexpr
-from akcli.readers.sexpr import SNode, dumps, parse
+from akcli.sexpr import parser as sexpr
+from akcli.sexpr.parser import SNode, dumps, parse
 from akcli.safety import MAX_ATOM_BYTES, MAX_SEXPR_DEPTH
 
 FIX = Path(__file__).resolve().parent / "fixtures"

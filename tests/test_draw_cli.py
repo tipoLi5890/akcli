@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from akcli import ops as ops_mod
 from akcli.cli import main
 from akcli.errors import EXIT
-from akcli.readers import sexpr
+from akcli.sexpr import parser as sexpr
 
 FIX = Path(__file__).parent / "fixtures" / "kicad"
 V8 = FIX / "board_v8.kicad_sch"
@@ -32,7 +33,8 @@ def _copy(tmp_path: Path) -> Path:
     return tgt
 
 
-def _ops_file(tmp_path: Path, ops: list, *, protocol=1, target="kicad", name="ops.json") -> Path:
+def _ops_file(tmp_path: Path, ops: list, *, protocol=ops_mod.PROTOCOL_VERSION,
+              target="kicad", name="ops.json") -> Path:
     p = tmp_path / name
     p.write_text(json.dumps(
         {"protocol_version": protocol, "target_format": target, "ops": ops}
@@ -178,8 +180,9 @@ def test_draw_bad_symbol_exit_oplist(tmp_path):
 
 def test_plan_structurally_invalid_oplist_exit_oplist(tmp_path):
     tgt = _copy(tmp_path)
-    # protocol_version 2 fails structural validation -> exit 6, no traceback
-    ops = _ops_file(tmp_path, _GOOD_OPS, protocol=2)
+    # an unsupported protocol_version fails structural validation -> exit 6,
+    # no traceback
+    ops = _ops_file(tmp_path, _GOOD_OPS, protocol=ops_mod.PROTOCOL_VERSION + 1)
     rc = main(["plan", str(tgt), "--ops", str(ops)])
     assert rc == EXIT["OPLIST"]
 
@@ -255,7 +258,7 @@ def test_duplicate_designator_gate_flags_literal_dup(tmp_path, capsys):
     """A doc carrying the same ref+unit on two symbol nodes must not verify."""
     import re
 
-    from akcli.readers import sexpr as sx
+    from akcli.sexpr import parser as sx
     from akcli.writers import connectivity
 
     tgt = _copy(tmp_path)

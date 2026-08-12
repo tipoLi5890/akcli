@@ -35,8 +35,8 @@ from .kicad_escape import unescape_string
 from .model import Component, Library, SymbolDef
 from .readers import kicad_lib
 from .readers.kicad_lib import _atom_value, _fnum_atom, _mm_to_mil, _sub_unit_style
-from .readers.sexpr import SNode
-from .writers import geometry
+from .sexpr import SNode
+from .geometry import transform as geometry
 
 _PIN_NUM_NUDGE_MIL = 25.0    # pin number: offset from the stub midpoint
 _PIN_NAME_GAP_MIL = 30.0     # pin name: past the stub's inner (body) end

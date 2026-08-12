@@ -17,12 +17,12 @@ All notable changes to `akcli` are documented here. The format is based on
   - **MINOR** — backwards-compatible new subcommands, flags, checks, readers, or ops.
   - **PATCH** — backwards-compatible bug fixes and internal changes.
 
-- **`schema_version`** (stamped on every `Schematic`/`Pcb`/`Library` JSON export; currently `"1.3"` — `model.SCHEMA_VERSION` is the single source of truth).
+- **`schema_version`** (stamped on every `Schematic`/`Pcb`/`Library` JSON export; currently `"2.0"` — `akcli.contract.SCHEMA_VERSIONS` is the single source of truth and `model.SCHEMA_VERSION` an alias of it).
   Bumped independently of the package version. A **minor** schema bump only adds optional fields
   (consumers must ignore unknown keys); a **major** schema bump may remove or rename fields and
   coincides with a package MAJOR bump.
 
-- **`protocol_version`** (integer; currently `1`) governs the op-list document. It is bumped **only**
+- **`protocol_version`** (integer; currently `2`) governs the op-list document. It is bumped **only**
   on a breaking change to op shapes or the result object. Executors **reject a higher major
   `protocol_version`** with `ERROR: PROTOCOL_MISMATCH` rather than guessing. Adding a new optional op or optional op field does
   **not** bump `protocol_version`.
@@ -30,6 +30,162 @@ All notable changes to `akcli` are documented here. The format is based on
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
 ## [Unreleased]
+
+The 0.21 architecture rework: a whole-tree internal restructuring
+(`tools/equiv_snapshot.py`: 98 behavioral fingerprint cases against the
+0.20.0 tree) that carried its external surface unchanged — plus, in the
+same batch, the deliberate 1.0 contract breaks below. Everything outside the
+BREAKING section is behaviour-preserving.
+
+### BREAKING
+
+Migration guide: [docs/migration-1.0.md](docs/migration-1.0.md).
+
+- **op-list `protocol_version` 1 → 2.** Four op fields were renamed; a
+  document still declaring `1` is refused with `PROTOCOL_MISMATCH`, and a v1
+  field name on a v2 document is refused with an explicit rename line
+  (`field 'orientation' was renamed to 'rotation' in protocol 2`) instead of
+  a bare unknown-field error.
+
+  | op | v1 field | v2 field |
+  | --- | --- | --- |
+  | `add_net_label` | `orientation` | `rotation` |
+  | `set_component_parameters` | `reference` | `new_designator` |
+  | `set_component_parameters` | `instance_references` | `instance_designators` |
+  | `rename_net` | `from` / `to` | `old_name` / `new_name` |
+
+  Values and semantics are unchanged in every case. `route_net` and
+  `connect_and_label` keep their own `from`/`to` (pin refs, not net names),
+  and `connect_and_label` keeps its own `orientation` — it expands into an
+  `add_net_label` carrying `rotation`.
+
+- **Canonical net names now follow eeschema's driver-priority ladder.** A net
+  named by two different explicit names (a power port and a local label, a
+  global and a local label) picks the name `kicad-cli sch export netlist`
+  would pick, instead of the first name the reader happened to see. Existing
+  designs can therefore report a DIFFERENT `Net.name` — the corpus board's
+  `MID`/`VOUT` net now reports `VOUT` (with `MID` in `aliases`). Every
+  displaced name stays reachable through `aliases`/`source_names`, so
+  `check --intent`, `check --contract` and sim probes still match on it.
+
+- **Export `schema_version` 1.3 → 2.0** on every `Schematic`/`Pcb`/`Library`
+  export and on the `check`/`review`/`diff` finding envelopes, marking the
+  net-name change as a major (renaming) schema bump rather than an additive
+  one.
+
+- **The `--json` error envelope gained `akcli_version`** (next to
+  `schema_version`). Additive for readers that ignore unknown keys; listed
+  here because the envelope is a frozen contract.
+
+### Changed (internal architecture)
+
+- **`prepare_oplist` returns a `PreparedOpList` record** (`doc` / `errors` /
+  `groups_resolved`) instead of a `(doc, errors)` tuple, and group resolution
+  no longer smuggles a `_groups_resolved` marker key INTO the op-list
+  document — the flag is the resolved document's type, so no internal
+  pipeline state can leak into a payload that echoes the op-list.
+
+- **Layering is now a tested invariant.** `tests/test_layering.py` freezes a
+  ranked import graph over `src/akcli` (AST scan, lazy imports included,
+  iterative SCC cycle check, shrink-only waivers). The one historical import
+  cycle (`arrange` ↔ `groupframe` ↔ `checks.layout`, hidden behind lazy
+  imports) is gone.
+- **New `akcli.sexpr` package (IR layer).** `readers/sexpr.py` →
+  `sexpr/parser.py` (the ONE parser/serializer), `writers/sexpr_writer.py` →
+  `sexpr/writer.py` (atom builders), plus `sexpr/query.py` (shared read-only
+  accessors: `root_uuid`, numeric children — formerly duplicated across four
+  modules) and `sexpr/build.py` (SNode construction helpers out of the
+  writer monolith).
+- **New `akcli.geometry` package.** `writers/geometry.py` →
+  `geometry/transform.py` (unchanged math, plus `point_world_mil` hoisted
+  from the reader); `geometry/boxes.py` (bounding-box primitives formerly
+  private to `checks/layout.py`); `geometry/segments.py` (integer segment
+  tests + union-find shared by the redundant-wire planner).
+- **`arrange` is a package.** `arrange.py` + `groupframe.py` →
+  `arrange/{collect,plan,frames,propose,groupsfile}.py`; frames no longer
+  reach back into the planner through lazy imports.
+- **The 2,278-line `writers/kicad.py` is now a 14-module package** behind a
+  re-export facade: `executor` (apply/run_ops/verify), `registry`
+  (`OpCall`/`Handler`/`@op` decorator), `context` (`ExecCtx` dataclass —
+  formerly an untyped dict), `anchors`, `properties`, `placement`, and six
+  `handlers/` modules (one per op family). Handler signatures are uniformly
+  `Callable[[OpCall], list[str]]`.
+- **`commands/drawing.py` (1,712 lines) shed its engine half** into the new
+  typed `akcli.pipeline` package (`draw`, `netgate`, `preview`, `undo`,
+  `arrange_apply`) plus `writers/blank.py` and `writers/backups.py`;
+  command modules now only translate argparse ↔ engine ↔ JSON envelope.
+- **`commands/query.py` and `commands/jlc.py` shed theirs too.** `net --why`'s
+  ~120-line attachment diagnosis became the typed `akcli.explain` engine;
+  `bbox`'s body∪pin-tip union became `geometry.boxes.placement_boxes_nm`;
+  `groups --frame`'s write half joined `pipeline.arrange_apply`
+  (`apply_group_frames`); `jlc bom`'s catalog check, table-row assembly and
+  summary line plus the shared exact-MPN resolution moved to
+  `parts/bom_report.py`, and `jlc add --place`'s planner (with the
+  read-back-from-artifacts symbol name/value) to `parts/place_oplist.py`.
+- **One implementation per semantic.** The six identical S-expression
+  quoters collapsed into `kicad_escape.quote_atom` (every historical name is
+  pinned `is`-identical); the unused second serializer (`serialize`) was
+  deleted (`sexpr.dumps` is the one); the three refdes-prefix copies
+  collapsed into `classify.refdes_prefix` (+ new `classify.split_refdes`);
+  the two SI prefix tables now derive from one base table
+  (`akcli.si_prefix`), with each consumer's deliberate alphabet/tolerance
+  differences kept and pinned by tests.
+- **The op vocabulary has a single source of truth.** New
+  `src/akcli/opspec.py` (typed, declarative) describes every op/macro —
+  fields, constraints, templates, group-coordinate classes, handler
+  bindings, capability rows, every schema description. `schemas/ops.schema.json`
+  and `ops.capabilities.json` are now **generated** from it
+  (`tools/gen_ops_schema.py`, byte-stable, `--check` drift gate in CI);
+  adding an op went from touching 6+ hand-synced tables to one spec entry
+  plus one handler.
+- **`ops.py` is a package** (`ops/{base,vocab,lints,template,macros,groups,
+  validate,schema_io}.py` behind a flat re-export shim); every vocabulary
+  table is derived from `opspec` at import time. `tools/schemas.py` is the
+  one schema entry point (`build`/`check`; `gen_ops_schema.py` and
+  `sync_schemas.py` remain as thin delegates), wired into CI lint.
+- **Version stamps have a central registry** (`akcli.contract`):
+  `SCHEMA_VERSIONS` / `PROTOCOL_VERSIONS` (four input protocols stay
+  separate keys on purpose) / `JOURNAL_VERSION`. Every stamp site reads the
+  registry; new gates assert `schemas/*.json` version consts equal the
+  registry and refuse new hardcoded version literals.
+- **Node-identity seeds have one home** (`writers/identity.py`): every uuid
+  seed format (`R3`, `R3#u2`, `R3.pin1`, `wire:…`, `label:…`, `sheet:…`,
+  keyed annotations) is a named builder; `deterministic_uuid` lost its
+  vestigial always-zero `op_index` parameter while the seed **strings**
+  (including the historical `:0` suffix) stay byte-identical — pinned by
+  hardcoded-uuid tests, because changing a seed re-identifies every node in
+  every existing document.
+- Symbol-level boundary gates: `_ExitWith`/`argparse` may not leave the CLI
+  layer; `writers/kicad.py` must stay a def-less facade. The
+  depth-sensitive `parents[2]` schema lookup re-anchored on the package
+  location (a gate now refuses new depth-sensitive anchors).
+
+### Fixed
+
+- `bom_policy.refdes_prefix` and `ops`' macro-role prefix check now classify
+  synthesized `$U7`-style designators (Altium parts whose designator record
+  is missing) the same way the rest of the tree does, instead of silently
+  returning no class. (Surfaced by the convergence's differential census;
+  affects BOM class rows for Altium imports with missing designators.)
+
+### Added (verification infrastructure)
+
+- `tools/equiv_snapshot.py` — behavioral fingerprint differ (read-only
+  command matrix × every fixture + apply-twice over every known op-list);
+  the mechanical "this refactor changed nothing" proof, with a determinism
+  self-check in CI.
+- Meta-gates: AST-gate scan-surface coverage census, depth-sensitive path
+  anchor whitelist, SPEC module-table ghost check
+  (`tests/test_gate_coverage.py`); mypy-scope census with an explicit,
+  shrink-only untyped-module ledger (`tests/test_mypy_scope.py`).
+- eeschema net-name parity fixtures for DIFFERENT-name driver competition
+  (power vs local label, global vs local), strict-xfail until the planned
+  canonical-net-name alignment; verified against a real `kicad-cli`.
+- `docs/pin-identity.md` — the audited pin-identity model and its
+  major-version migration boundaries.
+- New `akcli-net-naming` skill (13 skills total): predicts and debugs which
+  name a net gets under eeschema's driver priority; the authoring, review,
+  debug and sim surfaces cross-reference it.
 
 ## [0.20.0] - 2026-08-08
 

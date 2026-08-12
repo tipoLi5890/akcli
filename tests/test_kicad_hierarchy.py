@@ -162,7 +162,7 @@ def test_child_sheet_is_writable(tmp_path, capsys):
     child = tmp_path / "child.kicad_sch"
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "add_text", "text": "reviewed", "at": [4000, 4000]}],
     }), encoding="utf-8")
     rc = main(["draw", str(child), "--ops", str(ops), "--apply"])
@@ -221,7 +221,7 @@ def _place_into_child(tmp_path, n_sheets: int, extra_fields: dict | None = None,
         '        (name "~") (number "2")))))\n', encoding="utf-8")
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "place_component", "lib_id": "RR", "designator": "R9",
                  "x_mil": 3000, "y_mil": 3000, **(extra_fields or {})}],
     }), encoding="utf-8")
@@ -235,7 +235,7 @@ def _place_into_child(tmp_path, n_sheets: int, extra_fields: dict | None = None,
 def test_child_sheet_placement_joins_the_sibling_sheet_paths(tmp_path, capsys):
     """A part placed INTO a child sheet must sit on the sheet path(s) its
     siblings do — the flat ``/<own-root>`` form annotated as R? in KiCad."""
-    from akcli.readers import sexpr as sx
+    from akcli.sexpr import parser as sx
 
     child = _place_into_child(tmp_path, 1)
     capsys.readouterr()
@@ -258,7 +258,7 @@ def test_twice_instantiated_scalar_ref_refuses(tmp_path, capsys):
 def test_twice_instantiated_child_placement_with_instance_map(tmp_path, capsys):
     """With instance_designators, the new symbol carries BOTH sibling paths —
     each with its OWN reference — and the write replays byte-identically."""
-    from akcli.readers import sexpr as sx
+    from akcli.sexpr import parser as sx
 
     imap = {f"/{ROOT_UUID}/{SHEET1_UUID}": "R9",
             f"/{ROOT_UUID}/{SHEET2_UUID}": "R209"}
@@ -299,7 +299,7 @@ def test_unannotated_child_sheet_is_writable(tmp_path, capsys):
         encoding="utf-8")
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "add_text", "text": "note", "at": [4000, 4000]}],
     }), encoding="utf-8")
     assert main(["draw", str(child), "--ops", str(ops), "--apply"]) == 0
@@ -310,7 +310,7 @@ def test_unannotated_child_sheet_is_writable(tmp_path, capsys):
 def test_flat_file_bad_instances_path_still_refused(tmp_path):
     """The relaxed rule still rejects a single-segment path naming a WRONG
     root — flat-file corruption stays caught."""
-    from akcli.readers import sexpr as sx
+    from akcli.sexpr import parser as sx
     from akcli.writers import connectivity
 
     bad = _child_sch({"/99999999-0000-4000-8000-000000000099": "R1"})

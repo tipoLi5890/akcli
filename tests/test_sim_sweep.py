@@ -32,9 +32,9 @@ def _write_sim(tmp_path, doc: dict) -> str:
 
 
 def _ac_divider_sim(tmp_path, bound: dict | None = None) -> str:
-    # 1 V AC on +3V3; measure |v(MID)| at 1 kHz. The divider ratio (and the cap
+    # 1 V AC on +3V3; measure |v(VOUT)| at 1 kHz. The divider ratio (and the cap
     # shunt) fall as R1 grows, so vmid decreases monotonically across corners.
-    assertion = {"name": "vmid", "meas": "FIND vm(MID) AT=1k"}
+    assertion = {"name": "vmid", "meas": "FIND vm(VOUT) AT=1k"}
     assertion.update(bound or {"ge": "0"})
     return _write_sim(tmp_path, {
         "protocol_version": 1,
@@ -185,7 +185,7 @@ def test_sweep_surfaces_deck_build_warnings(monkeypatch, tmp_path, capsys):
 # --------------------------------------------------------------------------- #
 @_needs_ngspice
 def test_sweep_rc_monotonic_fc_shift(tmp_path, capsys):
-    # 3-corner RC sweep: as R1 grows, |v(MID)| at 1 kHz strictly decreases.
+    # 3-corner RC sweep: as R1 grows, |v(VOUT)| at 1 kHz strictly decreases.
     sim = _ac_divider_sim(tmp_path)
     assert cli.main(["sim", _BOARD, "--sim", sim,
                      "--sweep", "R1=10k,20k,40k", "--json"]) == 0

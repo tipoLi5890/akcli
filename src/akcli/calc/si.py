@@ -27,6 +27,8 @@ from __future__ import annotations
 import math
 import re
 
+from .. import si_prefix
+
 __all__ = ["parse_value", "parse_plain", "fmt_eng"]
 
 # Canonical prefix meanings. ``m``/``M`` are the *only* case-significant entry
@@ -34,27 +36,8 @@ __all__ = ["parse_value", "parse_plain", "fmt_eng"]
 # by ``_build_mult``. The micro signs are excluded from that mirroring on
 # purpose: "µ".upper() is Greek capital Mu, which would alias micro onto a
 # mega-looking character.
-_BASE_MULT = {
-    "p": 1e-12, "n": 1e-9, "u": 1e-6,
-    "m": 1e-3, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12,
-    "R": 1.0,
-}
-_MICRO_SIGNS = ("µ", "μ")  # MICRO SIGN, GREEK SMALL LETTER MU
-
-
-def _build_mult() -> dict[str, float]:
-    """Expand ``_BASE_MULT`` to both cases, keeping ``m``/``M`` distinct."""
-    out: dict[str, float] = {}
-    for ch, mult in _BASE_MULT.items():
-        out[ch] = mult
-        if ch not in ("m", "M"):
-            out[ch.swapcase()] = mult
-    for sign in _MICRO_SIGNS:
-        out[sign] = 1e-6
-    return out
-
-
-_MULT = _build_mult()
+_BASE_MULT = si_prefix.BASE_MULT          # the ONE prefix->multiplier table
+_MULT = si_prefix.expand_case()
 
 _RX = re.compile(r"^([0-9]*\.?[0-9]+)\s*(["
                  + re.escape("".join(sorted(_MULT)))

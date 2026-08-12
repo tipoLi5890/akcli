@@ -31,7 +31,7 @@ from .. import model
 from ..errors import fail
 from ..kicad_escape import unescape_string
 from .altium_pcb_bin import UNIT_MIL
-from . import sexpr
+from .. import sexpr
 
 __all__ = ["read_kicad_mod", "read_pretty", "read_pcblib", "parse_footprint_node"]
 

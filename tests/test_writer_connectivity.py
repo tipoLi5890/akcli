@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from akcli.readers import sexpr
-from akcli.readers.sexpr import dumps, parse
+from akcli.sexpr import parser as sexpr
+from akcli.sexpr.parser import dumps, parse
 from akcli.report import Severity
 from akcli.writers import connectivity
 

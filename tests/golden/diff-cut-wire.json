@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "2.0",
   "summary": {
     "components": {
       "added": 0,
@@ -86,8 +86,8 @@
       "confidence": 1.0
     },
     {
-      "name_a": "MID",
-      "name_b": "MID",
+      "name_a": "VOUT",
+      "name_b": "VOUT",
       "stable_id_a": "net_6ba9994ea87a",
       "stable_id_b": "net_6ba9994ea87a",
       "method": "membership",

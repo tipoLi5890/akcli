@@ -32,9 +32,9 @@ metadata header so the report is never vacuously clean.
 
 from __future__ import annotations
 
-import re
 
 from .. import bom_policy
+from .. import classify
 from ..model import Component, Schematic
 from ..report import Finding, Severity, anchor
 
@@ -43,15 +43,9 @@ __all__ = ["run"]
 # A "simple" / numeric-suffixed refdes: one or more letters then digits, nothing
 # else (``R12`` -> ("R", 12), ``U3`` -> ("U", 3)). Compound refs like ``J_USB_C``
 # (an underscore-bearing manual name) do NOT match and are skipped from gaps.
-_REFDES_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
-
-
-def _parse_refdes(ref: str) -> tuple[str, int] | None:
-    """Split a refdes into ``(alpha-prefix, int-suffix)`` or ``None`` if compound."""
-    m = _REFDES_RE.match(ref.strip())
-    if not m:
-        return None
-    return m.group(1), int(m.group(2))
+# The sortable-sequence split lives in classify.split_refdes (the second
+# refdes question, beside refdes_prefix); local name kept for the check body.
+_parse_refdes = classify.split_refdes
 
 
 def _clean(s: str | None) -> str | None:

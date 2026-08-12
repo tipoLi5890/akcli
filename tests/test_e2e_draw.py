@@ -22,7 +22,7 @@ DEVICE = Path(__file__).parent / "fixtures" / "kicad" / "symbols" / "Device.kica
 
 
 def _oplist(*ops):
-    return {"protocol_version": 1, "target_format": "kicad", "ops": list(ops)}
+    return {"protocol_version": 2, "target_format": "kicad", "ops": list(ops)}
 
 
 def _seed(tmp_path: Path) -> Path:
@@ -94,7 +94,7 @@ def test_derived_symbol_cache_is_flattened(tmp_path):
     # derived name (an AP1117-style leftover base unit name inside the entry is
     # exactly the broken case). The fixture's own plain Device:C cache entry
     # legitimately keeps its C_0_1/C_1_1 names, so scope the check to the block.
-    from akcli.readers import sexpr
+    from akcli.sexpr import parser as sexpr
 
     libsyms = sexpr.parse(text).find("lib_symbols")
     derived = next(
@@ -455,7 +455,7 @@ def test_draw_no_erc_skips_advisory_run(tmp_path, monkeypatch, capsys):
 
     target = tmp_path / "board.kicad_sch"
     assert _main(["new", str(target)]) == 0
-    ops = {"protocol_version": 1, "target_format": "kicad",
+    ops = {"protocol_version": 2, "target_format": "kicad",
            "target_file": "board.kicad_sch",
            "ops": [{"op": "add_text", "at": [1000, 1000], "text": "x"}]}
     (tmp_path / "ops.json").write_text(_json.dumps(ops), encoding="utf-8")

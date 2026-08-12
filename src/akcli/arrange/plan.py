@@ -20,25 +20,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .checks.layout import _Box, _overlaps, child_mil, _world_box
-from .readers import kicad as _krd
-from .readers import kicad_lib, sexpr
-from .safety import read_text_guarded
+from .. import sexpr
+from ..geometry.boxes import Box as _Box
+from ..geometry.boxes import overlaps as _overlaps
+from ..readers import kicad as _krd
+from ..safety import read_text_guarded
+from .collect import SymInfo, collect as _collect
 
 GRID_MIL = 100.0          # nudge step (2x the 50-mil pin grid)
 MARGIN_MIL = 50.0         # required clearance between full boxes
 _MAX_TRIES = 400          # bounded search per component
-
-
-@dataclass
-class SymInfo:
-    """One placed symbol: its padded full box and anchoring state."""
-
-    ref: str
-    at: tuple[float, float]           # placement anchor (mil)
-    box: _Box                         # body + pin field, world frame
-    pin_tips: set[tuple[float, float]]
-    anchored: bool = False
 
 
 @dataclass
@@ -54,57 +45,6 @@ class Move:
             op["carry_labels"] = True
             op["carry_wires"] = True
         return op
-
-
-def _collect(root: sexpr.SNode) -> tuple[list[SymInfo], set[tuple[float, float]]]:
-    """All placed symbols with world boxes + every wire/label anchor point."""
-    libsym = root.find("lib_symbols")
-    library = (kicad_lib.library_from_lib_symbols(libsym)
-               if libsym is not None else None)
-    syms: list[SymInfo] = []
-    for sym in _krd._placed_symbols(root):
-        lib_id = _krd._av(sym.find("lib_id"), 1) or ""
-        at = sym.find("at")
-        px, py = child_mil(at, 1), child_mil(at, 2)
-        rot = int(round(_krd._fnum(at, 3))) % 360
-        mnode = sym.find("mirror")
-        mirror = (_krd._av(mnode, 1) if mnode is not None else None) or "none"
-        unit = int(_krd._fnum(sym.find("unit"), 1, 1.0))
-        ref = _krd._props(sym).get("Reference") or lib_id
-        try:
-            symdef = kicad_lib.resolve(lib_id, [library] if library else [])
-        except Exception:
-            continue
-        pins = kicad_lib.unit_pins(symdef, unit)
-        pin_world = [_krd._pin_world(lp.x_mil, lp.y_mil, px, py, rot, mirror)
-                     for lp in pins]
-        ext = kicad_lib.body_extent_mil(symdef, unit)
-        if ext is not None:
-            body = _world_box(ext, px, py, rot, mirror, ref)
-            xs = [body.x0, body.x1] + [q[0] for q in pin_world]
-            ys = [body.y0, body.y1] + [q[1] for q in pin_world]
-        elif pin_world:
-            xs = [q[0] for q in pin_world]
-            ys = [q[1] for q in pin_world]
-        else:
-            continue
-        syms.append(SymInfo(
-            ref=ref, at=(px, py),
-            box=_Box(min(xs), min(ys), max(xs), max(ys), ref, (px, py)),
-            pin_tips={(q[0], q[1]) for q in pin_world}))
-
-    anchors: set[tuple[float, float]] = set()
-    for wire in root.find_all("wire"):
-        pts = wire.find("pts")
-        if pts is None:
-            continue
-        for xy in pts.find_all("xy"):
-            anchors.add((child_mil(xy, 1), child_mil(xy, 2)))
-    for tag in ("label", "global_label", "hierarchical_label"):
-        for lb in root.find_all(tag):
-            at = lb.find("at")
-            anchors.add((child_mil(at, 1), child_mil(at, 2)))
-    return syms, anchors
 
 
 def groups_from_properties(path: str | Path) -> dict[str, list[str]]:

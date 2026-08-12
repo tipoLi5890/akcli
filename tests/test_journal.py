@@ -17,7 +17,7 @@ from akcli.cli import main
 from akcli.errors import EXIT
 
 OPS = {
-    "protocol_version": 1, "target_format": "kicad",
+    "protocol_version": 2, "target_format": "kicad",
     "target_file": "board.kicad_sch",
     "ops": [{"op": "add_text", "at": [1000, 1000], "text": "hello"}],
 }

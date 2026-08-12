@@ -33,7 +33,10 @@ import sys
 import time
 from pathlib import Path
 
-JOURNAL_VERSION = "1.0"
+from . import contract
+from .safety import ensure_state_root_ignore
+
+JOURNAL_VERSION = contract.JOURNAL_VERSION
 DIR_NAME = ".akcli"
 FILE_NAME = "journal.jsonl"
 BACKUP_DIR_NAME = "backups"
@@ -66,15 +69,14 @@ def backups_dir(target: Path) -> Path:
 def ensure_self_ignore(root: Path) -> None:
     """Drop a self-ignoring ``.gitignore`` (``*``) into the state root ``root``.
 
-    Best-effort: state-dir hygiene must never fail the parent write command.
-    An existing ``.gitignore`` is left alone (user-managed content wins).
+    The state layer's name for :func:`safety.ensure_state_root_ignore`, which
+    owns the one implementation: ``safety.atomic_write_with_backup`` writes the
+    same file for an ``.akcli/`` backup dir, and a leaf module cannot import
+    this one (the layering rule that used to be waived). Best-effort — state-dir
+    hygiene must never fail the parent write command; an existing ``.gitignore``
+    is left alone (user-managed content wins).
     """
-    gi = root / ".gitignore"
-    try:
-        if not gi.exists():
-            gi.write_text("*\n", encoding="utf-8", newline="\n")
-    except OSError:
-        pass
+    ensure_state_root_ignore(root)
 
 
 def ensure_workspace_dir(target: Path) -> Path:

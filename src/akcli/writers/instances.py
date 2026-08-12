@@ -22,11 +22,11 @@ route the op to the child file itself (per-op ``sheet`` tag).
 
 Idempotency: writing the same component twice must converge.  The ``(instances)``
 block is rebuilt deterministically from its inputs and replaces any prior one, and
-:func:`deterministic_uuid` derives a component's instance UUID with UUIDv5 from
+:func:`writers.identity.node_uuid` derives a component's instance UUID with UUIDv5 from
 ``(sheet_uuid, "<designator>:<op_index>")`` so re-running an op-list reuses the
 exact same UUID rather than spawning duplicate symbols.
 
-All geometry/formatting goes through :mod:`..readers.sexpr` :class:`SNode`s so the
+All geometry/formatting goes through :mod:`..sexpr.parser` :class:`SNode`s so the
 serializer reproduces untouched nodes byte-for-byte; nodes synthesized here use
 single-space separators (KiCad re-pretty-prints on its next save).
 """
@@ -34,11 +34,13 @@ single-space separators (KiCad re-pretty-prints on its next save).
 from __future__ import annotations
 
 import re
-import uuid as _uuid
 from collections.abc import Mapping
 
 from ..errors import fail
-from ..readers.sexpr import SNode
+from ..sexpr import SNode
+from ..sexpr.build import _q  # noqa: F401 - the ONE quoter (coercing form)
+from ..sexpr import query as _query
+from . import identity
 
 __all__ = [
     "write_instance",
@@ -66,12 +68,6 @@ _PWR_RE = re.compile(r"#PWR0(\d+)$")
 # --------------------------------------------------------------------------- #
 # small SNode construction / quoting helpers
 # --------------------------------------------------------------------------- #
-def _q(value: object) -> str:
-    """Quote ``value`` as a KiCad string atom (escaping ``\\``, ``"``, control chars)."""
-    s = str(value)
-    s = s.replace("\\", "\\\\").replace('"', '\\"')
-    return '"' + s.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
-
 
 def _atom(text: str) -> SNode:
     return SNode.atom(text)
@@ -117,11 +113,7 @@ def _child_indent(parent: SNode) -> str:
 # --------------------------------------------------------------------------- #
 def root_uuid(doc: SNode) -> str:
     """Return the schematic's root-sheet UUID (its top-level ``(uuid ...)``)."""
-    node = doc.find("uuid")
-    val = node.children[1].value if node and len(node.children or []) >= 2 else None
-    if not val:
-        fail("VERIFY_FAILED", "schematic root sheet has no (uuid ...)")
-    return val
+    return _query.require_root_uuid(doc)
 
 
 def project_name(doc: SNode, default: str = DEFAULT_PROJECT) -> str:
@@ -461,22 +453,9 @@ def write_instance(
 # --------------------------------------------------------------------------- #
 # deterministic instance UUID (idempotent op-list replay)
 # --------------------------------------------------------------------------- #
-def deterministic_uuid(sheet_uuid: str | None, designator: str, op_index: int) -> str:
-    """UUIDv5 from ``(sheet_uuid, "<designator>:<op_index>")`` (SPEC §3.5).
-
-    Replaying the same op-list against the same sheet yields the *same* symbol
-    UUID, so re-running ``draw --apply`` updates the existing symbol instead of
-    spawning a duplicate.  Falls back to a DNS-namespaced hash when ``sheet_uuid``
-    is not a canonical UUID string.
-
-    ``op_index`` is **always 0** from the writer: every node's seed is now its
-    own content (designator, wire endpoints, label name + anchor, sheet file +
-    name…), because an index in the seed re-identified — and so duplicated —
-    every node after an edited op-list's insertion point.  The parameter stays
-    for callers that need a second uuid from one seed.
-    """
-    try:
-        ns = _uuid.UUID(str(sheet_uuid))
-    except (ValueError, AttributeError):
-        ns = _uuid.uuid5(_uuid.NAMESPACE_DNS, str(sheet_uuid))
-    return str(_uuid.uuid5(ns, f"{designator}:{op_index}"))
+# deterministic instance UUID (idempotent op-list replay)
+# --------------------------------------------------------------------------- #
+# The implementation (and every seed format) lives in writers/identity.py —
+# the ONE home of node identity.  Alias kept: this module is where callers
+# historically found it, and the instance-block writer is its main consumer.
+deterministic_uuid = identity.node_uuid

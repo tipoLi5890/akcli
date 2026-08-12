@@ -31,7 +31,7 @@ component, the symbol must be present in ``lib_symbols``.
   ``ensure_cached`` is idempotent and safe to call once per placed component.
 
 Geometry-free: this module only shuffles S-expression nodes; no coordinates are
-touched. The serializer (``sexpr.dumps`` / the writer's ``sexpr_writer``) renders
+touched. The serializer (``sexpr.dumps``) renders
 the mutated ``doc`` back to text.
 """
 
@@ -44,8 +44,10 @@ from pathlib import Path
 from .. import model
 from ..errors import fail
 from ..kicad_escape import escape_lib_id, unescape_string
-from ..readers import kicad_lib, sexpr
-from ..readers.sexpr import SNode
+from .. import sexpr
+from ..readers import kicad_lib
+from ..kicad_escape import quote_atom
+from ..sexpr import SNode
 from ..safety import read_text_guarded
 
 __all__ = ["ensure_cached", "find_cached"]
@@ -486,16 +488,8 @@ def _unqual(name: str | None) -> str:
     return name.split(":")[-1] if name else ""
 
 
-def _quote(s: str) -> str:
-    """Quote a symbol name the KiCad way (escape ``\\``, ``"`` and control chars).
-
-    CR and TAB escape alongside the newline: eeschema rejects any raw control
-    character inside a quoted atom, and a scraped/imported symbol name can
-    carry one. Pinned identical to every other akcli quoter by
-    ``tests/test_sexpr_quoting.py``.
-    """
-    body = s.replace("\\", "\\\\").replace('"', '\\"')
-    return '"' + body.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
+# The ONE quoter (kicad_escape.quote_atom); local name kept for callers.
+_quote = quote_atom
 
 
 # --------------------------------------------------------------------------- #

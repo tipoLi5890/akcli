@@ -12,6 +12,7 @@ the readers and ERC.
 
 from __future__ import annotations
 
+from . import contract
 import enum
 import hashlib
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -20,9 +21,21 @@ from dataclasses import dataclass, field, fields, is_dataclass
 # 1.1: Pcb gains tracks/vias/arcs/pads (optional adds)
 # 1.2: Pcb gains board/zones/metadata; Library gains metadata/footprints
 #      (FootprintDef/FootprintPad); all optional adds.
-SCHEMA_VERSION = "1.3"
+# 2.0: BREAKING — canonical net names now follow eeschema's own precedence, so
+#      an existing design's exported `Net.name` can CHANGE (a net named by a
+#      power port and a local label no longer depends on read order). Shipped
+#      with op-list protocol 2 (four op fields renamed) as one migration
+#      boundary; see docs/migration-1.0.md.
+SCHEMA_VERSION = contract.SCHEMA_VERSIONS["schematic"]   # the registry is the source
 
-# (designator, pin_number)
+# (designator, pin_number) — a PUBLIC identity, not an implementation detail:
+# it is serialized as the flat "REF.PIN" string in nets/diff JSON (the
+# diff-cut-wire golden pins that encoding), consumed by findings refs, the
+# netlist export and agent-eval expectations, and it shares its "." separator
+# with the op-list anchor syntax. Changing its shape is a coordinated
+# major-version batch — see docs/pin-identity.md for the audited migration
+# boundaries (notably: node-uuid seeds are NOT part of this identity and must
+# not change with it).
 PinRef = tuple[str, str]
 
 
@@ -306,6 +319,10 @@ class NetPrimitives:
     no_erc: list[tuple[float, float]] = field(default_factory=list)
     power_priority: bool = False        # PrjPcb PowerPortNamesTakePriority
     emit_single_pin_nets: bool = True   # PrjPcb NetlistSinglePinNets
+    # Canonical-name dialect: True (KiCad reader) ranks name drivers by
+    # eeschema's CONNECTION_SUBGRAPH priority; False (Altium readers) keeps
+    # the legacy two-mode rule driven by power_priority.
+    eeschema_naming: bool = False
 
 
 def to_json(obj: object) -> object:

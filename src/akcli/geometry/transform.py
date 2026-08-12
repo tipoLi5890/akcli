@@ -219,3 +219,26 @@ def grid_snap_nm(
         int(round(int(pt[0]) / g)) * g,
         int(round(int(pt[1]) / g)) * g,
     )
+
+
+def point_world_mil(
+    lx_mil: float,
+    ly_mil: float,
+    px_mil: float,
+    py_mil: float,
+    rot_deg: int,
+    mirror: str,
+) -> tuple[float, float]:
+    """World coords (mil, +Y down) of a symbol-local point offset.
+
+    The mil-level wrapper over :func:`transform_point` (library +Y-up flip,
+    then rotate-then-mirror), formerly ``readers.kicad._pin_world`` — hoisted
+    here so checks/arrange stop reaching into the reader for a pure
+    transform.  Math is exact in integer nanometres; a non-right angle snaps
+    to the nearest 90 degrees (eeschema only stores right angles).
+    """
+    local = (units.mil_to_nm(lx_mil), -units.mil_to_nm(ly_mil))
+    origin = (units.mil_to_nm(px_mil), units.mil_to_nm(py_mil))
+    rot = (round(rot_deg / 90) * 90) % 360
+    wx, wy = transform_point(local, rot, mirror, origin)
+    return units.nm_to_mil(wx), units.nm_to_mil(wy)

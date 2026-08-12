@@ -65,10 +65,10 @@ select = ["E4", "E7", "E9", "F", "W"]
 # rather than churning otherwise-untouched modules for the lint gate.
 "src/akcli/calc/registry.py" = ["F401"]
 "src/akcli/calc/regulator.py" = ["F401"]
-"src/akcli/ops.py" = ["F401"]
+"src/akcli/ops/__init__.py" = ["F401"]
 "src/akcli/parts/bom_jlc.py" = ["F401", "F541"]
 # Deliberate compact paired coordinate statements in the S-expression writer.
-"src/akcli/writers/kicad.py" = ["E702"]
+"src/akcli/writers/properties.py" = ["E702"]
 # Tests favor readability: spare imports/locals and compact fuzz mutators are fine.
 "tests/**" = ["E702", "E741", "F401", "F841"]
 
@@ -77,21 +77,31 @@ select = ["E4", "E7", "E9", "F", "W"]
 # rather than the whole tree at once. Covered so far: the networked layer
 # (parts), the calculators, the typed core (model/errors/units/safety/
 # netdiff/journal/render_svg/kicad_escape/config/arrange), and the net/parse
-# spine (netbuild, readers/sexpr, checks/diff, writers/geometry, groupframe,
+# spine (netbuild, sexpr, checks/diff, geometry, arrange,
 # intentgen), the symbol generator (symbol_spec + writers/symbol_lib),
 # and the shared classification vocabulary (classify).
 files = [
     "src/akcli/parts", "src/akcli/calc",
-    "src/akcli/classify.py",
+    "src/akcli/classify.py", "src/akcli/si_prefix.py", "src/akcli/contract.py",
     "src/akcli/model.py", "src/akcli/errors.py", "src/akcli/units.py",
     "src/akcli/safety.py", "src/akcli/netdiff.py", "src/akcli/journal.py",
     "src/akcli/render_svg.py", "src/akcli/render_art.py",
     "src/akcli/kicad_escape.py",
-    "src/akcli/config.py", "src/akcli/arrange.py",
-    "src/akcli/netbuild.py", "src/akcli/readers/sexpr.py",
-    "src/akcli/checks/diff.py", "src/akcli/writers/geometry.py",
-    "src/akcli/groupframe.py", "src/akcli/intentgen.py",
-    "src/akcli/symbol_spec.py", "src/akcli/writers/symbol_lib.py",
+    "src/akcli/config.py", "src/akcli/arrange",
+    "src/akcli/netbuild.py", "src/akcli/sexpr/parser.py", "src/akcli/sexpr/__init__.py", "src/akcli/sexpr/query.py",
+    "src/akcli/sexpr/build.py",
+    "src/akcli/checks/diff.py", "src/akcli/geometry",
+    "src/akcli/intentgen.py",
+    # 0.21 R4: the write-pipeline engines are born typed (as is every module
+    # extracted alongside them).
+    "src/akcli/pipeline",
+    "src/akcli/writers/blank.py", "src/akcli/writers/backups.py",
+    "src/akcli/symbol_spec.py", "src/akcli/writers/symbol_lib.py", "src/akcli/writers/identity.py",
+    # 0.21 R7: the op vocabulary is DATA (mypy --strict clean) and the
+    # generated schemas are views of it.
+    "src/akcli/opspec.py",
+    # 0.21 R8: `net --why`'s diagnosis engine, extracted from commands/query.
+    "src/akcli/explain.py",
 ]
 python_version = "3.11"
 disallow_untyped_defs = true

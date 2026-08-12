@@ -261,7 +261,7 @@ def test_cli_schematic_batch(monkeypatch, tmp_path, capsys):
     shutil.copy(v8, tgt)
     ops = tmp_path / "ops.json"
     ops.write_text(json.dumps({
-        "protocol_version": 1, "target_format": "kicad",
+        "protocol_version": 2, "target_format": "kicad",
         "ops": [{"op": "set_component_parameters", "designator": "R1",
                  "parameters": {"LCSC": "C11702"}}]}))
     assert main(["draw", str(tgt), "--ops", str(ops), "--apply"]) == EXIT["OK"]
@@ -280,7 +280,7 @@ def test_cli_schematic_batch(monkeypatch, tmp_path, capsys):
 
 def test_resolve_mpn_only_rows_hit_miss_and_dedupe(monkeypatch):
     """--resolve-mpn helper: one search per distinct MPN, hit + miss rewrite."""
-    from akcli.commands.jlc import _resolve_mpn_only_rows
+    from akcli.parts.bom_report import resolve_mpn_only_rows
     from akcli.parts import search as parts_search
 
     class _P:
@@ -304,7 +304,7 @@ def test_resolve_mpn_only_rows_hit_miss_and_dedupe(monkeypatch):
         ds.DatasheetRow(refs=["J1"], status="no-lcsc"),               # no mpn
         ds.DatasheetRow(refs=["R1"], lcsc="C11702"),                  # untouched
     ]
-    _resolve_mpn_only_rows(rows, cache=None)
+    resolve_mpn_only_rows(rows, cache=None)
 
     assert calls.count("LM339") == 1                 # deduped across U1/U2
     assert "NOPE-999" in calls
@@ -320,7 +320,7 @@ def test_resolve_mpn_only_rows_hit_miss_and_dedupe(monkeypatch):
 def test_resolve_mpn_only_rows_finds_exact_beyond_first_ten(monkeypatch):
     """A short generic MPN whose exact row ranks 11th must still be found:
     the exact-resolution search widens past the old limit=10 cap."""
-    from akcli.commands.jlc import _resolve_mpn_only_rows
+    from akcli.parts.bom_report import resolve_mpn_only_rows
     from akcli.parts import search as parts_search
 
     class _P:
@@ -339,7 +339,7 @@ def test_resolve_mpn_only_rows_finds_exact_beyond_first_ten(monkeypatch):
 
     monkeypatch.setattr(parts_search, "search", _search)
     rows = [ds.DatasheetRow(refs=["Q1"], mpn="BSS138", status="no-lcsc")]
-    _resolve_mpn_only_rows(rows, cache=None)
+    resolve_mpn_only_rows(rows, cache=None)
 
     assert seen["limit"] > 10                   # searches wider than the old cap
     assert rows[0].lcsc == "C999"               # exact match found …

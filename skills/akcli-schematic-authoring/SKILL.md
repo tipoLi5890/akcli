@@ -144,7 +144,7 @@ returns `{created, target, paper, title, status}`.)
 
 Document shape and the op vocabulary (22 ops + 10 macros) are defined in `schemas/ops.schema.json`
 (see also `docs/op-list-authoring.md` and `akcli ops list`/`ops template <op>`); per-executor support is in
-`schemas/ops.capabilities.json`. Envelope: `{"protocol_version": 1,
+`schemas/ops.capabilities.json`. Envelope: `{"protocol_version": 2,
 "target_format": "kicad", "ops": [...]}`. The validator is strict: unknown
 fields are errors with a did-you-mean hint (`_`-prefixed keys are safe
 annotations), field types are enforced per op, and a duplicate
@@ -176,7 +176,7 @@ coordinates are **group-local** (absolute = local + origin) — a whole module
 moves by editing one origin, and macros propagate the tag onto their children:
 
 ```json
-{ "protocol_version": 1, "target_format": "kicad",
+{ "protocol_version": 2, "target_format": "kicad",
   "groups": { "POWER": { "origin": [1000, 1000], "title": "Power supply" } },
   "ops": [
     { "op": "place_component", "group": "POWER", "lib_id": "Device:C",
@@ -206,7 +206,7 @@ Rules the validator and executor enforce:
   pin reference as `at` — the anchor snaps to that pin's world coordinate AND
   the label auto-orients away from the symbol body, with the `(justify ...)`
   KiCad needs (a bare 180° angle renders un-flipped, over the part). Explicit
-  `orientation` wins; for stub-end labels set it to the stub direction
+  `rotation` wins; for stub-end labels set it to the stub direction
   (0/90/180/270 = right/up/left/down).
 - **Layout lint**: after `--apply`, run `akcli check <file> --layout` — it flags
   overlapping symbol bodies, label text over a body/pin field, label-label
@@ -238,6 +238,9 @@ Rules the validator and executor enforce:
   wire stub for readable in-block nets; `"scope": "global"` for nets crossing
   blocks on the same sheet (`hierarchical` only when the net leaves the sheet
   through a `(sheet)` pin — see `add_sheet` below);
+  **which name becomes canonical follows eeschema's driver priority**
+  (global label > power symbol > local label > hierarchical port; the rest
+  become aliases) — predict/debug it with the `akcli-net-naming` skill;
   `place_power_port` / `place_gnd` / `place_vcc` for rails (power ports merge by
   name everywhere and auto-allocate `#PWR` refs; ONE port per coordinate — a
   port's identity IS its position, so re-running a list that renames its rail
@@ -344,7 +347,7 @@ Rules the validator and executor enforce:
   `INSTANCE_REFS_REQUIRED` (the message lists the instance paths to use —
   copy them into `"instance_designators": {"<path>": "R101", "<path2>":
   "R201"}`; `designator` must be one of the values). Renames use
-  `set_component_parameters.instance_references`; power ports need no map
+  `set_component_parameters.instance_designators`; power ports need no map
   (one `#PWR0n` is auto-allocated per instance). Addressing a part by ANY
   instance's refdes works (`R201.1` finds the same symbol `R101.1` does).
 - **Bus rips — label the WIRE, not the bus**: draw the bus (`add_bus`), name it
@@ -358,7 +361,7 @@ Rules the validator and executor enforce:
 ### Example A — LDO regulator block (new sheet)
 
 ```json
-{ "protocol_version": 1, "target_format": "kicad", "target_file": "board.kicad_sch",
+{ "protocol_version": 2, "target_format": "kicad", "target_file": "board.kicad_sch",
   "ops": [
     { "op": "place_component", "lib_id": "Regulator_Linear:AMS1117-3.3",
       "designator": "U1", "x_mil": 2000, "y_mil": 1000 },
@@ -380,7 +383,7 @@ Rules the validator and executor enforce:
 ### Example B — decoupling cap on an existing MCU (surgical edit)
 
 ```json
-{ "protocol_version": 1, "target_format": "kicad", "ops": [
+{ "protocol_version": 2, "target_format": "kicad", "ops": [
     { "op": "place_component", "lib_id": "Device:C", "designator": "C10",
       "x_mil": 3200, "y_mil": 900, "value": "100n",
       "footprint": "Capacitor_SMD:C_0402_1005Metric" },

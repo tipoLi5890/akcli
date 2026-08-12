@@ -28,7 +28,7 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
 
 1. **Build/validate the op-list.** If none was provided, author one as JSON per
    `schemas/ops.schema.json` (and `docs/op-list-authoring.md` if present). Document shape:
-   `{ "protocol_version": 1, "target_format": "kicad", "target_file": "<board>.kicad_sch",
+   `{ "protocol_version": 2, "target_format": "kicad", "target_file": "<board>.kicad_sch",
    "ops": [ ... ] }`. Honor the contract: coordinates in **mils, origin top-left, +Y down, 50-mil
    grid**; rotation enum `{0,90,180,270}`; mirror `{none,x,y}`; `add_wire.vertices` is an even,
    orthogonal array of `[x,y]` points or `"REF.PIN"` endpoint strings. The 22 ops: `place_component`
@@ -50,8 +50,9 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    `"sheets": {"<key>": {"file": "<child>.kicad_sch"}}` to the envelope and tag ops with
    `"sheet": "<key>"` — an undeclared tag is `SHEET_UNKNOWN`. A sheet instantiated more than
    once refuses a scalar designator (`INSTANCE_REFS_REQUIRED` — the error lists the instance
-   paths; pass `"instance_designators": {"<path>": "<REF>", ...}`, or `instance_references`
-   on a rename). Macro ops are validated too, before expansion:
+   paths; pass `"instance_designators": {"<path>": "<REF>", ...}` — the same field name on
+   `place_component` and on a `set_component_parameters` rename). Macro ops are validated
+   too, before expansion:
    an unknown field is an error with a did-you-mean, and `designators` is **positional** with a
    fixed part role per slot (`place_led_indicator` is `[R, D]`, not reading order), so check
    `akcli ops template <macro>` before filling it in.

@@ -16,7 +16,8 @@ The input DESIGN document is a superset of the ``check --intent`` file
      "layout": {"origin": [1000, 1000], "columns": 3, "margin_mil": 100,
                 "group": "NAME", "no_connect_unlisted": true}}
 
-Output is an ordinary op-list (``protocol_version`` 1) using ONLY the existing
+Output is an ordinary op-list (op-list ``protocol_version``, which is NOT
+the design-intent one) using ONLY the existing
 vocabulary — ``place_component`` + label-on-pin ``add_net_label`` +
 ``add_no_connect`` — so it flows through the unchanged plan -> dry-apply ->
 netdiff -> connectivity-verify pipeline. Components land in a uniform grid of
@@ -46,22 +47,28 @@ natural designator, nets by name, members by natural REF/pin).
 
 from __future__ import annotations
 
+from . import contract
+
 import json
 import math
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import model, units
+from .classify import natkey as _natkey
 from .checks import intent as intent_mod
-from .checks.layout import label_text_extent_mil
+from .geometry.boxes import label_text_extent_mil
 from .errors import fail
 from .netbuild import expand_bus_vector
 from .readers import kicad_lib
-from .writers import geometry
+from .geometry import transform as geometry
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = contract.PROTOCOL_VERSIONS["design-intent"]
+# the INPUT is a design-intent doc, the OUTPUT is an op-list: two
+# independently-versioned protocols that must not borrow each other's
+# number (they were both 1 until op-list protocol 2).
+OPLIST_PROTOCOL_VERSION = contract.PROTOCOL_VERSIONS["oplist"]
 GRID_MIL = 50.0
 
 DEFAULT_ORIGIN: tuple[float, float] = (1000.0, 1000.0)
@@ -86,13 +93,6 @@ _VALID_MIRRORS = frozenset({"none", "x", "y"})
 # pass every akcli gate and mean something else in eeschema. Refused.
 _BUS_GROUP_CHARS = frozenset("{}")
 
-_NAT_RE = re.compile(r"(\d+)")
-
-
-def _natkey(s: str) -> tuple:
-    """Natural-sort key: digit runs compare numerically (``U2`` < ``U10``)."""
-    return tuple(int(part) if part.isdigit() else part
-                 for part in _NAT_RE.split(s))
 
 
 # --------------------------------------------------------------------------- #
@@ -529,7 +529,7 @@ def generate(design: Design, libs: list[model.Library]) -> dict:
         ops.extend(_no_connect_ops(placeables, pin_net, layout.group))
 
     doc: dict = {
-        "protocol_version": PROTOCOL_VERSION,
+        "protocol_version": OPLIST_PROTOCOL_VERSION,
         "target_format": "kicad",
         # provenance annotation: `_`-prefixed keys are validator-ignored
         "_generator": "akcli ops from-intent",

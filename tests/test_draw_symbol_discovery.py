@@ -67,7 +67,7 @@ def _blank_sheet(tmp_path: Path) -> Path:
 def _ops_file(tmp_path: Path, ops: list) -> Path:
     p = tmp_path / "ops.json"
     p.write_text(json.dumps(
-        {"protocol_version": 1, "target_format": "kicad", "ops": ops}),
+        {"protocol_version": 2, "target_format": "kicad", "ops": ops}),
         encoding="utf-8", newline="\n")
     return p
 

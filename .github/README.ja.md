@@ -106,7 +106,7 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 
 - **Claude Code** — 同梱プラグインをインストールすると、8 つの `/akcli:circuit-*` コマンド（review・
   pinmap・draw・diff・parts・sim・datasheet・release）と、設計・レビュー・回路作成・Altium 連携・部品調達・計算機・リリース判定に
-  またがる 12 個の skills が使えます。
+  またがる 13 個の skills が使えます。
 - **Codex** — 同梱プラグインをインストールするか、skills フォルダを `.agents/skills/` に置けば自動検出
   されます。[docs/codex-plugin.md](../docs/codex-plugin.md) を参照。
 - **OpenCode** — 同梱 skills を自動検出します。正確なコマンドは

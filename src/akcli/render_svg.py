@@ -22,12 +22,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
+from . import contract
 from .model import Component, NetPrimitives, Schematic
 
 if TYPE_CHECKING:                        # no runtime KiCad dependency
     from .render_art import SymbolArt
 
-RENDER_VERSION = "1.0"
+RENDER_VERSION = contract.SCHEMA_VERSIONS["render"]
 
 _MARGIN_MIL = 200.0
 _SHEET_GAP_MIL = 600.0

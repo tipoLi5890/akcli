@@ -30,6 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .. import contract as _contract
 from ..errors import EXIT
 from .. import report as _report
 from ._shared import (
@@ -282,7 +283,7 @@ def _cmd_release_preflight(args: argparse.Namespace) -> int:
 
     passed = all(g["status"] in ("pass", "skipped") for g in gates)
     manifest = {
-        "schema_version": "1",
+        "schema_version": _contract.SCHEMA_VERSIONS["envelope"],
         "tool": {"akcli": __version__},
         "result": "PASS" if passed else "FAIL",
         "inputs": inputs,

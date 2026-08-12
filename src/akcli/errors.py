@@ -300,8 +300,8 @@ REMEDIATION: dict[str, str] = {
         "this sheet file is instantiated more than once, so a single "
         "designator would annotate BOTH instances with the same reference "
         "(a duplicate-refdes design); pass per-instance references — "
-        "place_component: \"instance_designators\": {\"<path>\": \"R101\", "
-        "...}; set_component_parameters: \"instance_references\" — the error "
+        "place_component / set_component_parameters: "
+        "\"instance_designators\": {\"<path>\": \"R101\", ...} — the error "
         "message lists the instance paths to use",
     "TXN_ROLLBACK_FAILED":
         "a multi-file commit failed partway AND the automatic rollback could "

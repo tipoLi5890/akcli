@@ -16,21 +16,15 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import re
 import sys
 from pathlib import Path
 
+from ..classify import natkey as _natkey
 from ..errors import EXIT
 from ._shared import _dumps, _emit, _load_schematic, _require_path, _stamp
 
 # ROADMAP v0.10: "per-IC/connector pin tables" — U = IC, J/CN/P = connector.
 _DEFAULT_REFS = "U*,J*,CN*,P*"
-
-
-def _natkey(s: str) -> tuple:
-    """Natural-sort key: digit runs compare numerically ("U2" < "U10")."""
-    return tuple(int(part) if part.isdigit() else part
-                 for part in re.split(r"(\d+)", s))
 
 
 def _md_escape(s: str) -> str:

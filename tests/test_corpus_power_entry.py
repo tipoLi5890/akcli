@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from akcli.ops import PROTOCOL_VERSION
 from akcli.readers import kicad as kreader
 from akcli.review import engine
 
@@ -33,7 +34,7 @@ def test_reads_with_expected_census():
 def test_reproducible_from_ops_json():
     ops = json.loads((BOARD.parent / "power_entry.ops.json").read_text(
         encoding="utf-8"))
-    assert ops["protocol_version"] == 1
+    assert ops["protocol_version"] == PROTOCOL_VERSION
     assert ops["target_file"] == BOARD.name
 
 

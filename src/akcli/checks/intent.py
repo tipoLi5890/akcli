@@ -64,6 +64,8 @@ assertion baseline for ``check --intent``.
 
 from __future__ import annotations
 
+from .. import contract
+
 import fnmatch
 import json
 from dataclasses import dataclass, field
@@ -73,7 +75,7 @@ from ..errors import AkcliError, fail
 from ..model import Net, Pin, PinRef, Schematic
 from ..report import Finding, Severity, anchor
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = contract.PROTOCOL_VERSIONS["design-intent"]
 MODES = ("exact", "subset")
 
 INTENT_PIN_UNKNOWN = "INTENT_PIN_UNKNOWN"

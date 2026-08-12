@@ -32,12 +32,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import model
-from .readers import footprint_lib, sexpr
+from . import sexpr
+from .readers import footprint_lib
 from .report import Finding, Severity, anchor
 # ONE s-expression quoting authority for the whole tree (escapes backslashes,
 # quotes AND control characters) — the hand-rolled repair-site copies escaped
 # only the double-quote.
-from .writers.sexpr_writer import quote as _quote
+from .sexpr.writer import quote as _quote
 
 # `(type "Table")` indirection depth cap (guards a cyclic/deep table chain).
 _MAX_TABLE_DEPTH = 8

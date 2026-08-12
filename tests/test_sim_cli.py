@@ -53,11 +53,12 @@ def test_sim_requires_sim_or_deck_only(capsys):
 def test_sim_deck_only_stdout(capsys):
     assert cli.main(["sim", _BOARD, "--deck-only"]) == 0
     out = capsys.readouterr().out
-    # RC divider fixture: +3V3 -> R1 -> MID -> R2 -> GND, C1 on MID.
+    # RC divider fixture: +3V3 -> R1 -> VOUT -> R2 -> GND, C1 on VOUT
+    # (the net carries local MID + global VOUT; eeschema names it VOUT).
     assert out.startswith("* akcli sim:")
-    assert "R1 _3V3 MID 10k" in out
-    assert "R2 MID 0 10k" in out
-    assert "C1 MID 0 100n" in out
+    assert "R1 _3V3 VOUT 10k" in out
+    assert "R2 VOUT 0 10k" in out
+    assert "C1 VOUT 0 100n" in out
     assert out.rstrip().endswith(".end")
 
 
@@ -65,7 +66,7 @@ def test_sim_deck_only_out_file(tmp_path, capsys):
     out_file = tmp_path / "board.cir"
     assert cli.main(["sim", _BOARD, "--deck-only", "--out", str(out_file)]) == 0
     text = out_file.read_text(encoding="utf-8")
-    assert "R1 _3V3 MID 10k" in text
+    assert "R1 _3V3 VOUT 10k" in text
     # nothing on stdout when writing to a file; the notice goes to stderr
     captured = capsys.readouterr()
     assert captured.out.strip() == ""
@@ -90,7 +91,7 @@ def test_sim_no_ground_exits_6(tmp_path, capsys, monkeypatch):
 def test_sim_deck_only_json(capsys):
     assert cli.main(["sim", _BOARD, "--deck-only", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
-    assert "R1 _3V3 MID 10k" in doc["deck"]
+    assert "R1 _3V3 VOUT 10k" in doc["deck"]
     assert len(doc["deck_sha"]) == 12
     assert doc["warnings"] == []
     assert doc["unmodeled"] == []
@@ -145,7 +146,7 @@ def test_sim_engine_missing_exit_7(tmp_path, capsys, monkeypatch):
         "stimuli": [{"kind": "vsource", "name": "Vsup",
                      "node": "+3V3", "node2": "0", "value": "3.3"}],
         "analyses": {"tran": "10u 10m"},
-        "assert": [{"name": "vmid", "meas": "MAX v(MID) from=5m to=10m",
+        "assert": [{"name": "vmid", "meas": "MAX v(VOUT) from=5m to=10m",
                     "approx": "1.65", "tol": "0.02"}],
     })
     assert cli.main(["sim", _BOARD, "--sim", sim]) == 7
@@ -310,7 +311,7 @@ def _divider_sim(tmp_path) -> str:
         "stimuli": [{"kind": "vsource", "name": "Vsup",
                      "node": "+3V3", "node2": "0", "value": "3.3"}],
         "analyses": {"tran": "10u 10m"},
-        "assert": [{"name": "vmid", "meas": "MAX v(MID) from=5m to=10m",
+        "assert": [{"name": "vmid", "meas": "MAX v(VOUT) from=5m to=10m",
                     "approx": "1.65", "tol": "0.02"}],
     })
 
@@ -318,7 +319,7 @@ def _divider_sim(tmp_path) -> str:
 @_needs_ngspice
 def test_sim_live_divider_passes(tmp_path, capsys):
     sim = _divider_sim(tmp_path)
-    # Equal 10k/10k divider off 3.3 V settles MID at ~1.65 V.
+    # Equal 10k/10k divider off 3.3 V settles VOUT at ~1.65 V.
     assert cli.main(["sim", _BOARD, "--sim", sim]) == 0
     out = capsys.readouterr().out
     assert "vmid" in out and "PASS" in out
@@ -347,7 +348,7 @@ def test_sim_live_assertion_failure_exits_1(tmp_path, capsys):
         "stimuli": [{"kind": "vsource", "name": "Vsup",
                      "node": "+3V3", "node2": "0", "value": "3.3"}],
         "analyses": {"tran": "10u 10m"},
-        "assert": [{"name": "vmid", "meas": "MAX v(MID) from=5m to=10m",
+        "assert": [{"name": "vmid", "meas": "MAX v(VOUT) from=5m to=10m",
                     "gt": "3.0"}],
     })
     assert cli.main(["sim", _BOARD, "--sim", sim]) == 1
@@ -368,9 +369,9 @@ def test_sim_live_multi_analysis_tran_and_ac(tmp_path, capsys):
                      "node": "+3V3", "node2": "0", "value": "dc 3.3 ac 1"}],
         "analyses": {"tran": "10u 10m", "ac": "dec 10 100 100k"},
         "assert": [
-            {"name": "vmid", "meas": "MAX v(MID) from=5m to=10m",
+            {"name": "vmid", "meas": "MAX v(VOUT) from=5m to=10m",
              "approx": "1.65", "tol": "0.05"},
-            {"name": "gain", "meas": "FIND vm(MID) AT=1k", "analysis": "ac",
+            {"name": "gain", "meas": "FIND vm(VOUT) AT=1k", "analysis": "ac",
              "ge": "0"},
         ],
     })
@@ -387,8 +388,8 @@ def test_sim_live_wave_writes_file(tmp_path, capsys):
         "stimuli": [{"kind": "vsource", "name": "Vsup",
                      "node": "+3V3", "node2": "0", "value": "3.3"}],
         "analyses": {"tran": "10u 10m"},
-        "options": {"wave_vectors": ["v(MID)"]},
-        "assert": [{"name": "vmid", "meas": "MAX v(MID) from=5m to=10m",
+        "options": {"wave_vectors": ["v(VOUT)"]},
+        "assert": [{"name": "vmid", "meas": "MAX v(VOUT) from=5m to=10m",
                     "approx": "1.65", "tol": "0.02"}],
     })
     wave = tmp_path / "wave.csv"
@@ -397,7 +398,7 @@ def test_sim_live_wave_writes_file(tmp_path, capsys):
     # --wave now emits the tidy CSV from wave.rewrite_wrdata: a single 'time'
     # column + one verbatim column per options.wave_vectors entry.
     lines = wave.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "time,v(MID)"
+    assert lines[0] == "time,v(VOUT)"
     # every data row is a clean 2-field CSV (no repeated scale column).
     assert all(len(row.split(",")) == 2 for row in lines[1:] if row)
 
@@ -411,8 +412,8 @@ def test_sim_live_wave_path_with_spaces(tmp_path):
         "stimuli": [{"kind": "vsource", "name": "Vsup",
                      "node": "+3V3", "node2": "0", "value": "3.3"}],
         "analyses": {"tran": "10u 10m"},
-        "options": {"wave_vectors": ["v(MID)"]},
-        "assert": [{"name": "vmid", "meas": "MAX v(MID) from=5m to=10m",
+        "options": {"wave_vectors": ["v(VOUT)"]},
+        "assert": [{"name": "vmid", "meas": "MAX v(VOUT) from=5m to=10m",
                     "approx": "1.65", "tol": "0.02"}],
     })
     spaced = tmp_path / "has space"

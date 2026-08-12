@@ -154,6 +154,7 @@ and discovery walks up from the schematic's directory. Interpret the metadata he
 | high passive-pin ratio | When <20% of pins carry a real electrical type, type-based findings (driver conflict, floating input, undriven power pin) are **demoted to NOTE** and are unreliable — you must do the manual input/driver review in the heuristics section below. The demotion is **per net, not per board**: a net whose *every* member pin carries a real type keeps full severity even on a low-confidence board (the message says which case applied), so a WARNING here is trustworthy despite the header ratio. |
 | No-ERC suppressed > 0 | Findings were hidden by No-ERC markers. List which nets carry them and confirm each suppression is justified; an unjustified one is itself a Minor finding. |
 | unnamed-net count high | The power check **ignores unnamed nets entirely** — a rail on an unnamed net is unchecked. Name-check the power tree manually (Step "Power tree" below). |
+| a net's name looks "wrong" | Canonical names follow eeschema's driver priority (global > power > local > hierarchical); the label you expected is usually in `aliases`, not lost — see the `akcli-net-naming` skill before flagging it. |
 | frac coords present | Altium sub-unit coordinates are in play; purely informational. |
 
 Finding codes you will see: `ERC_FLOATING_INPUT`, `ERC_DRIVER_CONFLICT`, `ERC_DANGLING_NET`,
