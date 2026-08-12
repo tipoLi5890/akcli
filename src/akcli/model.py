@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 #      an existing design's exported `Net.name` can CHANGE (a net named by a
 #      power port and a local label no longer depends on read order). Shipped
 #      with op-list protocol 2 (four op fields renamed) as one migration
-#      boundary; see docs/migration-1.0.md.
+#      boundary; see docs/migration-0.21.md.
 SCHEMA_VERSION = contract.SCHEMA_VERSIONS["schematic"]   # the registry is the source
 
 # (designator, pin_number) — a PUBLIC identity, not an implementation detail:

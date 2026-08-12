@@ -1,4 +1,4 @@
-# Migrating to the 1.0 contract
+# Migrating to the 0.21 contract
 
 Three external contracts break together in this release, on purpose: one
 migration boundary instead of three. Nothing else about the CLI surface

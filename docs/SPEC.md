@@ -99,7 +99,7 @@ before any coordinate is trusted. Conversion: `mil = (intval + frac/100000.0) * 
 All dataclasses; `from __future__ import annotations`. `PinRef = tuple[str, str]` = `(designator, pin_number)`.
 
 ```python
-SCHEMA_VERSION = "2.0"          # 1.1 Pcb tracks/vias; 1.2 pad-level nets; 1.3 finding evidence envelope; 2.0 eeschema-aligned canonical net names (see docs/migration-1.0.md)
+SCHEMA_VERSION = "2.0"          # 1.1 Pcb tracks/vias; 1.2 pad-level nets; 1.3 finding evidence envelope; 2.0 eeschema-aligned canonical net names (see docs/migration-0.21.md)
                                 # 1.0 -> 1.1: Pcb gained tracks/vias/arcs/pads (binary .PcbDoc copper)
 
 class PinType(enum.Enum):       # canonical, format-agnostic
@@ -358,7 +358,7 @@ and is then applied to that child instead of the target (absent = the target its
 undeclared tag is `SHEET_UNKNOWN` with a did-you-mean; a tagged macro propagates the tag onto
 every op it expands into). Both fields were purely additive — they did not move
 `protocol_version` (which reached `2` with the 1.0 field renames, see
-[docs/migration-1.0.md](migration-1.0.md)).
+[docs/migration-0.21.md](migration-0.21.md)).
 A routed run is ONE transaction (`writers/txn.py`, §3.5): every dirty file is staged and
 connectivity-verified before the first replace, and a partial commit rolls back. `run_id`
 names that transaction — it is recorded in the journal, echoed in the `draw --json` payload

@@ -161,7 +161,7 @@ def test_unknown_field_did_you_mean():
 
 
 # --------------------------------------------------------------------------- #
-# protocol 2 field renames (docs/migration-1.0.md)
+# protocol 2 field renames (docs/migration-0.21.md)
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("op,old,new", [
     ({"op": "add_net_label", "name": "N1", "at": [0, 0]},

@@ -31,6 +31,8 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-12
+
 The 0.21 architecture rework: a whole-tree internal restructuring
 (`tools/equiv_snapshot.py`: 98 behavioral fingerprint cases against the
 0.20.0 tree) that carried its external surface unchanged — plus, in the
@@ -39,7 +41,7 @@ BREAKING section is behaviour-preserving.
 
 ### BREAKING
 
-Migration guide: [docs/migration-1.0.md](docs/migration-1.0.md).
+Migration guide: [docs/migration-0.21.md](docs/migration-0.21.md).
 
 - **op-list `protocol_version` 1 → 2.** Four op fields were renamed; a
   document still declaring `1` is refused with `PROTOCOL_MISMATCH`, and a v1

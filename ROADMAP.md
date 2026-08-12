@@ -346,7 +346,7 @@ Goal: the public surface is stable enough to promise.
       0.20) and the manifest's `constraints.hierarchy` now reports
       `hierarchical_write_v2`/`sheet_reuse: true`. 0.21 spent both numbers deliberately:
       `protocol_version` 2 (four op-field renames) and `SCHEMA_VERSION` 2.0
-      (eeschema-aligned canonical net names) — see `docs/migration-1.0.md`
+      (eeschema-aligned canonical net names) — see `docs/migration-0.21.md`
 - [x] First PyPI release (`pip install akcli-kicad`) — **shipped in 0.15.0**; dist name is `akcli-kicad`; PyPI publishing opted in 2026-07-22 via the
       `publish-pypi` job in `release.yml`, gated on the **repository** variable
       `PYPI_TRUSTED_PUBLISHING` (must be repo-scoped, not environment-scoped — a job-level `if:`

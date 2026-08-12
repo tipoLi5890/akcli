@@ -54,7 +54,7 @@ Aliases are not second-class: `check --contract` rules, `intent` files and
 `sim --probe`/`--gnd` resolve a net by canonical name, alias or source
 name. A pre-0.21 intent file that says `MID` still matches the net now
 canonically called `VOUT`. Only the *printed* name changed — see
-`docs/migration-1.0.md` before pinning names in new files.
+`docs/migration-0.21.md` before pinning names in new files.
 
 ## Debugging a surprising name
 
