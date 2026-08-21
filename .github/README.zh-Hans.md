@@ -5,6 +5,7 @@
 <p><strong>AI 原生原理图设计，专为 KiCad 打造 — 零依赖（纯 Python 标准库）的命令行工具。</strong></p>
 
 <p>
+  <a href="https://github.com/joanbono/awesome-kicad"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome KiCad"></a>
   <a href="https://github.com/tipoLi5890/akcli/actions/workflows/ci.yml"><img src="https://github.com/tipoLi5890/akcli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="零运行时依赖">
