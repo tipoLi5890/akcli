@@ -9,15 +9,22 @@ description: >-
   sizes, board size/thickness, copper weight, solder mask or silkscreen limits;
   checking whether a package (0201/0402, BGA pitch, fine-pitch IC) is assemblable;
   Economic vs Standard SMT; panelization (V-cut, 郵票孔, process borders, Mark
-  points); flex stackups, coverlay, stiffeners; stencil ordering; or preparing /
+  points); flex stackups, coverlay, stiffeners; stencil ordering; preparing /
   exporting Gerber+drill files for a JLC order (出圖, RS-274-X, layer mapping,
   plated vs non-plated holes, silkscreen-on-pads, the common DFM mistakes JLC
-  flags). Triggers on:
+  flags); or the manufacturing handoff itself — which files a KiCad export
+  (headless `kicad-cli` or the Fabrication Toolkit plugin) actually produces,
+  which of them a bare-PCB order needs vs. an SMT/PCBA order, the jlc.com vs
+  jlcpcb.com order-sequencing difference, and how LCSC part-number matching
+  behaves on upload. Triggers on:
   嘉立創, JLC, JLCPCB, 工藝能力, 製程能力, DFM, design rules, min trace, 線寬線距,
   annular ring, 孔環, via, 過孔, 盲埋孔, HDI, 微孔, drill, 鑽孔, board thickness,
   板厚, copper weight, 銅厚, solder mask, 阻焊, silkscreen, 字符, castellated, 半孔,
   panelization, 拼板, V割, SMT, PCBA, BGA pitch, 0402, 0201, stencil, 鋼網, coverlay,
-  補強, flex, FPC, 出圖, Gerber, RS-274-X, plated, NPTH, thermal relief, DFM mistakes.
+  補強, flex, FPC, 出圖, Gerber, RS-274-X, plated, NPTH, thermal relief, DFM mistakes,
+  Fabrication Toolkit, gerber.zip, bom.csv, positions.csv, designators.csv,
+  netlist.ipc, 貼片, 貼片下單, 下單流程, BOM上傳, CPL, centroid, pick and place,
+  自助匹配選型, 嘉立創幫我選型, PCB Assembly, 出貨, order flow.
 ---
 
 # akcli-jlcpcb-capabilities — 嘉立創/JLC manufacturer limits to design against
@@ -119,6 +126,17 @@ JLCPCB's own KiCad 8 guides
 ([gerber/drill](https://jlcpcb.com/hk/help/article/generate-gerber-and-drill-files-in-kicad-8),
 [BOM/centroid](https://jlcpcb.com/hk/help/article/generate-bom-and-centroid-files-from-kicad-8));
 full detail in `docs/jlc.md`.
+
+**Fabrication Toolkit's five default files**: `gerber.zip`, `bom.csv`,
+`positions.csv` (already JLCPCB-shaped, no header rename), plus
+`designators.csv`/`netlist.ipc` (traceability only — not uploaded). A bare-PCB
+order needs `gerber.zip` alone. **Order sequencing differs by line**: on
+嘉立創 (jlc.com) SMT is a *second* order placed against an already-submitted
+PCB order; on JLCPCB.com international, PCB + Assembly are *one* combined
+order (toggle Assembly on before paying for the PCB). Either way, a component
+with a resolved `LCSC` C-number auto-matches in the SMT BOM step; an
+unmatched line falls to manual picking (jlc.com also offers a paid ¥50
+JLC-assisted match). Full detail in `docs/jlc.md`.
 
 ## DFM & 出圖 — the mistakes that scrap a first batch
 

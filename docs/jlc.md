@@ -367,8 +367,34 @@ silkscreen*, *Check zone fills before plotting*, *Tent vias*. *Drill*: from the
 same dialog, **Generate Drill Files** with *absolute* origin, *millimeters*,
 *decimal* zeros format (a drill map is recommended). *CPL*: **File →
 Fabrication Outputs → Component Placement (.pos/.csv)**. JLCPCB also publishes
-a **Fabrication Toolkit** plugin (KiCad Plugin Manager) that emits all four
-artifacts in one click.
+the **Fabrication Toolkit** plugin (KiCad Plugin Manager;
+[bennymeg/Fabrication-Toolkit](https://github.com/bennymeg/Fabrication-Toolkit))
+that runs the whole export in one click. With default settings it drops five
+files: `gerber.zip` (Gerbers + drill combined), `bom.csv`, `positions.csv`
+(CPL/centroid), plus `designators.csv` and `netlist.ipc` — the last two are
+traceability artifacts (reference-designator list, IPC-356 netlist for
+AOI/e-test), not something JLCPCB's order pages ask for. Unlike the
+`kicad-cli pcb export pos` output below, the plugin's `bom.csv`/`positions.csv`
+already carry JLCPCB's expected column headers — no rename step needed.
+
+### What to actually upload, and when (verified 2026-08-21)
+
+- **Bare-PCB fab order needs only `gerber.zip`.**
+- **嘉立創 (jlc.com) domestic**: SMT/貼片 is a **second, later** order —
+  submit the PCB order first, then a separate SMT order page lets you pick
+  that PCB order and upload `bom.csv` + `positions.csv`
+  ([嘉立创小助手贴片下单流程](https://www.jlc.com/portal/server_guide_19858.html)).
+- **JLCPCB.com international works the other way**: PCB + Assembly are
+  **one combined order** — after uploading Gerbers, toggle *PCB Assembly* on
+  the same quote page, upload BOM/CPL there, and get one quote. Don't pay for
+  the bare PCB separately if assembly is wanted too, or there is nothing left
+  to attach the SMT order to.
+- **LCSC-auto-match**: a component with a resolved `LCSC` C-number
+  (`jlc bom --suggest/--fix`, see the `akcli-parts-sourcing` skill)
+  auto-matches against the catalog in both flows' BOM step — no manual
+  search. An unmatched line falls to manual part-picking; on jlc.com that is
+  either **自助匹配選型** (self-service, free) or **嘉立創幫我選型** (JLC
+  staff matches it, ¥50 fee, ~2 h turnaround on weekdays).
 
 ### JLCPCB file expectations
 
@@ -379,10 +405,11 @@ artifacts in one click.
 
 `kicad-cli pcb export pos --format csv` emits `Ref,Val,Package,PosX,PosY,Rot,Side`
 — rename the header row to JLCPCB's names (`Ref→Designator`, `PosX→Mid X`,
-`PosY→Mid Y`, `Rot→Rotation`, `Side→Layer`) or let the Fabrication Toolkit /
-JLCPCB's order-page column mapper handle it. Rotation mismatches on polarized
-parts (diodes, tantalums, connectors) are the classic PCBA defect: always review
-JLCPCB's component-placement preview before paying.
+`PosY→Mid Y`, `Rot→Rotation`, `Side→Layer`) or let JLCPCB's order-page column
+mapper handle it (the Fabrication Toolkit plugin's own `positions.csv` is
+already in this shape — see above, no rename needed there). Rotation
+mismatches on polarized parts (diodes, tantalums, connectors) are the classic
+PCBA defect: always review JLCPCB's component-placement preview before paying.
 
 Keep an `LCSC` parameter on every schematic component (see `jlc bom
 --suggest/--fix`) — it is what makes the BOM column exact instead of a
