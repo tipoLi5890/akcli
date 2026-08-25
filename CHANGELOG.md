@@ -31,6 +31,102 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-25
+
+`akcli` finally writes a KiCad **project**, not just a schematic: `akcli
+project new`/`init`/`info`/`check` scaffold, complete, inspect and gate the
+`.kicad_pro` / `.kicad_pcb` / lib-table / `.gitignore` set that `akcli new`
+alone left missing, and `add_sheet` can now create its own child sheet inside
+the same transaction. Everything here is additive — the op vocabulary stays 22
+ops + 10 macros and `protocol_version` is unchanged.
+
+### Added
+
+- `akcli project new`/`akcli project init` — scaffold or complete a real KiCad
+  project in one atomic pass: `<name>.kicad_pro` bound to the root
+  `.kicad_sch`'s own uuid, the root schematic itself, an empty `.kicad_pcb`
+  board container, empty `sym-lib-table`/`fp-lib-table`, and a KiCad
+  `.gitignore`. `new` scaffolds from scratch (refuses an existing project
+  unless `--force`, with backups under `.akcli/backups/`); `init` is purely
+  additive and idempotent, adopting an existing root schematic's uuid rather
+  than minting a fresh one, and reporting `status: unchanged` on a second run.
+  `--sheets A,B` pre-creates blank child sheets (root uuid content-seeded
+  from the project root + file name — the same uuid `add_sheet {"create":
+  true}` would mint); `--dry-run` always exits 0
+  without writing.
+- `akcli project new --example NAME` — drops a worked op-list into
+  `DIR/ops.json` from the packaged `akcli.examples` mirror of
+  `examples/circuits/*/ops.json` (currently `voltage-divider`,
+  `rc-lowpass-with-power`); `tools/examples_mirror.py build`/`check` keeps the
+  mirror in sync with the canonical, CI-applied corpus.
+- `akcli project info`/`akcli project check` — read-only project-integrity
+  verbs completing the `project` family. `info` reports what the `.kicad_pro`
+  actually binds (root sheet uuid/file, sheet tree, boards, lib tables, net
+  classes, text variables, pinned libs); `check` runs the same material
+  through the shared `--fail-on`/`--exit-zero` lint exit policy with new
+  finding codes `PROJECT_FILE_MALFORMED` (WARNING),
+  `PROJECT_META_FILENAME_STALE` (NOTE), `PROJECT_ROOT_SHEET_MISSING` /
+  `PROJECT_ROOT_SHEET_MISMATCH` (ERROR), `PROJECT_PCB_MISSING` (NOTE),
+  `PROJECT_STATE_UNIGNORED` (NOTE), plus the reused `SHEET_FILE_MISSING` and
+  every `library audit` finding — calibrated so a freshly scaffolded project
+  exits 0.
+- `readers/kicad_pro.py` — the `.kicad_pro` reader: degrade-only, never raises
+  (`KicadPro.ok`/`error` instead), extracting `meta.filename`, `sheets`,
+  `text_variables`, `net_settings.classes`, and pinned symbol/footprint libs.
+- `writers/blank.py` — new emitters for `.kicad_pro`, `.kicad_pcb`, and the
+  project-local lib tables, transcribed byte-for-byte from a real KiCad 10
+  install (`tests/fixtures/kicad/blank_project/`). The blank board is a
+  **scaffold — an empty container, not a layout**: zero footprints, zero
+  tracks, no outline. akcli writes no PCB content.
+- `add_sheet` gains an optional `"create": true` (bool, default `false`)
+  field: the same op-list writes the child `.kicad_sch` as a blank stub (the
+  same shape `akcli new` writes) inside the same transaction, instead of a
+  separate `akcli new child.kicad_sch` round-trip. An existing child is never
+  touched; the created child's ROOT uuid is content-seeded from the parent's
+  own root uuid plus the `Sheetfile` string (`writers/identity.py`
+  `seed_sheet_file`), so `draw` (plan) and `draw --apply` agree on the child's
+  identity before either writes anything, and a re-apply — or a
+  delete-then-recreate — is byte-identical.
+- `PROJECT_EXISTS` (exit 2), `PROJECT_FILE_INVALID` (exit 3),
+  `PROJECT_FILE_MISSING` (exit 4) — the new error codes `project new`/`init`
+  raise.
+- `.gitattributes` pinning scaffolded/committed KiCad and JSON text files to
+  LF line endings (Windows portability for the new scaffold writes).
+
+### Changed
+
+- `akcli new` now prints a stderr hint pointing at `akcli project init` when
+  no `.kicad_pro` sits next to the target — the sheet is still written either
+  way, and the hint is suppressed under `--json`.
+- `project.py`'s `resolve_root` tie-break, when several sheet-tree roots claim
+  a target: tries the `.kicad_pro`'s `sheets[0][0]` uuid against each
+  candidate root's own uuid FIRST (identity), the project's filename stem
+  against the candidates' names SECOND (the historical convention), and only
+  then refuses `PROJECT_ROOT_AMBIGUOUS`; a malformed/unreadable `.kicad_pro`
+  degrades silently to the stem-only rule.
+- `akcli release preflight` gains a `project` gate (between `library-audit`
+  and `sch-pcb`) whenever a `.kicad_pro` sits beside `--sch` — the same
+  `project check` findings with library auditing switched off there (the
+  `library-audit` gate already covers that ground); no project file is an
+  explicit skip, never a silent pass.
+- `akcli doctor`'s advisory `workspace` probe now also flags a directory
+  holding `.kicad_sch` but no `.kicad_pro`, hinting at `akcli project init .`.
+- `SHEET_FILE_MISSING` / `SHEET_UNKNOWN` remediation now also names
+  `add_sheet`'s new `create: true` as a fix (in addition to `akcli new` the
+  child first).
+
+### Notes
+
+- The scaffolded `.kicad_pcb` is written in KiCad 10's board-file format
+  (`version 20241229`): **KiCad 8 cannot open it.** The schematic stays
+  KiCad 8's own `.kicad_sch` format and opens fine everywhere, so a KiCad 8
+  workflow should scaffold with `--no-pcb`.
+- Any `create: true`, even on an otherwise single-file op-list, routes the run
+  onto the multi-sheet **transaction** path: there is no rotated
+  `<name>.bak` for it — recover with `akcli undo <root> --run <run_id>
+  --apply`. A rollback restores CONTENT and never unlinks, so a created child
+  reverts to the blank stub it started as rather than disappearing.
+
 ## [0.21.0] - 2026-08-12
 
 The 0.21 architecture rework: a whole-tree internal restructuring

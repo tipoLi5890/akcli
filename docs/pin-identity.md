@@ -16,6 +16,7 @@ boundaries below are where it bites.
 | findings `refs` | `PinRef` | `report.py` / `model.py` |
 | op-list anchors | `"R1.2"` endpoint / anchor syntax | `ops/validate.py`, `writers/` anchor resolution |
 | node uuids | UUIDv5 seeds: `R3` / `R3#u2` (symbol), `R3.pin1` / `R3#u2.pin1` (pin; a *repeated* pin number gets `#2`, `#3`, …) | `writers/kicad.py` (`deterministic_uuid` call sites) |
+| child-sheet FILE identity | `sheetfile:<child.kicad_sch>` — the created child's own ROOT uuid, seeded from the PARENT's root uuid (`add_sheet {"create": true}`) | `writers/identity.py` (`seed_sheet_file`) |
 | netlist export | net node = (ref, pin) pairs | `exporters.py` |
 | agent-eval expectations | net name → member strings | `tools/agent_eval/tasks/*/expected_nets.json` |
 
@@ -43,9 +44,13 @@ boundaries below are where it bites.
 5. **The uuid seed vocabulary is a red line.** Every existing document's
    node uuids derive from the seed strings above; changing a seed format
    re-identifies every node, so the next re-apply would duplicate the whole
-   design. A per-pin `PinRef` upgrade does **not** require touching seeds
-   (finding 1); any future change that *does* must ship a one-shot uuid
-   migration tool in the same major release.
+   design. The same red line extends one level up, to FILES: `add_sheet
+   {"create": true}`'s child ROOT uuid is `sheetfile:<file>` seeded from the
+   parent's own root uuid (`seed_sheet_file`), not randomness — changing
+   that format would re-identify every node inside every child a project
+   already created this way. A per-pin `PinRef` upgrade does **not** require
+   touching seeds (finding 1); any future change that *does* must ship a
+   one-shot uuid migration tool in the same major release.
 
 ## Why not now
 

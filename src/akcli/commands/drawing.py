@@ -465,7 +465,28 @@ def _cmd_new(args: argparse.Namespace) -> int:
                              "status": "created"})))
     else:
         _emit(status_line)
+        _project_hint(target)
     return EXIT["OK"]
+
+
+def _project_hint(target: Path) -> None:
+    """stderr nudge when a fresh sheet is not part of a KiCad project.
+
+    A lone ``.kicad_sch`` is everything *akcli* needs, which is exactly why
+    this gap stayed invisible: KiCad opening it prompts to create a project,
+    finds no library tables and no board. One line, stderr (a log, not data),
+    text mode only — the JSON caller is a program that did not ask.
+    """
+    directory = target.parent if str(target.parent) else Path(".")
+    try:
+        if any(directory.glob("*.kicad_pro")):
+            return
+    except OSError:
+        return
+    sys.stderr.write(
+        f"note: no .kicad_pro next to {target.name} — KiCad will open this as "
+        f"a loose sheet; run `akcli project init {directory}` to make it a "
+        "real project (adds the project file, lib tables and a blank board)\n")
 
 
 def _cmd_ops(args: argparse.Namespace) -> int:

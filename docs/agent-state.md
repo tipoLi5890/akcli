@@ -25,7 +25,13 @@ and **self-ignoring**: whichever command creates the directory drops a
 `.gitignore` containing `*` inside it, so your own `.gitignore` never needs an
 entry and `git status` stays clean without akcli touching a user file.
 `akcli.toml`, intent files, and `datasheets/` are design decisions and belong
-in git.
+in git. `akcli project new`/`project init` seed a project-root `.gitignore`
+covering KiCad's own churn plus `.akcli/`, so a freshly scaffolded project
+starts with this contract already honored. `akcli project check` audits that
+coverage on demand — `PROJECT_STATE_UNIGNORED` (NOTE) fires when `.akcli/`,
+`*-backups`, `*.kicad_prl`, or `~*.lck` are not covered by any reachable
+`.gitignore`, so a hand-edited or pre-0.14 project surfaces the gap instead of
+leaking derived state into `git status`.
 
 ## The `.akcli/` directory
 
@@ -56,7 +62,10 @@ One per workspace (the directory holding the edited file):
   before/after per file). Restored — or redone, the same command run again —
   by `akcli undo <target> --run <run_id> [--apply]`; deliberately
   journal-independent (the recovery path survives `AKCLI_JOURNAL=off`) and
-  refuses the swap if any file changed since the transaction.
+  refuses the swap if any file changed since the transaction. A child
+  `add_sheet {"create": true}` wrote is never deleted by this restore — it
+  reverts to the blank stub it started as, and replaying the op-list onto
+  that stub reproduces the applied bytes exactly.
 - `stage/<pid>/` — ephemeral shadow-tree copy used only while the net-diff
   gate evaluates a sheet tree (a dry-applied child is staged and read back
   through the whole tree so global labels see every sheet's members);

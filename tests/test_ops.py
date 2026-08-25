@@ -120,7 +120,8 @@ def test_capabilities_loadable():
     assert cap["ops"]["add_sheet"] == {
         "kicad": True, "altium": False,
         "notes": "hierarchical (sheet ...) node + sheet pins; child file "
-                 "authored separately. OP_UNSUPPORTED on Altium live v1"}
+                 "authored separately (or created in-transaction with "
+                 "create: true). OP_UNSUPPORTED on Altium live v1"}
     assert cap["ops"]["rename_net"] == {
         "kicad": True, "altium": False,
         "notes": "rewrites label texts + power-port net Values; "

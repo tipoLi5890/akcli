@@ -38,6 +38,8 @@ def test_required_codes_present():
         "POWER_PORT_STACKED", "SHEET_FILE_MISSING",
         # sheet-tree root resolution (hierarchy-aware net-diff scope)
         "PROJECT_ROOT_AMBIGUOUS", "PROJECT_ROOT_MISMATCH",
+        # project scaffolding (`akcli project new` / `project init`)
+        "PROJECT_EXISTS", "PROJECT_FILE_INVALID", "PROJECT_FILE_MISSING",
         # multi-sheet op-list envelope + write transaction
         "SHEET_UNKNOWN", "INSTANCE_REFS_REQUIRED", "TXN_ROLLBACK_FAILED",
         "KICAD_CLI_TIMEOUT", "KICAD_CLI_MISSING", "BAD_CONFIG",

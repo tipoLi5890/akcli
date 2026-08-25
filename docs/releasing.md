@@ -115,6 +115,14 @@ command: after editing the op vocabulary, adding **or removing** a schema, run
 `python3 tools/schemas.py build` (or `python3 tools/schemas.py check` to see the
 drift — generator and mirror, including orphans — without writing).
 
+The same mirror+check shape covers the example corpus: `akcli project new
+--example NAME` reads from the packaged `src/akcli/examples/` mirror of
+`examples/circuits/*/ops.json`, not the repo-root copy (a wheel install has no
+repo root). Adding, renaming or deleting an example requires
+`python3 tools/examples_mirror.py build` in the same commit; CI runs
+`python3 tools/examples_mirror.py check` as a drift gate (also asserted by
+`tests/test_examples.py`).
+
 ## PyPI publishing
 
 The package is published to PyPI under the distribution name `akcli-kicad`

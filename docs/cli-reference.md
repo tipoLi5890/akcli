@@ -523,7 +523,167 @@ sheet size (`A4`|`A3`|…, default `A4`); `--title` fills the title-block title;
 `--force` overwrites an existing file (otherwise a present target is refused).
 `--json` = `{created, target, paper, title, status}`. Keep the created file for
 the whole session — its root uuid is the namespace for every deterministic op
-UUID, so regenerating it breaks idempotent re-runs.
+UUID, so regenerating it breaks idempotent re-runs. When no `.kicad_pro` sits
+next to the target (and `--json` was not passed), a stderr hint points at
+`akcli project init` — the sheet is written either way.
+
+### `akcli project new [DIR] [--name NAME] [--paper SIZE] [--title T] [--no-pcb] [--no-lib-tables] [--no-gitignore] [--sheets A,B] [--dry-run] [--force] [--example NAME]`
+Scaffold a **complete** KiCad project from scratch: `<name>.kicad_pro`,
+`<name>.kicad_sch` (the root, `akcli new`'s document with the same root
+`(uuid ...)` the project file's `sheets[0][0]` points at), `<name>.kicad_pcb`,
+an empty `sym-lib-table`/`fp-lib-table`, and a KiCad `.gitignore` — the set
+`akcli new` alone left missing, so opening the result in KiCad finds a project
+instead of a repair prompt. `DIR` defaults to `.`; `--name` defaults to the
+directory name. `--paper`/`--title` are the same as `akcli new`. `--no-pcb`,
+`--no-lib-tables`, `--no-gitignore` each skip one file group; `--sheets
+A,B` also writes blank child sheets `A.kicad_sch`/`B.kicad_sch` (not yet
+wired into the root — instantiate them with an `add_sheet` op). Refuses a
+directory that already has any of these files (`PROJECT_EXISTS`, exit `2`)
+unless `--force` overwrites (previous bytes backed up under
+`.akcli/backups/`); a directory with none of them yet is unaffected either
+way. An existing `.gitignore` is the one exception — it is user-managed
+content and is reported `kept`, never rewritten, not even under `--force`.
+`--dry-run` always exits `0`, printing the plan (including any `CONFLICT`
+lines) without writing anything.
+
+`--example NAME` also drops a worked op-list into `DIR/ops.json` — one of the
+examples packaged with this install (`akcli project new --help` lists what is
+actually available; the roster comes from the packaged `akcli.examples`
+directory, never a hand-kept constant). It lands as a `kind: "ops"` file in
+the plan/JSON output alongside the KiCad files, subject to the same
+`created`/`kept`/`conflict` rules as everything else; text mode prints a
+`note:` line on stderr showing the exact `akcli draw` invocation to actually
+draw it (`--sheets`' child-sheet note follows the same shape). The
+op-list itself is the same JSON `tests/test_examples.py` applies to a blank
+sheet in CI and diffs against `expected_nets.json` — it is not a toy, it is
+the canonical example corpus's shipping copy.
+
+```bash
+akcli project new demo --title "Demo board"
+akcli project new demo --sheets amp,psu --dry-run
+akcli project new demo --example voltage-divider
+```
+
+`--json` = `{command, dry_run, applied, status, mode, directory, name,
+project_file, root_sch, root_uuid, files:[{path, name, kind, action}],
+created, kept, overwritten, conflicts}` (`status` ∈ `applied`|`unchanged`|
+`dry-run`; `action` ∈ `created`|`kept`|`overwritten`|`conflict`; `kind` ∈
+`pro`|`sch`|`sheet`|`pcb`|`sym-lib-table`|`fp-lib-table`|`ops`|`gitignore`,
+which is also the order files are reported and committed in; every path —
+`directory`, `project_file`, `root_sch`, `files[].path` — is ABSOLUTE and
+`as_posix()`).
+
+The blank `.kicad_pcb` is a **container, not a layout** — zero footprints,
+zero tracks, no board outline; akcli writes no PCB content (a SPEC
+non-goal), it only makes sure pcbnew finds a board instead of a prompt. It
+is written in KiCad 10's board-file format (`version 20241229`): **KiCad 8
+cannot open it** (repair-prompts or refuses), while the schematic stays
+KiCad 8's own `.kicad_sch` format and opens fine everywhere. Pass `--no-pcb`
+to skip the board entirely on a KiCad 8 workflow.
+
+### `akcli project init [DIR] [--name NAME] [--root FILE] [--paper SIZE] [--title T] [--no-pcb] [--no-lib-tables] [--no-gitignore] [--sheets A,B] [--dry-run]`
+Complete a directory that already has *some* KiCad files, adding only what
+is missing — purely additive, so it is safe on a real design and idempotent
+(a second run reports `status: unchanged`, zero actions). Existing files are
+always `kept`, never rewritten, even a `.kicad_pro` already present (though
+its JSON is validated — a truncated one is `PROJECT_FILE_INVALID`, exit
+`3`); there is deliberately **no `--force`** here. The root schematic is
+whichever `.kicad_sch` is already in `DIR` (or the tree root when several
+are present and exactly one resolves as root; `--root FILE` names it
+explicitly otherwise, else `PROJECT_ROOT_AMBIGUOUS`) — its existing root
+`(uuid ...)` is adopted into the `.kicad_pro` this writes, so the project
+binds to the design you already have rather than orphaning it. `DIR` with no
+`.kicad_sch` at all is `PROJECT_FILE_MISSING` (exit `4`) — that is `project
+new`'s job. Every other flag (`--paper`, `--title`, `--no-pcb`,
+`--no-lib-tables`, `--no-gitignore`, `--sheets`, `--dry-run`) matches
+`project new`, and only applies to files this run actually creates —
+except `--name`, which here defaults to the existing `.kicad_pro`'s stem (or
+the root schematic's) before falling back to the directory name.
+
+```bash
+akcli project init demo
+akcli project init demo --json
+```
+
+`--json` shape matches `project new`'s (`command` reads `"project init"`,
+`mode: "init"`). `--dry-run` always exits `0` without writing.
+
+### `akcli project info [DIR|FILE]`
+What the `.kicad_pro` actually says — read-only, no write flags. `DIR`
+accepts a directory (the first `.kicad_pro` in it, sorted) or a `.kicad_pro`
+path directly, default `.`; a bare `akcli project` with no subcommand is
+**not** the same as `info` — it exits `2` with an error naming the four
+subcommands. No project file found is
+`PROJECT_FILE_MISSING` (exit `4`) — the message points at `project init`.
+Exit `0` on any project it *can* find, even a malformed one: a `.kicad_pro`
+that fails to parse degrades into `ok: false` / `error: "..."` rather than
+raising, because "what is this project" should not itself require a clean
+project to answer — that judgment belongs to `project check`.
+
+```bash
+akcli project info demo
+akcli project info demo --json
+```
+
+`--json` = `{project_file, name, ok, error, root_sheet:{uuid, file},
+sheet_tree:[...], schematics:[...], boards:[...],
+lib_tables:{sym, fp}, net_classes:[...], text_variables:{...},
+pinned_libs:{symbol:[...], footprint:[...]}}` — `root_sheet.uuid` is
+`sheets[0][0]` from the `.kicad_pro` (the schematic KiCad actually opens);
+`sheet_tree` is the same whole-tree walk `akcli check`/`draw` use
+(`project.tree_files`), not just the files the project JSON happens to name;
+`schematics`/`boards` are every `*.kicad_sch`/`*.kicad_pcb` in the project
+directory, tree membership or not; `root_sheet.file` is `null` when the
+schematic the project names is not on disk, and `error` is `null` unless
+`ok` is `false`. Every path is ABSOLUTE and `as_posix()`.
+
+### `akcli project check [DIR|FILE] [--fail-on {info,note,warning,error,never}] [--exit-zero]`
+Lint-style findings over the same project material `info` reports — "is
+anything WRONG with it" rather than "what is this". Shares the one
+`--fail-on`/`--exit-zero` exit policy every findings command uses (default
+`warning`; `never`/`--exit-zero` always exits `0`). A freshly scaffolded
+project reports **NOTEs at most** — none of them at or above the default
+threshold — so the gate is calibrated against the exact thing this command
+family produces: `project new demo && cd demo && akcli project check` reports
+zero findings and exits `0`. (Opting out with `--no-pcb`/`--no-gitignore`, or
+`init`-ing into a directory whose existing `.gitignore` does not cover akcli
+churn, leaves `PROJECT_PCB_MISSING`/`PROJECT_STATE_UNIGNORED` NOTEs — still
+exit `0`.)
+
+```bash
+akcli project check demo
+akcli project check demo --json --fail-on error
+```
+
+`--json` = `{project_file, name, findings:[{code, severity, message}]}`
+(`project_file` absolute, `as_posix()`). Findings are emitted in check order,
+not sorted by severity (severities per the shared `report.Severity` vocabulary
+— see the finding-code table below): a malformed `.kicad_pro`, a
+root-sheet binding that is missing or points at the wrong design, a `Sheetfile`
+referencing a child that is not on disk (reuses `SHEET_FILE_MISSING` from the
+op-list vocabulary), a missing `.kicad_pcb`, every `library audit` finding
+over the same project (unless the caller — `release preflight`'s `project`
+gate — already runs `library-audit` separately), and derived-state hygiene
+(`.akcli/`, `*-backups`, `*.kicad_prl`, `~*.lck` not covered by any
+`.gitignore`).
+
+#### Project-integrity finding codes (`project check`)
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `PROJECT_FILE_MALFORMED` | warning | The `.kicad_pro` did not parse (truncated, not JSON, not a JSON object). Not an error: every akcli read path still works without it — KiCad will offer to repair it on open, but the design itself is intact. |
+| `PROJECT_META_FILENAME_STALE` | note | `meta.filename` no longer matches the file's own name — the project was renamed on disk. Cosmetic; KiCad rewrites it on next save. |
+| `PROJECT_ROOT_SHEET_MISSING` | error | The project names no root sheet, or the schematic its `sheets[0]` binds to is not on disk — opening it loses the design. |
+| `PROJECT_ROOT_SHEET_MISMATCH` | error | The project's `sheets[0]` uuid does not match the root schematic's own `(uuid ...)` — the project points at a different design than the file on disk (e.g. a regenerated root schematic). |
+| `SHEET_FILE_MISSING` | error | A `Sheetfile` in the tree names a child that does not exist (reused from the op-list vocabulary — same code, same meaning). |
+| `PROJECT_PCB_MISSING` | note | No `<name>.kicad_pcb` — pcbnew will offer to create one. `project init` writes a blank board container; akcli never writes PCB content, so `--no-pcb` is a supported, permanently-note-level choice. |
+| `PROJECT_STATE_UNIGNORED` | note | `.akcli/`, `*-backups`, `*.kicad_prl`, or `~*.lck` are not covered by any reachable `.gitignore` — KiCad/akcli churn will show up as untracked changes. |
+
+Plus every `library audit` finding (`FOOTPRINT_LIB_UNREGISTERED`,
+`FOOTPRINT_MISSING`, `SYMBOL_LIB_UNREGISTERED`/`SYMBOL_MISSING`,
+`LIB_URI_UNRESOLVED`/`LIB_PATH_MISSING`, `MODEL_MISSING`/`MODEL_NOT_PORTABLE`,
+`FOOTPRINT_LEGACY_FORMAT`) over the project's tables — see `akcli library
+audit` above.
 
 ### `akcli undo <target.kicad_sch> [--apply] [--steps N] [--list] [--run RUN_ID] [--allow-open] [--note TEXT]`
 Restore the target from the **rotated draw backups** that `akcli draw --apply`
@@ -544,7 +704,10 @@ Dry-run by default (prints the part/net delta that restoring would cause);
   payload, its status line, and the journal). Three-way swap per file, so the
   **same command again is a redo**. Refuses (`exit 6`) when any file changed
   since the transaction — a swap would silently discard that later edit — and
-  exits `4` for an unknown RUN_ID.
+  exits `4` for an unknown RUN_ID. A child `add_sheet {"create": true}` wrote
+  is never deleted by this restore (a rollback restores CONTENT, never
+  unlinks): it reverts to the blank stub it started as, and replaying the
+  op-list onto that stub reproduces the applied bytes exactly.
 - `--allow-open` swaps even when a KiCad GUI lock file is present (File>Revert
   in KiCad afterwards); `--note` records a free-form intent note in the
   workspace journal.
@@ -718,7 +881,9 @@ Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 22 ops + 10 m
   `.akcli/backups/runs/<run_id>/`, and a partial commit rolls back automatically
   (`TXN_ROLLBACK_FAILED` only when even the rollback fails — the backup set is intact and
   `akcli undo <target> --run <run_id> --apply` restores it). The `--json` payload carries
-  `run_id` + per-file `files[]` on these runs (absent on single-file runs). A sheet
+  `run_id` + per-file `files[]` on these runs (absent on single-file runs). A `sheets` entry
+  naming a file nobody creates is `SHEET_UNKNOWN` (remediation suggests `create: true` on the
+  referencing `add_sheet`, which lets the same transaction write it). A sheet
   instantiated more than once refuses a scalar designator (`INSTANCE_REFS_REQUIRED`) — pass
   `instance_designators` maps; see
   [docs/op-list-authoring.md](op-list-authoring.md).
@@ -750,12 +915,19 @@ Execute an op-list against a KiCad `.kicad_sch`. The vocabulary is 22 ops + 10 m
   `side` ∈ left|right|top|bottom. **Wires attach to a sheet pin by coordinate**
   (`at` + `offset_mil` along the side, grid-snapped) — there is no
   `Sheet.Pin` wire endpoint. A cross-sheet net is a parent sheet-pin paired with
-  the child's same-name hierarchical label. The referenced child `.kicad_sch` is
-  **not** created by `add_sheet` and must ALREADY exist next to the parent —
-  run `akcli new <child>.kicad_sch` first, or the op is refused with
-  `SHEET_FILE_MISSING` (exit `6`). A stub is enough; it does not have to be
-  finished. The same code reports a root whose child later went missing, since a
-  dangling `(sheet …)` makes every `nets`/`check`/`render` on the design fail.
+  the child's same-name hierarchical label. The referenced child `.kicad_sch`
+  must ALREADY exist next to the parent — run `akcli new <child>.kicad_sch`
+  first, or the op is refused with `SHEET_FILE_MISSING` (exit `6`, remediation
+  now also suggests `create: true`) — UNLESS the op itself sets optional
+  `"create": true` (bool, default `false`), which has this SAME draw write a
+  blank child stub (same shape `akcli new` writes) before any op runs, inside
+  the same transaction; an existing child is never touched. A stub is enough;
+  it does not have to be finished. The same code reports a root whose child
+  later went missing, since a dangling `(sheet …)` makes every
+  `nets`/`check`/`render` on the design fail. Note: `create: true` puts even
+  an otherwise single-file op-list on the multi-sheet **transaction** path
+  (below) — no rotated `<name>.bak`, recover with `akcli undo <root> --run
+  <run_id> --apply`.
 
 ### `akcli relink-symbols <target.kicad_sch> [--libs DIR ...] [--only NICKS] [--apply]`
 (also available as `akcli library relink` — the library-maintenance family it belongs to)
@@ -1058,7 +1230,9 @@ One-shot environment report. Probes — the same way the features themselves dis
 **kicad-cli** (`KICAD_CLI` env → PATH → known install locations), **ngspice**
 (`AKCLI_NGSPICE` honored; KiCad's bundled libngspice found automatically), **symbols**,
 **config** discovery, and **workspace** hygiene (legacy beside-the-file backup stacks, leftover
-KiCad `~*.lck` lock files, an un-gitignored `.akcli/` — advisory, never `--require`-gatable).
+KiCad `~*.lck` lock files, an un-gitignored `.akcli/`, and — new — a directory holding
+`.kicad_sch` but no `.kicad_pro` (KiCad opens that as a project-less file; the hint points at
+`akcli project init .`) — advisory, never `--require`-gatable).
 `--network` additionally probes the `jlc` endpoint (doctor is offline by default).
 
 The **symbols** check walks the whole path `akcli pins Device:R` / `place_component` take —
@@ -1180,7 +1354,11 @@ policy is source-controlled, never a builtin constant).
 
 ### `akcli release preflight --sch FILE [--pcb FILE] [--intent FILE] [--contract FILE] [--fab-profile FILE] [--order FILE] [--sim FILE] [--gerbers DIR] [--review-policy FILE] [-o FILE] [--allow-dirty]`
 Run **every applicable gate** and emit a traceable release manifest. Gates:
-`check` (ERC/power/BOM/nets), `intent`, `contract`, `library-audit`, `sch-pcb` (needs `--pcb`),
+`check` (ERC/power/BOM/nets), `intent`, `contract`, `library-audit`, `project` (needs a
+`.kicad_pro` beside `--sch`; runs `project check`'s findings with `library-audit`
+suppressed there, since `library-audit` above already covers it — one finding reported
+twice reads as two problems; no project file is a skip, not a silent pass), `sch-pcb`
+(needs `--pcb`),
 `fab` (needs `--pcb` + `--fab-profile`), `order`, `sim` (needs `--sim` sim.json — quantitative
 SPICE assertions; a **requested** sim gate that cannot run FAILS rather than skips, so a PASS
 manifest never ships because the machine lacked libngspice), `review` (needs `--review-policy`),
@@ -1277,11 +1455,11 @@ surface as:
 
 | Exit | Error codes |
 |---|---|
-| `3` (parse) | `ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`, `ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG`, `KICAD_SEXPR_BAD_NUMBER`, `KICAD_BAD_ENCODING`, `INTERNAL` |
-| `4` (unusable path) | `FILE_UNREADABLE` |
+| `3` (parse) | `ALTIUM_BAD_MAGIC`, `ALTIUM_FAT_CYCLE`, `ALTIUM_OOB_SECTOR`, `ALTIUM_BAD_SECTOR_SHIFT`, `ALTIUM_ALLOC_GUARD`, `ALTIUM_MALFORMED`, `KICAD_SEXPR_DEPTH`, `KICAD_SEXPR_UNTERMINATED`, `KICAD_SEXPR_TOOBIG`, `KICAD_SEXPR_BAD_NUMBER`, `KICAD_BAD_ENCODING`, `INTERNAL`, `PROJECT_FILE_INVALID` |
+| `4` (unusable path) | `FILE_UNREADABLE`, `PROJECT_FILE_MISSING` |
 | `5` (unsupported) | `ALTIUM_UNSUPPORTED` |
 | `6` (op-list/verify) | `SYMBOL_NOT_FOUND`, `BAD_ANGLE`, `NON_ORTHOGONAL_WIRE`, `OFF_GRID`, `OVERLAP`, `VERIFY_FAILED`, `OP_UNSUPPORTED`, `HIERARCHICAL_UNSUPPORTED`, `PROJECT_ROOT_AMBIGUOUS`, `SHEET_UNKNOWN`, `INSTANCE_REFS_REQUIRED`, `TXN_ROLLBACK_FAILED`, `PROTOCOL_MISMATCH`, `TARGET_LOCKED`, `GROUP_UNKNOWN`, `GROUP_NO_ORIGIN`, `POWER_PORT_STACKED`, `SHEET_FILE_MISSING`, `DESIGN_UNSUPPORTED`, `SIM_NO_GROUND`, `SIM_NODE_COLLISION`, `SIM_NODE_COUNT_MISMATCH`, `SIM_VALUE_INVALID`, `BRIDGE_BUSY` (reserved, unraised) |
-| `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG`, `SIM_OP_ASSERT_UNSUPPORTED`, `PROJECT_ROOT_MISMATCH` |
+| `2` (usage/config) | `PATH_OUTSIDE_ROOT`, `BAD_CONFIG`, `SIM_OP_ASSERT_UNSUPPORTED`, `PROJECT_ROOT_MISMATCH`, `PROJECT_EXISTS` |
 | `7` (tool/network) | `KICAD_CLI_TIMEOUT`, `KICAD_CLI_MISSING`, `NGSPICE_MISSING`, `NGSPICE_FAILED`, `NETWORK` (`jlc`), `BINFETCH_DOWNLOAD`, `BINFETCH_CHECKSUM`, `BRIDGE_TIMEOUT` (reserved, unraised) |
 
 Two related but distinct vocabularies:
@@ -1302,7 +1480,11 @@ Two related but distinct vocabularies:
   `CONTRACT_*` (`check --contract`), `SCHPCB_*` (`verify sch board.kicad_pcb`), the
   `library audit` codes (`FOOTPRINT_LIB_UNREGISTERED`, `FOOTPRINT_MISSING`, `MODEL_MISSING`,
   `FOOTPRINT_LEGACY_FORMAT`, …), the `library lint-symbols` codes (`SYMLIB_PIN_COINCIDENT`,
-  `SYMLIB_PIN_TYPE_UNSPECIFIED`, `SYMLIB_PIN_OFF_GRID`), and `FAB_*`/`ORDER_*` (`fab check`).
+  `SYMLIB_PIN_TYPE_UNSPECIFIED`, `SYMLIB_PIN_OFF_GRID`), `FAB_*`/`ORDER_*` (`fab check`), and
+  the `project check` codes (`PROJECT_FILE_MALFORMED`, `PROJECT_META_FILENAME_STALE`,
+  `PROJECT_ROOT_SHEET_MISSING`, `PROJECT_ROOT_SHEET_MISMATCH`, `PROJECT_PCB_MISSING`,
+  `PROJECT_STATE_UNIGNORED`, plus reused `SHEET_FILE_MISSING` and `library audit`'s own
+  codes — see the finding-code table above).
 
 ### Symbol-library finding codes (`library lint-symbols`)
 

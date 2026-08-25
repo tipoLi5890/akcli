@@ -56,6 +56,10 @@ ERROR_CODES: frozenset[str] = frozenset(
         # sheet-tree root resolution (hierarchy-aware net-diff/gate scope)
         "PROJECT_ROOT_AMBIGUOUS",
         "PROJECT_ROOT_MISMATCH",
+        # project scaffolding (`akcli project new` / `project init`)
+        "PROJECT_EXISTS",
+        "PROJECT_FILE_INVALID",
+        "PROJECT_FILE_MISSING",
         # multi-sheet op-list envelope + write transaction
         "SHEET_UNKNOWN",
         "INSTANCE_REFS_REQUIRED",
@@ -136,6 +140,12 @@ _CODE_EXIT: dict[str, int] = {
     "HIERARCHICAL_UNSUPPORTED": EXIT["OPLIST"],
     "PROJECT_ROOT_AMBIGUOUS": EXIT["OPLIST"],
     "PROJECT_ROOT_MISMATCH": EXIT["USAGE"],
+    # project scaffolding: refusing to overwrite is an ARGUMENT problem (the
+    # caller wanted `project init`, or meant `--force`) -> 2; a corrupt
+    # .kicad_pro is a parse failure -> 3; nothing to complete is -> 4.
+    "PROJECT_EXISTS": EXIT["USAGE"],
+    "PROJECT_FILE_INVALID": EXIT["PARSE"],
+    "PROJECT_FILE_MISSING": EXIT["NOT_FOUND"],
     "SHEET_UNKNOWN": EXIT["OPLIST"],
     "INSTANCE_REFS_REQUIRED": EXIT["OPLIST"],
     "TXN_ROLLBACK_FAILED": EXIT["OPLIST"],
@@ -281,12 +291,27 @@ REMEDIATION: dict[str, str] = {
     "SHEET_FILE_MISSING":
         "the (sheet ...) points at a child .kicad_sch that does not exist next "
         "to this file; create it first with `akcli new <file>` (then re-run), "
-        "or fix the 'file' field — nets/check/render refuse the whole design "
-        "while the child is missing",
+        "or set `create: true` on the add_sheet op to have the same draw write "
+        "a blank child, or fix the 'file' field — nets/check/render refuse the "
+        "whole design while the child is missing",
     "PROJECT_ROOT_AMBIGUOUS":
         "several root sheets instantiate this file, so the tree to evaluate "
         "cannot be guessed; pass --root FILE to name the root (or --flat to "
         "evaluate this file alone, accepting the truncated net view)",
+    "PROJECT_EXISTS":
+        "the target directory already holds the project file(s) this would "
+        "write; run `akcli project init DIR` to add only what is MISSING "
+        "(never overwriting), or pass --force to overwrite (the previous "
+        "bytes are kept under .akcli/backups/)",
+    "PROJECT_FILE_INVALID":
+        "the existing .kicad_pro is not valid JSON (or the named root file is "
+        "not a kicad_sch document), so akcli will not report a healthy "
+        "project over it; fix or remove the file, then re-run "
+        "`akcli project init`",
+    "PROJECT_FILE_MISSING":
+        "no .kicad_pro/.kicad_sch was found where one is required; run "
+        "`akcli project new DIR` to scaffold a project from scratch, or point "
+        "the command at the project directory (`akcli project init DIR`)",
     "PROJECT_ROOT_MISMATCH":
         "the --root file's sheet tree does not contain the target; point "
         "--root at the schematic whose (sheet ...) chain reaches the target, "
@@ -295,7 +320,9 @@ REMEDIATION: dict[str, str] = {
         "the op's 'sheet' tag names an entry the envelope's 'sheets' map does "
         "not declare (or the declared file does not exist next to the "
         "target); declare it as \"sheets\": {\"<name>\": {\"file\": "
-        "\"<child.kicad_sch>\"}} — `akcli new` the child first if needed",
+        "\"<child.kicad_sch>\"}} — `akcli new` the child first if needed, or "
+        "set `create: true` on the add_sheet op that references it and the "
+        "same draw writes the blank child",
     "INSTANCE_REFS_REQUIRED":
         "this sheet file is instantiated more than once, so a single "
         "designator would annotate BOTH instances with the same reference "

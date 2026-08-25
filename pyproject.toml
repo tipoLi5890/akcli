@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # package and CLI stay `akcli` (see src/akcli/__init__.py name cascade);
 # keep the three in lockstep.
 name = "akcli-kicad"
-version = "0.21.0"
+version = "0.22.0"
 description = "AI-native schematic design agent, purpose-built for KiCad: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -44,6 +44,9 @@ where = ["src"]
 [tool.setuptools.package-data]
 "akcli.webui" = ["*.html"]
 "akcli.schemas" = ["*.json"]
+# examples/circuits/*/ops.json mirrored by tools/examples_mirror.py; loaded at
+# runtime via Path(__file__) so `project new --example` works from a wheel.
+"akcli.examples" = ["*/ops.json"]
 # sim/builtin.lib is loaded at runtime via Path(__file__); it MUST ship in the
 # wheel or `akcli sim` with a builtin model breaks on a non-editable install.
 "akcli.sim" = ["*.lib"]
@@ -102,6 +105,11 @@ files = [
     "src/akcli/opspec.py",
     # 0.21 R8: `net --why`'s diagnosis engine, extracted from commands/query.
     "src/akcli/explain.py",
+    # 0.22: the project-scaffolding engine is born typed, as is the
+    # degrade-only .kicad_pro reader and the packaged example index.
+    "src/akcli/scaffold.py",
+    "src/akcli/readers/kicad_pro.py",
+    "src/akcli/examples/__init__.py",
 ]
 python_version = "3.11"
 disallow_untyped_defs = true

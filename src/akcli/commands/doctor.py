@@ -24,7 +24,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ._shared import _dumps, _emit, _stamp
+from ._shared import _dumps, _emit, _gitignored, _stamp
 
 # Capabilities a CI gate may demand via --require.
 _REQUIRABLE = ("python", "kicad-cli", "ngspice", "config", "symbols", "network")
@@ -124,18 +124,8 @@ def _check_workspace() -> tuple[bool, str, str]:
     if (cwd / ".akcli").is_dir():
         # 0.14+ state roots self-ignore via .akcli/.gitignore; the walk-up
         # check only matters for legacy roots created before that.
-        ignored = (cwd / ".akcli" / ".gitignore").is_file()
-        if not ignored:
-            for d in [cwd, *cwd.parents]:
-                gi = d / ".gitignore"
-                try:
-                    if gi.is_file() and ".akcli" in gi.read_text(encoding="utf-8"):
-                        ignored = True
-                        break
-                except OSError:
-                    pass
-                if (d / ".git").exists():
-                    break
+        ignored = ((cwd / ".akcli" / ".gitignore").is_file()
+                   or _gitignored(cwd, ".akcli"))
         if not ignored:
             issues.append(".akcli/ not covered by any .gitignore "
                           "(pre-0.14 state root)")
@@ -143,6 +133,16 @@ def _check_workspace() -> tuple[bool, str, str]:
                          ".akcli/.gitignore; or add `.akcli/` to .gitignore — "
                          "journal and undo backups are derived state, not "
                          "design sources")
+
+    # A directory of schematics with no .kicad_pro opens in KiCad as "no
+    # project": no library tables, no board, and a prompt to create one. akcli
+    # itself never needed the project file, which is exactly why this stayed
+    # invisible until a human double-clicked the result.
+    if any(cwd.glob("*.kicad_sch")) and not any(cwd.glob("*.kicad_pro")):
+        issues.append("schematic(s) here but no .kicad_pro "
+                      "(KiCad opens this as a project-less file)")
+        hints.append("run `akcli project init .` to add the project file, "
+                     "lib tables and a blank board around what is already here")
 
     if not issues:
         return True, "clean workspace", ""

@@ -40,6 +40,26 @@ def test_new_and_undo_list_are_stamped(tmp_path):
     _assert_stamped(json_of(argv), argv)
 
 
+def test_project_new_and_init_are_stamped(tmp_path):
+    d = tmp_path / "demo"
+    argv = ["project", "new", str(d), "--json"]
+    _assert_stamped(json_of(argv, expect=0), argv)
+    argv = ["project", "init", str(d), "--json"]
+    _assert_stamped(json_of(argv, expect=0), argv)
+    # the dry-run payload is hand-built too, and is what an agent reads first
+    argv = ["project", "new", str(tmp_path / "other"), "--dry-run", "--json"]
+    _assert_stamped(json_of(argv, expect=0), argv)
+
+
+def test_project_info_and_check_are_stamped(tmp_path):
+    d = tmp_path / "demo"
+    assert json_of(["project", "new", str(d), "--json"], expect=0)
+    argv = ["project", "info", str(d), "--json"]
+    _assert_stamped(json_of(argv, expect=0), argv)
+    argv = ["project", "check", str(d), "--json"]
+    _assert_stamped(json_of(argv, expect=0), argv)
+
+
 def test_doctor_is_stamped():
     argv = ["doctor", "--json"]
     _assert_stamped(json_of(argv), argv)

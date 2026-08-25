@@ -57,14 +57,17 @@ codex plugin install akcli@akcli
 
 ## 快速上手
 
-直接在 shell 里读取设计、检查、并绘制进去：
+先脚手架出一个真正的 KiCad 项目（附带一份示例 op-list），再读取、检查并绘制进去——全部在 shell 里完成：
 
 ```bash
-akcli read  board.kicad_sch --summary                            # 归一化 JSON，压缩在上下文预算内
-akcli check board.kicad_sch                                      # ERC-lite + power + BOM + 连通性 + 文档完整性
-akcli draw  board.kicad_sch --ops ops.json                       # dry-run：显示改动 + net diff
-akcli draw  board.kicad_sch --ops ops.json --apply --strict-nets # 原子写入 + 校验 + 备份
-akcli undo  board.kicad_sch                                      # 回退上一次写入
+akcli project new demo --example voltage-divider                  # .kicad_pro/.kicad_sch/.kicad_pcb/lib table/ops.json
+cd demo
+akcli read  demo.kicad_sch --summary                              # 归一化 JSON，压缩在上下文预算内
+akcli check demo.kicad_sch                                        # ERC-lite + power + BOM + 连通性 + 文档完整性
+akcli draw  demo.kicad_sch --ops ops.json                         # dry-run：显示改动 + net diff
+akcli draw  demo.kicad_sch --ops ops.json --apply --strict-nets   # 原子写入 + 校验 + 备份
+akcli project check                                               # 项目完整性检查（仍然 0 条）
+akcli undo  demo.kicad_sch                                        # 回退上一次写入
 ```
 
 每次写入默认都是 dry run；`--apply` 会经过原子化的 快照 → 临时文件 → 校验 → 替换 流水线，并由纯
@@ -78,7 +81,7 @@ Python 的连通性闸门把关，`akcli undo` 则从轮替备份栈回退。离
 | 命令 | 功能 |
 |---|---|
 | `read` · `net` · `component` · `pins` | 把 KiCad 或 Altium 解析成同一套归一化 JSON 模型；查询 net（整条 net，或引脚级的 `net --at`／`--same`／`--why`）、元件与引脚坐标。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | 依据带版本号的 **22 种 op + 10 种宏** JSON op-list 绘制 `.kicad_sch`——根文件、子图页，或**在一次事务中写入多张图页**（`sheets` envelope + 逐 op 的 `sheet` 路由，附带运行备份与 `undo --run`）——由覆盖**整个 sheet tree** 的 net-diff 安全闸门与一键 `undo` 把关；`ops from-intent` 可把设计文档（声明的 nets + 元件）直接编译成 op-list。符号来源依次为 `--symbols`、配置文件路径，最后是项目与全局的 `sym-lib-table`。 |
+| `project` · `new` · `plan` · `draw` · `ops` · `arrange` | 从零脚手架出一个完整 KiCad 项目（`.kicad_pro`/`.kicad_pcb`/lib table，可加 `--example NAME`），或把既有 `.kicad_sch` 收编进项目（`project new`／`project init`），查看其绑定内容（`project info`）、把关其完整性（`project check`），再依据带版本号的 **22 种 op + 10 种宏** JSON op-list 绘制它——根文件、子图页，或**在一次事务中写入多张图页**（`sheets` envelope + 逐 op 的 `sheet` 路由，附带运行备份与 `undo --run`）——由覆盖**整个 sheet tree** 的 net-diff 安全闸门与一键 `undo` 把关；`ops from-intent` 可把设计文档（声明的 nets + 元件）直接编译成 op-list。符号来源依次为 `--symbols`、配置文件路径，最后是项目与全局的 `sym-lib-table`。 |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + 文档完整性 + intent／contract 检查、原理图 ↔ PCB 等价、net 成员关系 diff、MCU 引脚 → net 表。 |
 | `review` | 建议性（advisory）、分级置信度的设计评审，横跨六大检测族（signal／validation／pcb／emc／domain／gerber）；标记 DNP 的元件不满足任何规则。 |
 | `sim` | 转成 SPICE deck，在 KiCad 自带 ngspice 上断言；角点扫描；用 datasheet 点拟合二极管模型。元件值先归一化，无法确定解读的一律拒绝而不猜测。 |
@@ -151,7 +154,11 @@ Python 之外的东西——一律在运行时探测，核心流程永远不需�
 
 ## 路线图
 
-**当前已提供（v0.20.0）：** KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet`、写入既有
+**当前已提供（v0.22.0）：** 完整的 KiCad 项目脚手架——`project new`／`project init` 会在根图页旁
+写出 `.kicad_pro`、空白的 `.kicad_pcb` 板框容器、项目 lib table 与 `.gitignore`（`--example NAME` 还会
+附上一份现成 op-list），`project info`／`project check` 则负责读取与把关这个项目绑定了什么；
+KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet`，可用 `"create": true` 在同一次事务中
+创建子图页文件、写入既有
 层次结构中的子图页、一次事务写入多张图页、覆盖整个 sheet tree 的 net-diff 安全护栏、重复实例化图页的
 逐实例参考编号、`new`／多级 `undo`／`undo --run`）、保持 net 不变的 `arrange --groups`
 重新布局、建议性的 `akcli review` 评审引擎（六大检测族，现已纳入电源入口保护检测、datasheet facts

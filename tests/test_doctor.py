@@ -60,3 +60,22 @@ def test_doctor_ngspice_env_off(monkeypatch, capsys):
     monkeypatch.setenv("AKCLI_NGSPICE", "off")
     assert main(["doctor", "--require", "ngspice"]) == 1
     assert "missing: ngspice" in capsys.readouterr().out
+
+
+def test_doctor_workspace_flags_a_projectless_schematic_dir(tmp_path, monkeypatch):
+    """Schematics with no .kicad_pro: KiCad opens that as a project-less file."""
+    (tmp_path / "board.kicad_sch").write_text("(kicad_sch)", encoding="utf-8",
+                                              newline="\n")
+    monkeypatch.chdir(tmp_path)
+    ok, detail, hint = doc._check_workspace()
+    assert ok is False
+    assert "no .kicad_pro" in detail
+    assert "akcli project init ." in hint
+
+
+def test_doctor_workspace_is_quiet_once_the_project_exists(tmp_path, monkeypatch):
+    assert main(["project", "new", str(tmp_path / "demo")]) == 0
+    monkeypatch.chdir(tmp_path / "demo")
+    ok, detail, _hint = doc._check_workspace()
+    assert ok is True and detail == "clean workspace"
+

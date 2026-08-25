@@ -58,14 +58,17 @@ codex plugin install akcli@akcli
 
 ## クイックスタート
 
-shell から直接、設計を読み込み・チェックし・書き込めます：
+まず実際の KiCad プロジェクトを（実例の op-list 付きで）スキャフォールドし、そのまま読み込み・チェック・書き込みまで shell から行えます：
 
 ```bash
-akcli read  board.kicad_sch --summary                            # 正規化 JSON、コンテキスト予算に収める
-akcli check board.kicad_sch                                      # ERC-lite + power + BOM + 接続性 + 整合性
-akcli draw  board.kicad_sch --ops ops.json                       # dry-run: 変更 + net diff を表示
-akcli draw  board.kicad_sch --ops ops.json --apply --strict-nets # アトミック書き込み + 検証 + バックアップ
-akcli undo  board.kicad_sch                                      # 直前の書き込みを取り消す
+akcli project new demo --example voltage-divider                  # .kicad_pro/.kicad_sch/.kicad_pcb/lib テーブル/ops.json
+cd demo
+akcli read  demo.kicad_sch --summary                              # 正規化 JSON、コンテキスト予算に収める
+akcli check demo.kicad_sch                                        # ERC-lite + power + BOM + 接続性 + 整合性
+akcli draw  demo.kicad_sch --ops ops.json                         # dry-run: 変更 + net diff を表示
+akcli draw  demo.kicad_sch --ops ops.json --apply --strict-nets   # アトミック書き込み + 検証 + バックアップ
+akcli project check                                               # プロジェクト整合性の指摘（引き続き 0 件）
+akcli undo  demo.kicad_sch                                        # 直前の書き込みを取り消す
 ```
 
 書き込みはデフォルトですべて dry run です。`--apply` はアトミックなスナップショット → 一時ファイル →
@@ -80,7 +83,7 @@ akcli undo  board.kicad_sch                                      # 直前の書�
 | コマンド | 機能 |
 |---|---|
 | `read` · `net` · `component` · `pins` | KiCad または Altium を単一の正規化 JSON モデルに解析。net（net 全体、またはピン単位の `net --at`／`--same`／`--why`）・部品・ピン座標を照会。 |
-| `new` · `plan` · `draw` · `ops` · `arrange` | バージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch` を生成——ルートファイル、子シート、あるいは**1 回のアトミックなトランザクションで複数シートに書き込み**（`sheets` envelope + op ごとの `sheet` ルーティング、run 単位のバックアップと `undo --run` 付き）。**sheet tree 全体**を対象に評価する net-diff の安全ゲートと 1 コマンドの `undo` が保護。`ops from-intent` は設計ドキュメント（宣言した nets + 部品）をそのまま op-list にコンパイル。シンボルは `--symbols`、設定のパス、最後にプロジェクトとグローバルの `sym-lib-table` から解決。 |
+| `project` · `new` · `plan` · `draw` · `ops` · `arrange` | ゼロから完全な KiCad プロジェクト（`.kicad_pro`/`.kicad_pcb`/lib テーブル、`--example NAME` も可）を骨組みするか、既存の `.kicad_sch` をプロジェクトに取り込み（`project new`／`project init`）、その拘束内容を調べ（`project info`）、整合性をゲートし（`project check`）、そのうえでバージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch` を生成——ルートファイル、子シート、あるいは**1 回のアトミックなトランザクションで複数シートに書き込み**（`sheets` envelope + op ごとの `sheet` ルーティング、run 単位のバックアップと `undo --run` 付き）。**sheet tree 全体**を対象に評価する net-diff の安全ゲートと 1 コマンドの `undo` が保護。`ops from-intent` は設計ドキュメント（宣言した nets + 部品）をそのまま op-list にコンパイル。シンボルは `--symbols`、設定のパス、最後にプロジェクトとグローバルの `sym-lib-table` から解決。 |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + ドキュメント整合性 + intent／contract チェック、回路図 ↔ PCB の等価性、net メンバーシップ差分、MCU ピン → net マップ。 |
 | `review` | 6 つの検出器ファミリ（signal／validation／pcb／emc／domain／gerber）にわたる、確信度別のアドバイザリ設計レビュー。DNP 指定の部品はどのルールも満たしません。 |
 | `sim` | SPICE デッキにレンダリングし、KiCad 同梱の ngspice 上でアサート。コーナースイープ。データシートの点からダイオードモデルをフィッティング。部品値は正規化され、確実に解釈できない値は推測せず拒否します。 |
@@ -157,7 +160,11 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 
 ## ロードマップ
 
-**提供済み（v0.20.0）：** 22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet`、既存
+**提供済み（v0.22.0）：** 完全な KiCad プロジェクトのスキャフォールド——`project new`／`project init` が
+ルートシートの隣に `.kicad_pro`、空の `.kicad_pcb` 基板コンテナ、プロジェクトの lib テーブル、`.gitignore` を
+書き出し（`--example NAME` で実例の op-list も同梱）、`project info`／`project check` がそのプロジェクトの
+束縛内容を読み取り・ゲートします。22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet`、
+`"create": true` で同一トランザクション内に子シートを作成可能、既存
 階層の子シートへの書き込み、1 回のアトミックなトランザクションでの複数シート書き込み、sheet tree 全体を
 対象とする net-diff 安全レール、複数回インスタンス化されたシートのインスタンス別リファレンス、
 `new`／多段 `undo`／`undo --run`）、net を保つ `arrange --groups`

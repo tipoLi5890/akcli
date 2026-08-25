@@ -59,6 +59,7 @@ def test_ast_gates_cover_every_product_module():
 _PARENTS_WHITELIST = {
     "src/akcli/__init__.py": 1,      # parents[2] -> repo root (pyproject.toml)
     "tools/schemas.py": 1,
+    "tools/examples_mirror.py": 1,   # parents[1] -> repo root (examples corpus)
     "tools/golden_regen.py": 1,
     "tools/agent_eval/run_eval.py": 1,
     "tools/equiv_snapshot.py": 1,    # parents[1] -> repo root (fixture corpus)

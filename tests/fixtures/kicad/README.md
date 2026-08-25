@@ -115,3 +115,38 @@ power symbols. The `VOUT` net carries both a local label (`MID`) and a global la
 S-expressions, required elements present, the v7/v8 format-marker differences) and
 re-derives the three nets with a self-contained mini-parser to prove the hand-placed
 wire endpoints actually coincide with the computed pin world-coordinates.
+
+## `blank_project/` — project-scaffold ground truth
+
+`blank.kicad_pro`, `blank.kicad_pcb`, `sym-lib-table`, `fp-lib-table` are the exact
+bytes `akcli project new` writes for the non-schematic half of a KiCad project. Unlike
+the schematics above these are **not hand-authored**: the project file is KiCad's own
+`share/kicad/template/kicad.kicad_pro` with `meta.filename` + `sheets` filled in, and
+the board's header/layers block is transcribed verbatim from
+`share/kicad/template/Arduino_Mega/Arduino_Mega.kicad_pcb` (file version `20241229`,
+new-style layer numbering). Nothing here is invented; see the module docstring of
+`src/akcli/writers/blank.py` for why.
+
+The `.kicad_pro` fixture pins the UUID `00000000-0000-4000-8000-000000000001` so the
+file is byte-stable — `tests/test_scaffold.py` substitutes it when comparing against the
+emitter, and asserts byte equality in both directions.
+
+The board is a **container, not a layout**: zero footprints, zero tracks, no outline.
+`tests/test_e2e_project.py` runs a real `kicad-cli pcb drc` / `pcb export svg` over both
+the fixture and a freshly scaffolded project and requires exit 0; the single expected
+`invalid_outline` violation is the "there is no outline" fact, not a defect.
+
+Regenerate (only when the emitter deliberately changes, and re-run the e2e file):
+
+```
+PYTHONPATH=src python3 -c "
+from pathlib import Path
+from akcli.writers import blank
+d = Path('tests/fixtures/kicad/blank_project')
+u = '00000000-0000-4000-8000-000000000001'
+d.joinpath('blank.kicad_pro').write_text(blank.blank_pro('blank.kicad_pro', u), encoding='utf-8', newline='\n')
+d.joinpath('blank.kicad_pcb').write_text(blank.blank_pcb('A4'), encoding='utf-8', newline='\n')
+d.joinpath('sym-lib-table').write_text(blank.blank_lib_table('sym'), encoding='utf-8', newline='\n')
+d.joinpath('fp-lib-table').write_text(blank.blank_lib_table('fp'), encoding='utf-8', newline='\n')
+"
+```

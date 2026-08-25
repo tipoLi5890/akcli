@@ -23,7 +23,7 @@ Ranks are assigned by ROLE, not by current directory: ``readers/sexpr`` and
     rank  layer
       5   package root (akcli/__init__ — no internal imports)
      10   base leaves: errors units safety kicad_escape classify
-     15   packaged data: akcli.schemas
+     15   packaged data: akcli.schemas akcli.examples
      20   contracts: model report config journal netdiff bom_policy ops
           symbol_spec
      30   sexpr IR (today: readers.sexpr; after the move: akcli.sexpr)
@@ -50,7 +50,7 @@ _RANK: dict[str, int] = {
     "__init__": 5,
     "errors": 10, "units": 10, "safety": 10, "kicad_escape": 10, "si_prefix": 10,
     "classify": 10,
-    "schemas": 15,
+    "schemas": 15, "examples": 15,
     "model": 20, "report": 20, "config": 20, "journal": 20, "netdiff": 20,
     "bom_policy": 20, "ops": 20, "symbol_spec": 20, "opspec": 20,
     "contract": 20,
@@ -58,7 +58,8 @@ _RANK: dict[str, int] = {
     "geometry": 40, "writers.geometry": 40, "netbuild": 40,
     "readers": 50,
     "writers": 60,
-    "project": 70, "libtable": 70, "exporters": 70, "relink": 70, "fab": 70,
+    "project": 70, "scaffold": 70, "libtable": 70, "exporters": 70,
+    "relink": 70, "fab": 70,
     "render_svg": 70, "render_art": 70, "arrange": 70, "groupframe": 70,
     "drivers": 70, "adapters": 70, "calc": 70, "explain": 70,
     "checks": 72,

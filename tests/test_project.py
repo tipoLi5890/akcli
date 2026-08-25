@@ -176,6 +176,48 @@ def test_resolve_root_kicad_pro_breaks_the_tie(tmp_path):
     assert project.resolve_root(child) == root.resolve()
 
 
+# --- .kicad_pro tie-break: uuid identity first, filename convention second --- #
+def _pro(tmp_path: Path, stem: str, body: str) -> Path:
+    p = tmp_path / f"{stem}.kicad_pro"
+    p.write_text(body, encoding="utf-8", newline="\n")
+    return p
+
+
+def _two_roots(tmp_path: Path):
+    """Two roots claiming the same child — the ambiguous case a pro resolves."""
+    root, child = _write_tree(tmp_path)
+    root2 = tmp_path / "root2.kicad_sch"
+    root2.write_text(_root_sch("child.kicad_sch", root_uuid=ROOT2_UUID),
+                     encoding="utf-8")
+    return root, root2, child
+
+
+def test_resolve_root_pro_uuid_wins_over_the_stem(tmp_path):
+    """The pro's `sheets[0][0]` names root2 while its own stem matches NEITHER.
+
+    The stem rule could not have answered this; the uuid is a statement of
+    identity, so the tie resolves without a --root flag.
+    """
+    root, root2, child = _two_roots(tmp_path)
+    _pro(tmp_path, "board", json.dumps({"sheets": [[ROOT2_UUID, "Root"]]}))
+    assert project.resolve_root(child) == root2.resolve()
+
+
+def test_resolve_root_malformed_pro_falls_back_to_the_stem(tmp_path):
+    """A truncated .kicad_pro must never turn a READ path into a parse error."""
+    root, root2, child = _two_roots(tmp_path)
+    _pro(tmp_path, "root", '{"sheets": [["' + ROOT2_UUID)   # truncated JSON
+    assert project.resolve_root(child) == root.resolve()
+
+
+def test_resolve_root_pro_uuid_matching_nobody_falls_back_to_the_stem(tmp_path):
+    """A stale binding (the sheet it names is gone) degrades, never misleads."""
+    root, root2, child = _two_roots(tmp_path)
+    _pro(tmp_path, "root", json.dumps(
+        {"sheets": [["ffffffff-0000-4000-8000-ffffffffffff", "Root"]]}))
+    assert project.resolve_root(child) == root.resolve()
+
+
 def test_stage_tree_preserves_relative_layout(tmp_path):
     root, child = _write_tree(tmp_path, child_dir="sub")
     base = tmp_path / "stage"

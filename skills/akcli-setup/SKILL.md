@@ -30,6 +30,18 @@ akcli doctor --network             # also probe the jlc endpoint (only networked
 akcli doctor --json                # machine-readable: {checks: {name: {ok, detail, hint}}, ok}
 ```
 
+No project here yet? `akcli project new` scaffolds a complete one in one pass
+(`.kicad_pro`/`.kicad_sch`/`.kicad_pcb`/lib tables/`.gitignore` — the board is
+an empty container, a scaffold so pcbnew finds a file instead of a prompt;
+akcli writes no PCB content); if a bare `.kicad_sch` already exists without the
+rest, `akcli project init` completes it in place instead:
+
+```bash
+akcli project new demo --title "Demo board"   # from scratch
+akcli project init .                          # complete an existing .kicad_sch
+akcli project check demo                      # confirm the result is a coherent project (0 findings on a fresh scaffold)
+```
+
 Every `MISSING` row prints its own remediation hint. Only **python** is a hard
 requirement — kicad-cli / ngspice / network / config are optional capabilities
 that specific features need:

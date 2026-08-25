@@ -14,13 +14,19 @@ read-only on-ramp into the KiCad flow, not a symmetric conversion peer. That rep
 release-critical now live in a demand-driven optional track, and the experimental Windows live
 bridge was **deleted outright** (0.17).
 
-## Where we are (v0.20.0)
+## Where we are (v0.22.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 
-- **KiCad authoring:** `plan`/`draw` from a `protocol_version 1` op-list — **22 ops + 10 macros**
-  (incl. hierarchical `add_sheet`, `rename_net`, cascade delete, multi-unit placement, `mid()`
-  anchors), `akcli new` blank-sheet bootstrap, deterministic UUIDv5 idempotency, atomic apply with a
+- **KiCad authoring:** `plan`/`draw` from a `protocol_version 2` op-list — **22 ops + 10 macros**
+  (incl. hierarchical `add_sheet`, optionally creating its child sheet in the same transaction with
+  `"create": true`, `rename_net`, cascade delete, multi-unit placement, `mid()`
+  anchors), `akcli new` blank-sheet bootstrap, `akcli project new`/`project init` KiCad project
+  scaffolding (`.kicad_pro`/a blank `.kicad_pcb` board container/lib tables/`.gitignore`, atomic and
+  idempotent, `--example NAME` for a packaged worked op-list — akcli writes no PCB content, the
+  board is a scaffold, not a layout), `akcli project info`/`project check` reading
+  and gating that project's integrity (root-sheet binding, sheet tree, board, lib tables,
+  gitignore coverage — reused by the `release preflight` `project` gate), deterministic UUIDv5 idempotency, atomic apply with a
   rotated backup stack (`undo --list`/`--steps`), a pure-Python connectivity gate, a before/after
   **net-membership diff** on every run, and `--apply --strict-nets` refusing named-net
   splits/merges. **Net-preserving re-layout** (0.8.0): `move_component` carries a part's net labels
@@ -40,7 +46,8 @@ Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
   several files inside a single atomic transaction, recoverable with `akcli undo <target> --run
   <run_id>`, and a sheet instantiated more than once now takes per-instance references
   (`instance_designators` on both ops), refusing a duplicate refdes with the new
-  `INSTANCE_REFS_REQUIRED`.
+  `INSTANCE_REFS_REQUIRED`. `add_sheet` now takes an optional `create: true` to write the child
+  `.kicad_sch` as a blank stub in the same transaction, instead of a separate `akcli new` step.
   **Modular authoring (v0.10)**: functional-group envelope with group-local coordinates and a
   persisted `Group` property, `akcli groups`/`--frame` self-refreshing module borders,
   bare `arrange --groups --frames`, relative placement (`anchor`+`offset_mil`), `place_array`,

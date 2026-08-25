@@ -230,7 +230,8 @@ authoring model:
 The full modular loop:
 
 ```
-akcli new board.kicad_sch
+akcli project new board                            # scaffold pro/sch/pcb/lib tables in ./board
+cd board                                            # akcli new board.kicad_sch also works, inside an existing project
 akcli bbox Device:R --symbols mylib.kicad_sym     # reserve space per part
 # author ops.json: declare groups -> place with group-local coords /
 #   anchors / place_array -> route_net between modules
@@ -459,15 +460,39 @@ wrong silently changes netlists:
 `add_sheet` places a child-sheet reference on the parent. The authoring flow,
 parity-verified against eeschema's own netlister (kicad-cli 10):
 
-1. **Create both files, child FIRST.** `akcli new child.kicad_sch` and
-   `akcli new root.kicad_sch` — each gets a root uuid (the namespace for
-   deterministic op uuids). `add_sheet`'s `file` must point at an EXISTING
-   child: the op is refused with `SHEET_FILE_MISSING` otherwise, and the same
-   code fires on any later write to a root whose child has gone missing. (It
-   used to succeed, and then every `nets`/`check`/`render` on the design failed
-   with exit 4 because the child could not be read.) The child needs to exist,
-   not to be finished — a bare `akcli new` stub is enough to start wiring the
-   parent.
+1. **The child must exist — pick one on-ramp.** `add_sheet`'s `file` must
+   point at an EXISTING child: the op is refused with `SHEET_FILE_MISSING`
+   otherwise, and the same code fires on any later write to a root whose
+   child has gone missing. (It used to succeed, and then every
+   `nets`/`check`/`render` on the design failed with exit 4 because the
+   child could not be read.) Two ways to satisfy it:
+   - **Pre-create, child FIRST.** `akcli new child.kicad_sch` and
+     `akcli new root.kicad_sch` — each gets a root uuid (the namespace for
+     deterministic op uuids). The child needs to exist, not to be finished —
+     a bare `akcli new` stub is enough to start wiring the parent. `akcli
+     project new --sheets amp,psu` pre-creates several blank child sheets
+     alongside the root in one pass; the "child must exist" rule is
+     unchanged — `add_sheet` still refuses a file that isn't there yet, it
+     just already is.
+   - **`"create": true` on the `add_sheet` op** brings the child into
+     existence in the SAME transaction, instead of a separate `akcli new`
+     round-trip:
+     ```json
+     { "op": "add_sheet", "name": "power", "file": "child.kicad_sch",
+       "at": [2000, 1000], "size": [1000, 800], "create": true,
+       "pins": [{"name": "VBUS", "type": "input", "side": "left", "offset_mil": 200}] }
+     ```
+     The stub written is exactly what `akcli new` writes (A4, no title); its
+     root uuid is content-seeded from the parent's own root uuid plus the
+     `Sheetfile` string, so `draw` (plan) and `draw --apply` agree on the
+     child's identity before either writes anything, and a re-apply is
+     byte-identical. An EXISTING child is never touched — `create` only
+     fires when the file is absent. Default `false`/absent keeps the
+     `SHEET_FILE_MISSING` refusal.
+     > ⚠ Any op-list with `create: true` — even an otherwise single-file one
+     > — takes the multi-sheet TRANSACTION path (no rotated `<name>.bak`
+     > stack); recover with `akcli undo <root> --run <run_id> --apply`
+     > (the `run_id` is in the `draw` output).
 2. **Place the sheet on the parent.**
    `{"op":"add_sheet", "name":"power", "file":"child.kicad_sch",
    "at":[2000,1000], "size":[1000,800],
@@ -525,7 +550,9 @@ One op-list can edit the root AND its children in **one atomic transaction**:
 ```
 
 - `sheets` declares the child files (relative to the draw target's directory;
-  each must already exist — `akcli new` it first, or `SHEET_UNKNOWN`). A
+  each must already exist — `akcli new` it first, or `SHEET_UNKNOWN` —
+  UNLESS an `add_sheet {"create": true}` in the same op-list names it, in
+  which case the transaction creates it before any op runs). A
   per-op `"sheet": "<key>"` routes that op onto the declared file; no tag =
   the target itself. An undeclared tag is `SHEET_UNKNOWN` at validate time
   (with did-you-mean). A `sheet`-tagged macro expands with the tag riding
@@ -678,3 +705,9 @@ its own section below.
 
 More patterns (LDO block, decoupling, connector fanout, multi-unit gates) live
 in the `akcli-schematic-authoring` skill.
+
+A handful of complete, CI-applied op-lists live in `examples/circuits/` (each
+with an `expected_nets.json` `tests/test_examples.py` diffs against, and a
+`README.md`) — the same JSON is packaged into the wheel and one flag away
+from a fresh project: `akcli project new demo --example voltage-divider`
+drops it straight into `demo/ops.json`, ready for `akcli draw`.

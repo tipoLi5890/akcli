@@ -113,8 +113,11 @@ def evaluate(*, target: Path, oplist: dict[str, Any], sources: Any,
                                if want_diff else None)
                 stage_files = list(_project.tree_files(scope_root))
                 if routed:
-                    for f in _txn.resolve_sheet_files(oplist, target).values():
-                        if f not in stage_files:
+                    # A child the op-list will CREATE (add_sheet create:true)
+                    # has nothing to stage yet — the transaction writes its
+                    # blank stub inside the stage, next to the staged parent.
+                    for f in _txn.resolve_sheet_files(oplist, target)[0].values():
+                        if f.is_file() and f not in stage_files:
                             stage_files.append(f)
                 mapping = _project.stage_tree(stage_files, stage_base)
                 dry_target = mapping[target.resolve()]

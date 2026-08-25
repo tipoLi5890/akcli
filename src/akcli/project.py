@@ -26,6 +26,7 @@ from pathlib import Path
 
 from .errors import AkcliError, fail
 from .readers import kicad as _kreader
+from .readers import kicad_pro as _kpro
 
 __all__ = ["resolve_root", "stage_tree", "tree_files"]
 
@@ -38,14 +39,21 @@ _MAX_DEPTH = 16
 _MAX_PRO_CLIMB = 3
 
 
-def _refs_of(path: Path) -> list[Path]:
-    """Resolved child paths referenced by ``path`` (unreadable file -> [])."""
+def _scan(path: Path) -> tuple[str, list[Path]]:
+    """``(root uuid, resolved child paths)`` for ``path``; unreadable -> ``("", [])``.
+
+    One parse per file serving both jobs the reverse index needs: WHO this
+    file's children are, and WHICH design this file is (its root ``(uuid ...)``
+    — the value a ``.kicad_pro`` records in ``sheets[0]``). Keeping them
+    together is what lets :func:`resolve_root` do the project tie-break without
+    re-reading a single schematic.
+    """
     try:
-        _root_uuid, refs = _kreader.sheet_refs(path)
+        root_uuid, refs = _kreader.sheet_refs(path)
     except (AkcliError, OSError, UnicodeDecodeError):
         # A broken NEIGHBOR must never block the target's own flow: the
         # reverse index simply doesn't learn this file's children.
-        return []
+        return "", []
     out: list[Path] = []
     for _uuid, _name, sfile in refs:
         if sfile:
@@ -53,7 +61,23 @@ def _refs_of(path: Path) -> list[Path]:
                 out.append((path.parent / sfile).resolve())
             except OSError:  # pragma: no cover - unresolvable path text
                 continue
-    return out
+    return root_uuid, out
+
+
+def _refs_of(path: Path) -> list[Path]:
+    """Resolved child paths referenced by ``path`` (unreadable file -> [])."""
+    return _scan(path)[1]
+
+
+def _pro_root_uuid(pro: Path) -> str | None:
+    """The root-sheet UUID a ``.kicad_pro`` binds to (``None`` on ANY problem).
+
+    :mod:`.readers.kicad_pro` is degrade-only by contract, so a truncated or
+    hand-mangled project file yields ``None`` here and the caller falls back to
+    the historical stem rule. Reading a schematic must never start failing
+    because a file akcli does not even write is malformed.
+    """
+    return _kpro.root_sheet_uuid(_kpro.read(pro))
 
 
 def tree_files(root: Path) -> list[Path]:
@@ -128,8 +152,12 @@ def resolve_root(target: Path, explicit: Path | None = None) -> Path:
 
     pros, candidates = _scan_scope(target)
     parents: dict[Path, set[Path]] = {}
+    # Root uuid per candidate, harvested from the SAME parse that builds the
+    # reverse index — the project tie-break below costs no extra file read.
+    root_uuids: dict[Path, str] = {}
     for f in candidates:
-        for child in _refs_of(f):
+        root_uuids[f], refs = _scan(f)
+        for child in refs:
             parents.setdefault(child, set()).add(f)
 
     if target not in parents:
@@ -155,6 +183,16 @@ def resolve_root(target: Path, explicit: Path | None = None) -> Path:
         return next(iter(roots))
 
     if len(pros) == 1:
+        # KiCad-project tie-break, strongest evidence first. `sheets[0][0]` in
+        # the .kicad_pro IS the root schematic's own uuid, so a uuid hit is a
+        # statement of identity; the stem rule is only a naming CONVENTION
+        # (KiCad's own, but a renamed-file tree still satisfies it by accident).
+        # Try identity, fall back to convention, and only then refuse.
+        want = _pro_root_uuid(pros[0])
+        if want:
+            matched = [r for r in roots if root_uuids.get(r) == want]
+            if len(matched) == 1:
+                return matched[0]
         matched = [r for r in roots if r.stem == pros[0].stem]
         if len(matched) == 1:
             return matched[0]

@@ -46,6 +46,7 @@ from .commands import gate as _gate_cmd
 from .commands import jlc as _jlc_cmd
 from .commands import library as _library_cmd
 from .commands import log as _log_cmd
+from .commands import project as _project_cmd
 from .commands import query as _query_cmd
 from .commands import render as _render_cmd
 from .commands import release as _release_cmd
@@ -157,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     _calc_cmd.register(sub, common)
     _jlc_cmd.register(sub, common)
     _library_cmd.register(sub, common)
+    _project_cmd.register(sub, common)
     _fab_cmd.register(sub, common)
     _release_cmd.register(sub, common)
     _gate_cmd.register(sub, common)

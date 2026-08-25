@@ -204,7 +204,9 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   per-op `"sheet"` tag instead (or target the child file directly).
 - **Hierarchy-era codes (0.20), each with a precise fix:** `SHEET_UNKNOWN` —
   a `"sheet"` tag names no `sheets` entry (did-you-mean rides along), or the
-  declared child file does not exist (`akcli new` it first).
+  declared child file does not exist (`akcli new` it first, or set
+  `"create": true` on the `add_sheet` op that references it and the same draw
+  writes the blank child).
   `INSTANCE_REFS_REQUIRED` — the target sheet is instantiated more than once,
   so a scalar designator would annotate every instance with one refdes; the
   error lists the instance paths — copy them into

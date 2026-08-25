@@ -17,6 +17,13 @@ tests/fixtures/MANIFEST.sha256 text eol=lf
 *.kicad_sch  text eol=lf
 *.kicad_sym  text eol=lf
 *.kicad_pcb  text eol=lf
+# The project-scaffold ground truth (tests/fixtures/kicad/blank_project/) is
+# compared byte-for-byte against the emitters, which write LF unconditionally:
+# a CRLF checkout on Windows would fail those tests on the SEPARATOR, not on
+# content. The lib tables have no extension, so they need explicit patterns.
+*.kicad_pro  text eol=lf
+tests/fixtures/**/sym-lib-table text eol=lf
+tests/fixtures/**/fp-lib-table  text eol=lf
 
 # Source + shipped text assets.
 *.py    text eol=lf

@@ -114,6 +114,9 @@ def test_preflight_pass_writes_manifest(proj, capsys):
     assert by["order"]["status"] == "pass"
     assert by["intent"]["status"] == "skipped"       # skipped is explicit
     assert by["git"]["status"] == "skipped"          # tmp dir is not a repo
+    # no .kicad_pro beside the schematic: an explicit skip, never a quiet pass
+    assert by["project"]["status"] == "skipped"
+    assert ".kicad_pro" in by["project"]["reason"]
     assert doc["inputs"]["sch"]["sha256"]
     assert json.loads(out.read_text())["result"] == "PASS"
 
@@ -268,3 +271,40 @@ def test_preflight_sim_spec_missing_file_is_not_found(proj, capsys):
     code = main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"),
                  "--sim", str(proj / "nope.json")])
     assert code == 4
+
+
+# --------------------------------------------------------------------------- #
+# project gate — only when the release candidate really IS a KiCad project
+# --------------------------------------------------------------------------- #
+def _preflight(proj, capsys) -> dict:
+    main(["release", "preflight", "--sch", str(proj / "x.kicad_sch"), "--json"])
+    return json.loads(capsys.readouterr().out)
+
+
+def test_preflight_project_gate_passes_on_a_scaffolded_project(proj, capsys):
+    assert main(["project", "init", str(proj), "--name", "x"]) == 0
+    capsys.readouterr()
+    doc = _preflight(proj, capsys)
+    by = {g["gate"]: g for g in doc["gates"]}
+    assert by["project"]["status"] == "pass"
+    assert doc["inputs"]["project"]["sha256"]
+    # library-audit is the gate that reports lib-table findings; the project
+    # gate must not repeat them (with_lib_audit=False)
+    assert not [f for f in by["project"]["findings"]
+                if f["code"].startswith("LIB_")]
+
+
+def test_preflight_project_gate_fails_on_a_broken_root_binding(proj, capsys):
+    assert main(["project", "init", str(proj), "--name", "x"]) == 0
+    capsys.readouterr()
+    pro = proj / "x.kicad_pro"
+    doc_json = json.loads(pro.read_text(encoding="utf-8"))
+    doc_json["sheets"] = [["11111111-1111-4111-8111-111111111111", "Root"]]
+    pro.write_text(json.dumps(doc_json), encoding="utf-8", newline="\n")
+    doc = _preflight(proj, capsys)
+    by = {g["gate"]: g for g in doc["gates"]}
+    assert by["project"]["status"] == "fail"
+    assert any(f["code"] == "PROJECT_ROOT_SHEET_MISMATCH"
+               for f in by["project"]["findings"])
+    assert doc["result"] == "FAIL"
+

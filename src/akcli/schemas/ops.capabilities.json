@@ -89,7 +89,7 @@
     "add_sheet": {
       "kicad": true,
       "altium": false,
-      "notes": "hierarchical (sheet ...) node + sheet pins; child file authored separately. OP_UNSUPPORTED on Altium live v1"
+      "notes": "hierarchical (sheet ...) node + sheet pins; child file authored separately (or created in-transaction with create: true). OP_UNSUPPORTED on Altium live v1"
     },
     "place_gnd": {
       "kicad": true,

@@ -55,10 +55,14 @@ def _op_add_sheet(call: OpCall) -> list[str]:
     uuid, one sheet pin per ``pins`` entry at its computed edge coordinate, and
     the ``(instances (project ... (path "/<root>" (page N))))`` block KiCad needs
     to page the sub-sheet. The referenced child ``.kicad_sch`` is NOT created
-    here — author it FIRST (``akcli new <file>``): a sheet pointing at a file
-    that does not exist is refused with ``SHEET_FILE_MISSING``, because it used
-    to "succeed" and then brick every later ``nets``/``check``/``render`` on the
-    design (none of them can read the missing child).
+    here — author it FIRST (``akcli new <file>``), or set ``create: true`` and
+    let the TRANSACTION write a blank one before any op runs
+    (:func:`..txn.apply_project`): a sheet pointing at a file that does not
+    exist is refused with ``SHEET_FILE_MISSING``, because it used to "succeed"
+    and then brick every later ``nets``/``check``/``render`` on the design
+    (none of them can read the missing child). ``create`` only waives the
+    refusal — this handler never writes the child, so the two paths cannot
+    disagree about who owns the file.
     Wires attach to a sheet pin
     by its coordinate: ``at`` + ``offset_mil`` along the pin's side, grid-snapped
     (the connectivity gate already treats sheet pins as label anchors, so a wire
@@ -68,7 +72,8 @@ def _op_add_sheet(call: OpCall) -> list[str]:
         call.doc, call.op, call.index, call.src_libs, call.inst_path, call.ctx)
     file_name = str(op["file"])
     doc_path = ctx.doc_path if ctx is not None else None
-    if doc_path is not None and not (Path(doc_path).parent / file_name).exists():
+    if (doc_path is not None and not op.get("create")
+            and not (Path(doc_path).parent / file_name).exists()):
         fail("SHEET_FILE_MISSING",
              f"add_sheet {str(op['name'])!r}: child file {file_name!r} does not "
              f"exist next to {Path(doc_path).name} — create it first "

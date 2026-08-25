@@ -121,6 +121,20 @@ find the package).
 plans (lossless S-expression rewrite, dry-run by default, `--apply` leaves a
 `.bak` and re-audits).
 
+`akcli project check [DIR]` complements `library audit` rather than
+duplicating it: `audit` is scoped to the sym/fp-lib-table ↔ schematic ↔
+library-contents ↔ 3D-model chain, while `check` looks one layer out, at
+whether the `.kicad_pro` itself is coherent — its root-sheet binding matches
+the schematic on disk (`PROJECT_ROOT_SHEET_MISSING`/`_MISMATCH`), every
+`Sheetfile` in the tree exists (`SHEET_FILE_MISSING`), a board container is
+present (`PROJECT_PCB_MISSING`), and derived state is gitignored
+(`PROJECT_STATE_UNIGNORED`). `check` runs `library audit`'s own findings as
+part of its report too, so a plain `akcli project check` alone is the single
+project-integrity gate; `release preflight`'s `project` gate calls the same
+`check_findings` function with library auditing switched off there, since
+its own `library-audit` gate already covers that ground — one finding is
+never reported twice across the two gates.
+
 ## jlc add, integrated with the workspace
 
 ```bash
@@ -236,7 +250,9 @@ akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --contract b
 ```
 
 Runs every applicable gate — schematic checks, intent, contracts, library
-audit, sch↔PCB equivalence, fab policy, order manifest, (with
+audit, project integrity (when a `.kicad_pro` sits beside `--sch` — the same
+`project check` findings, minus a redundant second library audit),
+sch↔PCB equivalence, fab policy, order manifest, (with
 `--sim <sim.json>`) quantitative SPICE assertions, (with
 `--review-policy <policy.toml>`) the calibrated review allowlist, (with
 `--gerbers <dir>`) fab-package completeness, and git cleanliness — and

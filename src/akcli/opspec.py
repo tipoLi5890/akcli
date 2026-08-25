@@ -847,7 +847,8 @@ CORE: Final[tuple[OpSpec, ...]] = (
         doc=(
             "Emit a hierarchical (sheet ...) node with Sheetname/Sheetfile, "
             "sheet pins at computed edge coordinates and the (instances) "
-            "block; the child file is authored separately."
+            "block; the child file must already exist unless create is true, "
+            "in which case the transaction writes a blank one."
         ),
         fields=(
             Field(
@@ -862,7 +863,7 @@ CORE: Final[tuple[OpSpec, ...]] = (
                 template="<child.kicad_sch>",
                 doc=(
                     "Sheetfile property value; the referenced child "
-                    ".kicad_sch is NOT created by this op."
+                    ".kicad_sch must already exist unless create is true."
                 ),
             ),
             Field(
@@ -894,11 +895,22 @@ CORE: Final[tuple[OpSpec, ...]] = (
                     "attach to that coordinate."
                 ),
             ),
+            Field(
+                "create", "bool",
+                template=False,
+                doc=(
+                    "Create the child .kicad_sch as a blank sheet when it "
+                    "does not exist yet, inside the same transaction; an "
+                    "existing child is never touched. Default false keeps "
+                    "the SHEET_FILE_MISSING refusal."
+                ),
+            ),
         ),
         handler="_op_add_sheet",
         caps_note=(
             "hierarchical (sheet ...) node + sheet pins; child file authored "
-            "separately. OP_UNSUPPORTED on Altium live v1"
+            "separately (or created in-transaction with create: true). "
+            "OP_UNSUPPORTED on Altium live v1"
         ),
     ),
     OpSpec(

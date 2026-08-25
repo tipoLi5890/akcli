@@ -1,5 +1,5 @@
 ---
-description: Run the akcli release gate — every applicable preflight gate (check/intent/contract/library/sch-pcb/fab/order/review/gerber/git, optional sim) with a traceable manifest — and report GO / NO-GO with skipped gates named.
+description: Run the akcli release gate — every applicable preflight gate (check/intent/contract/library/project/sch-pcb/fab/order/review/gerber/git, optional sim) with a traceable manifest — and report GO / NO-GO with skipped gates named.
 argument-hint: --sch <board.kicad_sch> [--pcb board.kicad_pcb] [--gerbers DIR] [--sim sim.json] [--out manifest.json]
 ---
 
@@ -9,7 +9,9 @@ Arguments: `$ARGUMENTS`
 - The schematic goes in as `--sch <board.kicad_sch>` — `release preflight` takes no
   positional argument (a bare path exits `2`). Every additional input enables its gate: `--pcb`
   (sch-pcb + fab), `--gerbers` (gerber package), `--intent`/`--contract` files,
-  `--sim <sim.json>` (quantitative simulation assertions), `--out` (the manifest).
+  `--sim <sim.json>` (quantitative simulation assertions), `--out` (the manifest). The `project`
+  gate needs no flag of its own — it activates automatically when a `.kicad_pro` sits beside
+  `--sch`.
 - **Each omitted input is a skipped gate, recorded WITH its reason — never silent.**
 
 Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m akcli`):

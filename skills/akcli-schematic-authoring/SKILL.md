@@ -128,7 +128,27 @@ akcli jlc datasheet board.kicad_sch --fetch --out datasheets  # every BOM line, 
 ## (3) Seed the target file (new schematics only)
 
 `plan`/`draw` require an existing target with a root `(uuid ...)`. For a brand-new
-schematic, bootstrap one with `akcli new`:
+design, prefer scaffolding a **complete KiCad project** — not just a bare sheet —
+with `akcli project new`:
+
+```bash
+akcli project new demo --title "Power board"     # .kicad_pro/.kicad_sch/.kicad_pcb/lib tables
+cd demo                                          # then plan/draw demo.kicad_sch
+```
+
+Want a starting point instead of a blank sheet? `--example NAME` drops a
+worked, CI-verified op-list into `demo/ops.json` (`akcli project new --help`
+lists what this install ships, e.g. `voltage-divider`):
+
+```bash
+akcli project new demo --example voltage-divider
+cd demo && akcli draw demo.kicad_sch --ops ops.json --apply
+```
+
+That leaves KiCad able to actually open the result (a project, not a repair
+prompt) with an empty board container already in place. Inside an **existing**
+project, `akcli new` still works — it just adds one more sheet, not a whole
+project:
 
 ```bash
 akcli new board.kicad_sch                       # blank A4 sheet, root uuid + paper
@@ -329,7 +349,14 @@ Rules the validator and executor enforce:
   endpoint — and the child `.kicad_sch` must already exist (`akcli new` it
   first): pointing at a missing file is refused with `SHEET_FILE_MISSING`,
   because a dangling sheet makes every later `nets`/`check`/`render` on the
-  design fail. A part drawn INTO a child file joins its siblings' sheet paths
+  design fail. Optional `"create": true` (default `false`) skips the
+  separate `akcli new` round-trip — the SAME draw writes a blank child stub
+  before any op runs, in the same transaction; an existing child is never
+  touched, and the child's root uuid is content-seeded from the parent's own
+  root uuid so a re-apply is byte-identical. `create: true` puts even a
+  single-file op-list on the multi-sheet transaction path (recover with
+  `akcli undo <root> --run <run_id> --apply`, not the rotated `.bak` stack).
+  A part drawn INTO a child file joins its siblings' sheet paths
   automatically. KiCad only. Full flow + pin fields: the "Hierarchical sheets"
   section of `docs/op-list-authoring.md`.
 - **Multi-sheet op-lists — the `sheets` envelope (0.20)**: declare children

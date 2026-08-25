@@ -590,6 +590,34 @@ def _table_symbol_sources(lib_ids, explicit: list, project_dir=None) -> list[str
     return out
 
 
+# --------------------------------------------------------------------------- #
+# workspace hygiene — shared by `doctor` (workspace probe) and `project check`
+# --------------------------------------------------------------------------- #
+def _gitignored(start: Path, token: str) -> bool:
+    """Is ``token`` named by any ``.gitignore`` from ``start`` up to the repo?
+
+    A deliberately *textual* check, not a gitignore-semantics engine: the
+    question both callers ask is "did somebody remember to exclude this churn",
+    and a substring hit on the pattern (``.akcli``, ``*.kicad_prl`` …) answers
+    it without akcli growing a pattern matcher for a NOTE-level hint. The walk
+    stops at the first directory holding ``.git``: above the repository root,
+    another project's ignore file says nothing about this one.
+
+    Unreadable files are skipped, never fatal — this feeds advisory output on
+    both sides.
+    """
+    for d in [start, *start.parents]:
+        gi = d / ".gitignore"
+        try:
+            if gi.is_file() and token in gi.read_text(encoding="utf-8"):
+                return True
+        except OSError:
+            pass
+        if (d / ".git").exists():
+            break
+    return False
+
+
 def _draw_exit(results: list, findings: list) -> int:
     """Exit 6 (OPLIST) when any op errored or connectivity has an error finding.
 

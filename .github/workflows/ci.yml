@@ -38,6 +38,10 @@ jobs:
       # packaged mirror are generated views of it. Drift = a stale contract.
       - name: schemas match opspec (generated + packaged mirror)
         run: python3 tools/schemas.py check
+      # examples/circuits/*/ops.json is the canonical corpus; the packaged
+      # akcli/examples mirror is what `project new --example` ships in a wheel.
+      - name: packaged example mirror matches examples/circuits
+        run: python3 tools/examples_mirror.py check
       - name: Install mypy (dev extra)
         run: python -m pip install -e ".[dev]"
       - name: mypy (beachhead — scope in pyproject [tool.mypy].files)
@@ -241,16 +245,19 @@ jobs:
       - name: Run KiCad ground-truth tests live (fail if any case is skipped)
         run: |
           set -euo pipefail
-          # Fixture-first is only a real gate if these actually RUN: all three
+          # Fixture-first is only a real gate if these actually RUN: all four
           # files skip themselves when kicad-cli is missing, so a broken install
           # (or a broken availability probe) would otherwise turn the whole
           # ground-truth suite into a silent green. test_kicad_parity.py is the
-          # biggest of the three (the eeschema netlist parity corpus) and was
-          # the one this assertion used to miss entirely.
+          # biggest of the four (the eeschema netlist parity corpus) and was
+          # the one this assertion used to miss entirely; test_e2e_project.py is
+          # the only place the .kicad_pro/.kicad_pcb emitters are proven against
+          # a real KiCad at all.
           python -m pytest -q -rs \
             tests/test_e2e_draw.py tests/test_kicad_cli.py tests/test_kicad_parity.py \
+            tests/test_e2e_project.py \
             | tee /tmp/kicad-tests.log
-          # Matches the "kicad-cli not installed" skip reason in all three files;
+          # Matches the "kicad-cli not installed" skip reason in all four files;
           # capability-fallback skips (e.g. KiCad < 8 emits no JSON ERC report)
           # stay allowed.
           if grep -qE "^SKIPPED .*kicad-cli not installed" /tmp/kicad-tests.log; then

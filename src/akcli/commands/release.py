@@ -166,6 +166,24 @@ def _cmd_release_preflight(args: argparse.Namespace) -> int:
     ws = libtable.discover(sch_path.parent)
     gates.append(_gate("library-audit", libtable.audit(ws, [sch_path])))
 
+    # 4b. project integrity ---------------------------------------------------
+    # A release candidate is a PROJECT, not a loose schematic: if the shipped
+    # tree has a .kicad_pro, its root binding, sheet tree and board container
+    # are part of what is being released. `with_lib_audit=False` because
+    # library-audit above is the same check — one finding reported twice reads
+    # as two problems. No project file: an explicit skip, never a silent pass.
+    from ..readers import kicad_pro as _kpro
+    pro_path = _kpro.find(sch_path.parent)
+    if pro_path is not None:
+        from .project import check_findings
+        gates.append(_gate("project",
+                           check_findings(pro_path, with_lib_audit=False)))
+        inputs["project"] = {"path": str(pro_path),
+                             "sha256": _sha256(pro_path)}
+    else:
+        gates.append(_skipped("project",
+                              "no .kicad_pro beside the --sch schematic"))
+
     # 5+6. board gates ----------------------------------------------------------
     pcb_path = getattr(args, "pcb", None)
     profile = None

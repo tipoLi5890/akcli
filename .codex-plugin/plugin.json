@@ -1,6 +1,6 @@
 {
   "name": "akcli",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "AI-native schematic design agent, purpose-built for KiCad (zero-dependency pure-stdlib Python CLI): author and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent/BOM checks, simulate on KiCad's bundled ngspice, source real parts and fetch datasheets, and import Altium .SchDoc/.SchLib/.PcbDoc read-only into the KiCad flow.",
   "author": {
     "name": "Li, ching yu",
@@ -28,7 +28,7 @@
   "interface": {
     "displayName": "akcli — AI-native KiCad design agent",
     "shortDescription": "Author & edit KiCad .kicad_sch from op-lists, run ERC/design checks, simulate on bundled ngspice, and import Altium schematics read-only into the KiCad flow.",
-    "longDescription": "Drives the zero-dependency `akcli` CLI: parse Altium .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch/.kicad_sym/.kicad_pcb into one normalized model, extract netlists, run ERC-lite / power-rail / BOM / pinmap / revision-diff checks, author and apply KiCad schematics from an op-list, and source real JLCPCB/LCSC parts. Bundles twelve task skills — akcli-circuit-design (core mechanics), akcli-schematic-authoring, akcli-schematic-review, akcli-circuit-debug, akcli-altium-interop, akcli-parts-sourcing, akcli-jlcpcb-capabilities, akcli-design-calc (60 standards-cited engineering calculators), akcli-setup (environment probe/repair via `akcli doctor`), akcli-datasheet-facts (audited PDF-pinned facts extraction), akcli-deep-review (LLM candidates gated by `review validate`), and akcli-release-gating (preflight manifest + calibrated blocking policy). KiCad is the writable target; Altium .SchDoc/.SchLib/.PcbDoc are read/imported into the same model — it is not a symmetric Altium↔KiCad converter.",
+    "longDescription": "Drives the zero-dependency `akcli` CLI: parse Altium .SchDoc/.SchLib/.PcbDoc and KiCad .kicad_sch/.kicad_sym/.kicad_pcb into one normalized model, extract netlists, run ERC-lite / power-rail / BOM / pinmap / revision-diff checks, scaffold a complete KiCad project (.kicad_pro / blank .kicad_pcb container / lib tables), author and apply KiCad schematics from an op-list, and source real JLCPCB/LCSC parts. Bundles thirteen task skills — akcli-circuit-design (core mechanics), akcli-schematic-authoring, akcli-net-naming, akcli-schematic-review, akcli-circuit-debug, akcli-altium-interop, akcli-parts-sourcing, akcli-jlcpcb-capabilities, akcli-design-calc (60 standards-cited engineering calculators), akcli-setup (environment probe/repair via `akcli doctor`), akcli-datasheet-facts (audited PDF-pinned facts extraction), akcli-deep-review (LLM candidates gated by `review validate`), and akcli-release-gating (preflight manifest + calibrated blocking policy). KiCad is the writable target; Altium .SchDoc/.SchLib/.PcbDoc are read/imported into the same model — it is not a symmetric Altium↔KiCad converter.",
     "developerName": "Li, ching yu",
     "category": "Developer Tools",
     "capabilities": [

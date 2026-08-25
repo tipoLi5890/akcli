@@ -65,3 +65,34 @@ def test_example_applies_and_matches_pinned_nets(exdir, tmp_path, capsys):
 def test_example_readme_shows_the_apply_command(exdir):
     text = (exdir / "README.md").read_text(encoding="utf-8")
     assert "akcli draw" in text and "--apply" in text
+
+
+# --------------------------------------------------------------------------- #
+# packaged mirror — `project new --example` ships these inside the wheel
+# --------------------------------------------------------------------------- #
+def test_packaged_example_mirror_matches_the_corpus():
+    """``src/akcli/examples/<name>/ops.json`` is byte-identical to the corpus.
+
+    Same failure class ``tools/schemas.py`` guards for the JSON schemas: a
+    stale mirror is invisible from the repo (where tests read
+    ``examples/circuits/``) while every installed wheel hands users yesterday's
+    op-list. Refresh with ``python3 tools/examples_mirror.py build``.
+    """
+    from akcli import examples as packaged
+
+    corpus = {d.name: (d / "ops.json").read_bytes() for d in EXAMPLES
+              if (d / "ops.json").is_file()}
+    mirror = {name: packaged.ops_path(name).read_bytes()
+              for name in packaged.names()}
+    assert mirror == corpus, (
+        "packaged example mirror drifted — run `python3 "
+        "tools/examples_mirror.py build`")
+
+
+def test_packaged_example_lookup_rejects_paths():
+    """``--example`` names are matched against the roster, never path-joined."""
+    from akcli import examples as packaged
+
+    assert packaged.ops_path("../../etc/passwd") is None
+    assert packaged.ops_path("nope") is None
+

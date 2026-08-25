@@ -46,7 +46,10 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
    to reserve space before placing. An `add_text`/`add_text_box`/`add_rectangle` `key` must be
    unique within the op-list — the validator refuses duplicates (both ops would seed one uuid).
    `add_sheet`'s child `.kicad_sch` must already exist — `akcli new <child>.kicad_sch` first, or
-   the op is refused with `SHEET_FILE_MISSING`. For a multi-sheet edit, add
+   the op is refused with `SHEET_FILE_MISSING` — or set `"create": true` on the op to have the
+   same draw write a blank child stub in the same transaction (an existing child is never
+   touched; this puts even a single-file op-list on the multi-sheet transaction path, recovered
+   with `akcli undo <root> --run <run_id> --apply`). For a multi-sheet edit, add
    `"sheets": {"<key>": {"file": "<child>.kicad_sch"}}` to the envelope and tag ops with
    `"sheet": "<key>"` — an undeclared tag is `SHEET_UNKNOWN`. A sheet instantiated more than
    once refuses a scalar designator (`INSTANCE_REFS_REQUIRED` — the error lists the instance

@@ -92,6 +92,11 @@ structured netlist model use `akcli net --json` instead. All exports are
 deterministically sorted; unnamed nets are named by membership-derived `stable_id`,
 so re-exports are diffable.
 
+Once you have read an Altium design, continue development in KiCad with `akcli
+project new <dir>` (fresh project) or `akcli project init <dir>` (a
+`.kicad_sch` from an earlier conversion is already there) — Altium stays
+import-only, so this is where the design actually moves forward.
+
 ## Getting changes INTO Altium
 
 `akcli` has **no Altium write path at all** — on any OS, offline or live. (The

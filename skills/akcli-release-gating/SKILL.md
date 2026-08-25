@@ -25,7 +25,10 @@ akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profil
 ```
 
 Gates, in order: `check` (ERC/power/BOM/nets) → `intent` → `contract` →
-`library-audit` → `sch-pcb` → `fab` → `order` → **`sim`** (`--sim` sim.json;
+`library-audit` → **`project`** (a `.kicad_pro` beside `--sch`; the same
+`project check` findings, library auditing switched off there so
+`library-audit` above isn't reported twice — no project file skips with a
+reason) → `sch-pcb` → `fab` → `order` → **`sim`** (`--sim` sim.json;
 quantitative SPICE assertions) → **`review`** (policy-gated) → **`gerber`**
 (fab package) → `git` (clean worktree; `--allow-dirty` records instead of
 failing).

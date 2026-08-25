@@ -28,7 +28,8 @@ __all__ = [
     "node_uuid",
     "seed_symbol", "seed_symbol_pin", "seed_wire", "seed_junction",
     "seed_no_connect", "seed_bus_entry", "seed_label", "seed_sheet",
-    "seed_sheet_pin", "seed_annotation_key", "seed_annotation_coords",
+    "seed_sheet_file", "seed_sheet_pin", "seed_annotation_key",
+    "seed_annotation_coords",
 ]
 
 _SEED_SUFFIX = ":0"     # historical; removing it re-identifies every node
@@ -82,6 +83,20 @@ def seed_label(tag: str, name: str, anchor_seed: str) -> str:
 
 def seed_sheet(file_name: str, name: str) -> str:
     return f"sheet:{file_name}:{name}"
+
+
+def seed_sheet_file(file_name: str) -> str:
+    """``sheetfile:<child.kicad_sch>`` — the ROOT uuid of a child sheet file
+    that ``add_sheet {"create": true}`` writes for the first time.
+
+    The only seed here that identifies a FILE rather than a node inside one,
+    and the same red line applies: it is derived from the PARENT document's
+    root uuid plus the Sheetfile string exactly as the op wrote it, never from
+    randomness or an op index. That is what makes ``draw`` (plan) and
+    ``draw --apply`` agree on the child's identity, and what keeps a
+    re-created child re-identifying every node inside it.
+    """
+    return f"sheetfile:{file_name}"
 
 
 def seed_sheet_pin(file_name: str, name: str, pin_name: str) -> str:

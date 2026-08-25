@@ -57,14 +57,18 @@ Full details, per-agent setup, and troubleshooting in [INSTALL.md](INSTALL.md).
 
 ## Quickstart
 
-Read a design, check it, and draw into it — straight from the shell:
+Scaffold a real KiCad project with a worked example, then read, check, and draw into it — straight
+from the shell:
 
 ```bash
-akcli read  board.kicad_sch --summary                            # normalized JSON, context-budgeted
-akcli check board.kicad_sch                                      # ERC-lite + power + BOM + connectivity + integrity
-akcli draw  board.kicad_sch --ops ops.json                       # dry-run: shows changes + net diff
-akcli draw  board.kicad_sch --ops ops.json --apply --strict-nets # atomic write + verify + backup
-akcli undo  board.kicad_sch                                      # revert the last write
+akcli project new demo --example voltage-divider                  # .kicad_pro/.kicad_sch/.kicad_pcb/lib tables/ops.json
+cd demo
+akcli read  demo.kicad_sch --summary                              # normalized JSON, context-budgeted
+akcli check demo.kicad_sch                                        # ERC-lite + power + BOM + connectivity + integrity
+akcli draw  demo.kicad_sch --ops ops.json                         # dry-run: shows changes + net diff
+akcli draw  demo.kicad_sch --ops ops.json --apply --strict-nets   # atomic write + verify + backup
+akcli project check                                               # project-integrity findings (still 0)
+akcli undo  demo.kicad_sch                                        # revert the last write
 ```
 
 Every write is a dry run by default; `--apply` goes through an atomic snapshot → temp → verify →
@@ -79,7 +83,7 @@ One normalized model behind every command, so each check, diff, and report works
 | Command | What it does |
 |---|---|
 | `read` · `net` · `component` · `pins` | Parse KiCad or Altium into one normalized JSON model; query nets (whole-net or pin-level: `net --at` / `--same` / `--why`), components, and pin coordinates. |
-| `new` · `plan` · `draw` · `ops` · `arrange` | Author a `.kicad_sch` — a root file, a child sheet, or **several sheets in one atomic transaction** (the `sheets` envelope + per-op `sheet` routing, with run backups and `undo --run`) — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate evaluated over the **whole sheet tree** and one-command `undo`; `ops from-intent` compiles a design document (declared nets + components) straight into an op-list. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
+| `project` · `new` · `plan` · `draw` · `ops` · `arrange` | Scaffold a complete KiCad project (`.kicad_pro`/`.kicad_pcb`/lib tables, optionally `--example NAME`) from scratch, or adopt an existing `.kicad_sch` into one (`project new`/`project init`), inspect what it binds (`project info`) and gate its integrity (`project check`), then author it — a root file, a child sheet, or **several sheets in one atomic transaction** (the `sheets` envelope + per-op `sheet` routing, with run backups and `undo --run`) — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate evaluated over the **whole sheet tree** and one-command `undo`; `ops from-intent` compiles a design document (declared nets + components) straight into an op-list. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
 | `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + document-integrity + intent / contract checks, schematic ↔ PCB equivalence, net-membership diff, MCU pin → net map. |
 | `review` | Advisory, confidence-graded design review across six detector families (signal / validation / pcb / emc / domain / gerber); DNP parts satisfy no rule. |
 | `sim` | Render to a SPICE deck and assert on KiCad's bundled ngspice; sweep corners; fit diode models from datasheet points. Component values are normalized, or refused rather than guessed. |
@@ -158,7 +162,11 @@ by the core loop:
 
 ## Roadmap
 
-**Shipped (v0.20.0):** KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical `add_sheet`,
+**Shipped (v0.22.0):** complete KiCad project scaffolding — `project new` / `project init` write the
+`.kicad_pro`, a blank `.kicad_pcb` board container, the project lib tables and a `.gitignore` around a
+root sheet (`--example NAME` drops in a worked op-list), while `project info` / `project check` read
+and gate what the project binds — KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical
+`add_sheet`, optionally creating the child sheet inside the same transaction with `"create": true`,
 writes into a child sheet of an existing hierarchy and across several sheets in one atomic
 transaction, a net-diff safety rail evaluated over the whole sheet tree, per-instance references on
 a reused sheet, `new` / multi-level `undo` / `undo --run`), net-preserving `arrange --groups` re-layout, the advisory `akcli review` engine (six
