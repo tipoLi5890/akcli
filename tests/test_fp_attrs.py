@@ -188,8 +188,8 @@ def test_a_reader_that_cannot_know_keeps_the_defaults():
 def _exe_with_pcb_upgrade() -> str:
     exe = kicad_cli.find()
     assert exe is not None
-    if (kicad_cli.version() or (0,))[0] < 9:
-        pytest.skip("this kicad-cli predates `pcb upgrade` (KiCad 9)")
+    if (kicad_cli.version() or (0,))[0] < 10:
+        pytest.skip("this kicad-cli predates `pcb upgrade` (KiCad 10)")
     return exe
 
 

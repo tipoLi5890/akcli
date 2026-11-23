@@ -31,7 +31,7 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
-## [0.23.0] - 2026-10-12
+## [0.23.0] - 2026-11-23
 
 A design-integrity hardening release: the verification side grows — KiCad DRC,
 a library baseline, a PCB ↔ library check and tree-scoped integrity join the
@@ -228,6 +228,8 @@ macros; `protocol_version` is unchanged. The export `schema_version` moves
 
 ### Fixed
 
+- CI: the KiCad job silently ran KiCad 9 after `ubuntu-latest` moved to 26.04;
+  it is pinned to `ubuntu-24.04` and now fails unless `kicad-cli` is 10.x.
 - `check --integrity` could not see a duplicate designator in or among child
   sheets, nor a missing grandchild; `project check` reported one missing child
   sheet twice.

@@ -49,6 +49,9 @@ _VERSION = kicad_cli.version() if _EXE is not None else None
 needs_stats = pytest.mark.skipif(
     _VERSION is not None and _VERSION < (10,),
     reason="this kicad-cli predates `pcb export stats` (KiCad 10)")
+needs_pcb_upgrade = pytest.mark.skipif(
+    _VERSION is not None and _VERSION < (10,),
+    reason="this kicad-cli predates `pcb upgrade` (KiCad 10)")
 
 KICAD10_BOARDS = ["outline_cutouts", "outline_circle", "outline_poly_arc",
                   "outline_rect_radius", "outline_open", "outline_footprint",
@@ -197,6 +200,7 @@ def _facts(pcb) -> dict:
 
 
 @needs_cli
+@needs_pcb_upgrade
 @pytest.mark.parametrize("name", ["legacy_v5", "tenting_v9"])
 def test_legacy_input_resaves_to_what_the_reader_already_sees(tmp_path, name):
     source = FAB / f"{name}.kicad_pcb"
@@ -213,6 +217,7 @@ def test_legacy_input_resaves_to_what_the_reader_already_sees(tmp_path, name):
 
 
 @needs_cli
+@needs_pcb_upgrade
 def test_kicad9_named_tenting_sides_survive_a_resave(tmp_path):
     """Per-via KiCad 9 tokens: a NAMED side is tented in both readings; an
     unnamed side is the one thing akcli declines to decide (see the reader)."""
@@ -227,6 +232,7 @@ def test_kicad9_named_tenting_sides_survive_a_resave(tmp_path):
 
 
 @needs_cli
+@needs_pcb_upgrade
 @pytest.mark.parametrize("on_mask, tented", [("true", False), ("false", True)])
 def test_viasonmask_migrates_to_board_tenting(tmp_path, on_mask, tented):
     """KiCad <= 8 kept "do not tent vias" as a plot option; kicad-cli moves it

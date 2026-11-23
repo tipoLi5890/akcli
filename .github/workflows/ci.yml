@@ -204,7 +204,10 @@ jobs:
   # ---------------------------------------------------------------------------
   kicad-cli:
     name: kicad-cli (ubuntu + KiCad 10)
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: the 26.04 image resolves apt through amd64v3 indexes,
+    # the KiCad PPA publishes no kicad package there, and apt silently installs
+    # the distro's KiCad 9 instead.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -216,8 +219,15 @@ jobs:
           sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends kicad
-      - name: kicad-cli version
-        run: kicad-cli version
+      - name: kicad-cli version (must be 10.x)
+        run: |
+          set -euo pipefail
+          ver="$(kicad-cli version)"
+          echo "$ver"
+          case "$ver" in
+            10.*) ;;
+            *) echo "::error::expected KiCad 10.x, got: $ver" >&2; exit 1 ;;
+          esac
       - name: Install libngspice (sim engine live tests)
         run: |
           set -euo pipefail
