@@ -1,0 +1,10 @@
+{
+ "nets": [
+  {"name": "3V3", "members": ["J1.1", "R1.1", "R2.1"]},
+  {"name": "GND", "members": ["J1.4"]},
+  {"name": "SCL", "members": ["J1.3", "R2.2", "R4.2"]},
+  {"name": "SCL_MCU", "members": ["R4.1"]},
+  {"name": "SDA", "members": ["J1.2", "R1.2", "R3.2"]},
+  {"name": "SDA_MCU", "members": ["R3.1"]}
+ ]
+}

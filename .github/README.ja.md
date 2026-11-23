@@ -2,7 +2,7 @@
 
 <img src="../docs/assets/hero.png" alt="akcli — 人と AI エージェントのための KiCad ネイティブ設計 CLI" width="820">
 
-<p><strong>AI ネイティブな回路図設計、KiCad のために作られた依存ゼロ（純 Python 標準ライブラリ）の CLI。</strong></p>
+<p><strong>AI が書いた KiCad 回路図を安心して適用できるようにする検証レイヤー — 依存ゼロ（純 Python 標準ライブラリ）の CLI。</strong></p>
 
 <p>
   <a href="https://github.com/joanbono/awesome-kicad"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome KiCad"></a>
@@ -20,7 +20,8 @@
 
 **akcli** は、**KiCad 上で AI ネイティブな回路図設計**を行うための依存ゼロの Python CLI です。あなた自身でも
 **任意の AI エージェント**でも端から端まで駆動できる、スクリプト化された設計ループを提供します（Claude
-Code・Codex・OpenCode 向けのプラグイン／skills を同梱していますが、shell さえあれば動きます）。JSON の
+Code・Codex・OpenCode 向けのプラグイン／skills を同梱していますが、shell さえあれば動きます）。書き込みは機能であり、検証こそが安心して使える理由です —
+すべての編集は既定で dry-run、net diff と接続性ゲートを通ります。JSON の
 op-list から `.kicad_sch` を生成し、ERC／設計レビュー／BOM／回路図 ↔ PCB のチェックを実行し、ngspice で
 シミュレーションし、実際に発注できる JLCPCB/LCSC 部品を検索できます。既存の Altium `.SchDoc` / `.SchLib`
 / `.PcbDoc` / `.PcbLib` 設計は読み取り専用でインポートでき——KiCad フローへの入口として機能します。以降の
@@ -84,12 +85,12 @@ akcli undo  demo.kicad_sch                                        # 直前の書
 |---|---|
 | `read` · `net` · `component` · `pins` | KiCad または Altium を単一の正規化 JSON モデルに解析。net（net 全体、またはピン単位の `net --at`／`--same`／`--why`）・部品・ピン座標を照会。 |
 | `project` · `new` · `plan` · `draw` · `ops` · `arrange` | ゼロから完全な KiCad プロジェクト（`.kicad_pro`/`.kicad_pcb`/lib テーブル、`--example NAME` も可）を骨組みするか、既存の `.kicad_sch` をプロジェクトに取り込み（`project new`／`project init`）、その拘束内容を調べ（`project info`）、整合性をゲートし（`project check`）、そのうえでバージョン管理された **22 op + 10 マクロ**の JSON op-list から `.kicad_sch` を生成——ルートファイル、子シート、あるいは**1 回のアトミックなトランザクションで複数シートに書き込み**（`sheets` envelope + op ごとの `sheet` ルーティング、run 単位のバックアップと `undo --run` 付き）。**sheet tree 全体**を対象に評価する net-diff の安全ゲートと 1 コマンドの `undo` が保護。`ops from-intent` は設計ドキュメント（宣言した nets + 部品）をそのまま op-list にコンパイル。シンボルは `--symbols`、設定のパス、最後にプロジェクトとグローバルの `sym-lib-table` から解決。 |
-| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + ドキュメント整合性 + intent／contract チェック、回路図 ↔ PCB の等価性、net メンバーシップ差分、MCU ピン → net マップ。 |
+| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + ドキュメント整合性 + intent／contract チェック、回路図 ↔ PCB の等価性（`verify --library` は基板上の各フットプリントをライブラリの定義とも比較）、net メンバーシップ差分、MCU ピン → net マップ。 |
 | `review` | 6 つの検出器ファミリ（signal／validation／pcb／emc／domain／gerber）にわたる、確信度別のアドバイザリ設計レビュー。DNP 指定の部品はどのルールも満たしません。 |
 | `sim` | SPICE デッキにレンダリングし、KiCad 同梱の ngspice 上でアサート。コーナースイープ。データシートの点からダイオードモデルをフィッティング。部品値は正規化され、確実に解釈できない値は推測せず拒否します。 |
 | `jlc` | JLCPCB/LCSC を検索（在庫・価格・Basic／Extended）。部品をインプロセスで KiCad ライブラリに変換（電気タイプ付きピン、実際の `Value`）。データシートを取得。 |
 | `calc` | **60** 個の規格準拠オフライン計算機（E 系列、IPC-2221、インピーダンス、I²C プルアップ、buck／boost……）。各項目が根拠を明示。 |
-| `library` · `fab` · `release` | ライブラリワークスペースの監査／修復、ピン表からのシンボル生成（`new-symbol`——ピン表を渡せば akcli が座標を計算）と独立した lint（`lint-symbols`）+ 書き込みを拒否する同一座標ピン検査、バージョン管理された fab プロファイルのチェック、追跡可能な manifest を書き出す release preflight。 |
+| `library` · `fab` · `release` | ライブラリワークスペースの監査／修復、ピン表からのシンボル生成（`new-symbol`——ピン表を渡せば akcli が座標を計算）と独立した lint（`lint-symbols`）+ 書き込みを拒否する同一座標ピン検査、バージョン管理された fab プロファイルのチェック（同梱プロファイルは `fab profiles` で id 指定可能。基板の実際の外形・ビア・テンティング・プロジェクトの設計ルールを読み取ります）、コミット済みのライブラリベースライン（`library audit --write-baseline`）、ツール・gerber・プロファイルの証跡付きで追跡可能な manifest を書き出す release preflight（KiCad DRC を含む）。 |
 | `gate` | GUI 編集のたびに回す反復用の 4 チェックバンドル（フル `check` セット、intent アサーション、回路図 ↔ PCB `verify`、BOM ロックのドリフト——デフォルトはオフライン）。設定済みプロジェクトなら引数ゼロで実行でき、リリース級のゲートは引き続き `release preflight`。 |
 | `export` · `render` · `doc` · `view` | ネットリスト出力（Protel／KiCad／CSV——KiCad 形式は再インポートに必要な UUID sheetpath の同一性を保持）、純標準ライブラリの SVG レンダリング、Markdown のピンアウトブック、localhost の `/calc` + `/live` ダッシュボード。 |
 | `capabilities` · `schema` | 自己記述的なインターフェース manifest——全体、セクション単位（`--section`）、またはコマンド単位（`--command draw`）——と、クライアント側検証のためにバイト単位で出力される全 JSON Schema。 |
@@ -126,8 +127,8 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 - **バイト単位で同一な再適用。** 決定論的な UUIDv5 + その場置換により、すべての編集が冪等です——同じ
   op-list を再実行すると同じバイト列が生成されます。
 - **接続性が唯一のハード書き込みゲート。** すべての `plan`／`draw` は書き込み前後の net diff（分割・結合・
-  改名——名前ではなくピンのメンバーシップで照合）を表示します。`--strict-nets` は名前付き net を分割・
-  結合する書き込みを拒否します。
+  移動・改名——名前ではなくピンのメンバーシップで照合）を表示します。`--strict-nets` は名前付き net を分割・
+  結合・移動する書き込みを拒否します。
 - **信頼できる net 推論。** 再構築された net 層はグローバルな同名結合・junction・T 字接続・No-ERC マーカー
   を処理し——古典的な「同名 net が単一ピンの net に分割される」バグを修正します。
 
@@ -142,6 +143,7 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 |---|---|---|
 | アドバイザリな ERC セカンドオピニオン、`view live` の SVG | `kicad-cli`（ローカル実行ファイル） | 静かにスキップ——致命的ではなく、結果は元々アドバイザリです。 |
 | `sim` の実行（`--deck-only` は不要） | libngspice（KiCad 同梱） | `sim` は `NGSPICE_MISSING` で終了。その他は影響なし。 |
+| 標準シンボルのニックネーム（`Device:R`、`power:*`） | `kicad-cli` のインストール場所（`${KICAD*_SYMBOL_DIR}` を導出） | シンボルは明示的な `--symbols`／設定パスからのみ解決されます。 |
 | `jlc` の部品検索／データシート取得 | ネットワーク | **唯一**ネットワークを使うコマンド群。他はすべてオフライン。 |
 
 `akcli doctor` はこれらを個別に検査し、OS ごとの修復手順を表示します。
@@ -156,11 +158,22 @@ capabilities` は CLI 全体を単一の JSON ドキュメントで自己記述�
 | [design-integrity.md](../docs/design-integrity.md) | contract、fab プロファイル、release preflight |
 | [review-rules.md](../docs/review-rules.md) | 設計レビュールールのカタログ |
 | [sim.md](../docs/sim.md) | シミュレーションリファレンス |
+| [agent-state.md](../docs/agent-state.md) | ワークスペースの状態ファイルとマルチエージェント契約 |
+| [codex-plugin.md](../docs/codex-plugin.md) | Codex プラグインの構成と同梱スキル |
+| [jlc.md](../docs/jlc.md) | `akcli jlc`：部品検索、BOM の調達可否、データシート取得、JLCPCB 製造データ受け渡し |
+| [kicad-format-gotchas.md](../docs/kicad-format-gotchas.md) | 安全に編集するための KiCad ファイル形式のルール |
+| [pin-identity.md](../docs/pin-identity.md) | v1.0 に向けたピン識別モデルの監査 |
+| [migration-0.21.md](../docs/migration-0.21.md) | 0.21 契約への移行（`protocol_version` 2、schema 2.0） |
+| [releasing.md](../docs/releasing.md) | リリース手順書 |
+| [recipes/](../docs/recipes/README.md) | CI workflow レシピ（回路図 PR のゲート） |
+| [stability.md](../docs/stability.md) | 公開コントラクト面、コントラクト外の範囲、バージョン規則 |
 | [ROADMAP.md](../ROADMAP.md) | 受け入れ基準付きの v1.0 ロードマップ |
 
 ## ロードマップ
 
-**提供済み（v0.22.0）：** 完全な KiCad プロジェクトのスキャフォールド——`project new`／`project init` が
+**提供済み（v0.23.0）：** リリースゲートに KiCad DRC、コミット済みのライブラリベースライン、PCB ↔ ライブラリ
+チェック、sheet tree 全体の整合性チェックが加わり、`fab check` は基板の実際の外形・ビア・テンティング・
+プロジェクトの設計ルールを読み取ります。あわせて、完全な KiCad プロジェクトのスキャフォールド——`project new`／`project init` が
 ルートシートの隣に `.kicad_pro`、空の `.kicad_pcb` 基板コンテナ、プロジェクトの lib テーブル、`.gitignore` を
 書き出し（`--example NAME` で実例の op-list も同梱）、`project info`／`project check` がそのプロジェクトの
 束縛内容を読み取り・ゲートします。22 op + 10 マクロの語彙からの KiCad 書き込み／描画（階層 `add_sheet`、
@@ -179,7 +192,8 @@ datasheet facts store、`propose`／`tree`／`validate`）、ERC／power／BOM�
 `kicad-cli` から導出され、`akcli doctor` がこの解決がこの環境で動作するかを報告します。
 
 **今後（→ v1.0）：** contract freeze 監査。最初の PyPI リリース（`pip install akcli-kicad`）は 0.15.0 で
-提供されました。*方針により保留：* 回路図 PR を判定する GitHub Action、`view` の波形パネル、ネイティブ
+提供されました。回路図 PR を判定する workflow レシピは [docs/recipes/](../docs/recipes/README.md) に収録されています。
+*方針により保留：* パッケージ化された Marketplace Action、`view` の波形パネル、ネイティブ
 MCP サーバー（現状はプレーン CLI がエージェントに対応）。完全な計画と受け入れ基準は
 [ROADMAP.md](../ROADMAP.md) を参照。
 

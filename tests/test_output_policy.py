@@ -144,6 +144,23 @@ def test_facts_default_resolves_through_single_choke_point():
     assert _files_containing(r'or "datasheets"') == set()
 
 
+def test_library_baseline_defaults_beside_the_project(tmp_path):
+    # DELIVERABLE-class: the baseline is a committed record a release gate
+    # compares against, so it defaults beside the .kicad_pro — never under
+    # the self-ignored .akcli/ state root, never into a per-user cache
+    from akcli import config, library_baseline, libtable
+    from akcli.commands.library import _baseline_path
+    ws = libtable.discover(tmp_path)
+    cfg = config.Config()
+    default = _baseline_path(ws, cfg, "")
+    assert default == tmp_path / library_baseline.DEFAULT_FILENAME
+    assert ".akcli" not in default.parts
+    # precedence: explicit FILE > [paths].library_baseline > the default
+    cfg.paths["library_baseline"] = str(tmp_path / "rel" / "libs.json")
+    assert _baseline_path(ws, cfg, "") == tmp_path / "rel" / "libs.json"
+    assert _baseline_path(ws, cfg, "x.json") == Path("x.json")
+
+
 def test_cwd_default_literal_census():
     # `Path("datasheets")` is only the documented back-compat probe in the
     # review facts commands; `akcli-parts` is only the jlc add deliverable
@@ -151,3 +168,7 @@ def test_cwd_default_literal_census():
     # classify it per SPEC §10 and extend this census deliberately.
     assert _files_containing(r'Path\("datasheets"\)') == {"commands/review.py"}
     assert _files_containing(r"akcli-parts") == {"commands/jlc.py"}
+    # the library-baseline default NAME is one constant (help texts may
+    # mention it inside a sentence; only this module holds it as a value)
+    assert _files_containing(r'"akcli-library\.baseline\.json"') == {
+        "library_baseline.py"}

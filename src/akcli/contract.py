@@ -30,7 +30,7 @@ __all__ = ["SCHEMA_VERSIONS", "PROTOCOL_VERSIONS", "JOURNAL_VERSION"]
 
 SCHEMA_VERSIONS: Final[dict[str, str]] = {
     # normalized model exports (model.SCHEMA_VERSION is an alias of these)
-    "schematic": "2.0",
+    "schematic": "2.1",
     "netlist": "2.0",
     # per-family payloads
     "doc": "1",
@@ -40,6 +40,8 @@ SCHEMA_VERSIONS: Final[dict[str, str]] = {
     "facts": "1.0",
     "proposals": "1.0",
     "bom-lock": "1",
+    # the committed library baseline (akcli-library.baseline.json)
+    "library-baseline": "1.0",
     # the generic envelope stamp (_stamp default / error envelope / small
     # hand-built payloads: library audit, release preflight, render summary)
     "envelope": "1",

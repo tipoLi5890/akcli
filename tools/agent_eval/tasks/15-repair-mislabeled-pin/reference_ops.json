@@ -1,0 +1,9 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "delete_object", "match": {"kind": "label", "name": "SDA", "at": [2700, 2050]}},
+  {"op": "add_net_label", "at": "J1.3", "name": "SCL"}
+ ]
+}

@@ -85,9 +85,12 @@ akcli jlc add C2040 --footprint-lib proj_jlc --3d-path relative
 ```
 
 `--footprint-lib NICKNAME` sets the fp-lib-table nickname written into the symbol's
-Footprint field (and the footprint output directory) — the default hardcoded `footprint`
-is the **#1 cause of "KiCad can't find footprint"**; set it to the nickname your
-project's fp-lib-table actually registers. `--3d-path {relative|absolute|'${VAR}'}`
+Footprint field (and the footprint output directory). Without it the footprints go to
+`<out>/footprint/` and the nickname is the one project `fp-lib-table` entry whose URI
+resolves to that directory; with no such entry (or several) it stays `footprint` — the
+**#1 cause of "KiCad can't find footprint"** — and stderr prints the exact `(lib …)` line
+to add to the table. Read `footprint_lib_source` in `--json` (`flag` | `fp-lib-table` |
+`default`): `default` means the table still needs that line. `--3d-path {relative|absolute|'${VAR}'}`
 is a portability trade-off: `relative` (default) only resolves next to the library,
 `absolute` always resolves on this machine but breaks on another, and a `${VAR}`
 prefix resolves portably via a KiCad path variable.
@@ -133,7 +136,8 @@ akcli component board.kicad_sch U1             # confirm the placed part's pin -
 - Run `akcli library audit <project>` to cross-check sym/fp-lib-table ↔ schematic ↔ footprint ↔
   3D. Fix any `FOOTPRINT_LIB_UNREGISTERED`/`MODEL_MISSING` finding with
   `akcli library repair <project> --rename-footprint-lib OLD=NEW --3d-path absolute --apply`
-  (leaves a `.bak`, then re-audits) instead of manual `sed`.
+  (leaves a `.bak`, then re-audits — exit `1` if an ERROR remains in a repaired file) instead
+  of manual `sed`.
 - **No catalog symbol? Author one from the datasheet's pin table — never by hand-writing
   S-expressions.** Transcribing a pin table is the part you do reliably; laying out coordinates is
   not, and that failure is silent: two pins on one connection point make KiCad join them into a

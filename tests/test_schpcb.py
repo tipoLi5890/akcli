@@ -160,3 +160,100 @@ def test_cli_verify_fails_on_mismatch(pair, capsys):
     sch, pcb = pair
     pcb.write_text(_PCB.replace('(net 1 "MID"))', '(net 3 "B"))'))
     assert main(["verify", str(sch), str(pcb)]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# refs + config [[waiver]] entries (applied by `verify` as by `check`)
+# --------------------------------------------------------------------------- #
+_PAD_R2_1 = '(pad "1" smd rect (at -0.5 0) (size 0.5 0.5) (layers "F.Cu") (net 1 "MID"))'
+
+
+def _swap_r2_footprint(pcb: Path) -> None:
+    pcb.write_text(_PCB.replace(
+        '(footprint "jlc:R_0402" (layer "F.Cu") (at 60 50 0)',
+        '(footprint "jlc:R_0603" (layer "F.Cu") (at 60 50 0)'))
+
+
+def _waive(directory: Path, *entries: str) -> None:
+    (directory / "akcli.toml").write_text(
+        "\n".join(f"[[waiver]]\n{e}\n" for e in entries),
+        encoding="utf-8", newline="\n")
+
+
+def test_findings_carry_the_refs_a_waiver_scopes_on(pair):
+    sch, pcb = pair
+    _swap_r2_footprint(pcb)
+    assert [f.refs for f in _run(sch, pcb)] == [["R2"]]       # the component
+
+    pcb.write_text(_PCB.replace(
+        '    (pad "2" smd rect (at 0.5 0) (size 0.5 0.5) (layers "F.Cu") (net 3 "B")))',
+        "  )"))
+    assert [f.refs for f in _run(sch, pcb)] == [["R2.2"]]     # REF.PIN
+
+    pcb.write_text(_PCB.replace(_PAD_R2_1, _PAD_R2_1.replace('1 "MID"', '3 "B"')))
+    by_code = {f.code: f.refs for f in _run(sch, pcb)}
+    assert by_code["SCHPCB_NET_SPLIT"] == ["MID"]             # the schematic net
+    merge = by_code["SCHPCB_NET_MERGE"]
+    assert merge[0] == "B" and "MID" in merge[1:]             # board net first
+
+
+def test_cli_verify_waiver_by_designator(pair, capsys):
+    sch, pcb = pair
+    _swap_r2_footprint(pcb)
+    assert main(["verify", str(sch), str(pcb), "--json"]) == 1
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["equivalent"] is False
+    assert doc["config_waived"] == "0 (0 demoted)" and doc["waived"] == []
+    assert doc["findings"][0]["refs"] == ["R2"]
+
+    # discovered by walking up from the schematic's directory, as in `check`
+    _waive(sch.parent, 'code = "SCHPCB_FOOTPRINT_MISMATCH"\nrefs = ["R2"]\n'
+                       'reason = "0603 rework approved"')
+    assert main(["verify", str(sch), str(pcb), "--json"]) == 0
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert doc["equivalent"] is True and doc["findings"] == []
+    assert doc["config_waived"] == "1 (0 demoted)"
+    assert doc["waived"] == [{"code": "SCHPCB_FOOTPRINT_MISMATCH", "refs": ["R2"],
+                              "action": "dropped", "reason": "0603 rework approved"}]
+    assert ("waived: SCHPCB_FOOTPRINT_MISMATCH [R2] dropped — 0603 rework approved"
+            in io.err)
+
+    # text mode: a waiver-cleaned PASS says so instead of "all match"
+    assert main(["verify", str(sch), str(pcb)]) == 0
+    out = capsys.readouterr().out
+    assert "config-waived: 1 (0 demoted)" in out
+    assert "every finding was config-waived" in out and "all match" not in out
+
+
+@pytest.mark.parametrize("entry", [
+    'code = "SCHPCB_FOOTPRINT_MISMATCH"\nrefs = ["R1"]',      # another component
+    'code = "SCHPCB_VALUE_MISMATCH"\nrefs = ["R2"]',          # another code
+    'code = "SCHPCB_FOOTPRINT_MISMATCH"\nrefs = ["MID"]',     # a net, not a ref
+])
+def test_cli_verify_non_matching_waiver_waives_nothing(pair, capsys, entry):
+    sch, pcb = pair
+    _swap_r2_footprint(pcb)
+    _waive(sch.parent, entry)
+    assert main(["verify", str(sch), str(pcb), "--json"]) == 1
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert doc["equivalent"] is False
+    assert doc["config_waived"] == "0 (0 demoted)" and "waived:" not in io.err
+
+
+def test_cli_verify_waiver_by_net_and_demotion(pair, capsys):
+    sch, pcb = pair
+    pcb.write_text(_PCB.replace(_PAD_R2_1, _PAD_R2_1.replace('1 "MID"', '3 "B"')))
+    assert main(["verify", str(sch), str(pcb)]) == 1
+    capsys.readouterr()
+
+    # a net-scoped waiver; demotion keeps the finding visible as a NOTE
+    _waive(sch.parent, 'code = "SCHPCB_NET_*"\nrefs = "MID"\nseverity = "note"')
+    assert main(["verify", str(sch), str(pcb), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["equivalent"] is True                 # no ERROR left
+    assert doc["config_waived"] == "2 (2 demoted)"
+    assert {f["severity"] for f in doc["findings"]} == {"note"}
+    assert {f["code"] for f in doc["findings"]} == {"SCHPCB_NET_SPLIT",
+                                                    "SCHPCB_NET_MERGE"}

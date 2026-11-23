@@ -6,14 +6,14 @@ discover, install, and load them as one unit — no manual copying of skill fold
 
 Spec reference: <https://developers.openai.com/codex/plugins/build>
 
-## What was added
+## What the plugin provides
 
 | File | Role |
 |---|---|
 | `.codex-plugin/plugin.json` | The Codex **plugin manifest** (required). Declares name/version/metadata and points at the bundled skills and hooks. |
 | `.agents/plugins/marketplace.json` | A **repo-scoped marketplace catalog** so Codex can find and install this plugin straight from the repo. |
 
-Nothing else moved. The manifest **reuses the existing directories** — the Codex skill
+The manifest **reuses the existing directories** — the Codex skill
 format (`skills/<name>/SKILL.md` with YAML `name` + `description` frontmatter) is identical
 to the Claude skill format, and the Codex hook format matches `hooks/hooks.json` as-is. So
 one set of skills serves Claude Code, Codex, and OpenCode.

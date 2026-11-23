@@ -487,15 +487,128 @@ _ADD_EXIT = {
 }
 
 
-def _build_place_oplist(result, args, value: str | None) -> dict | None:
-    """Thin arg-unpacking wrapper over :func:`akcli.parts.place_oplist.build_place_oplist`."""
+def _build_place_oplist(result, args, value: str | None,
+                        footprint_lib: str) -> dict | None:
+    """Thin arg-unpacking wrapper over :func:`akcli.parts.place_oplist.build_place_oplist`.
+
+    ``footprint_lib`` is the nickname the add RESOLVED (flag, fp-lib-table or
+    default), so the placed instance and the library symbol agree on it.
+    """
     from ..parts import place_oplist
 
     return place_oplist.build_place_oplist(
         result,
         lib_name=getattr(args, "lib_name", None) or "akcli",
-        footprint_lib=getattr(args, "footprint_lib", None) or "footprint",
+        footprint_lib=footprint_lib,
         designator=args.designator, at=args.at, value=value)
+
+
+# The footprint directory (and, failing a better answer, the nickname) of an
+# add without --footprint-lib — the converter's historic default.
+_DEFAULT_FP_LIB = "footprint"
+
+
+def _fp_lib_line(nick: str, uri: str) -> str:
+    """The fp-lib-table entry registering ``uri`` as ``nick`` (KiCad's shape)."""
+    from ..sexpr.writer import quote
+
+    return (f'(lib (name {quote(nick)})(type "KiCad")(uri {quote(uri)})'
+            '(options "")(descr ""))')
+
+
+def _free_nickname(base: str, taken: set[str]) -> str:
+    """``base`` (made nickname-safe), suffixed until no table entry has it."""
+    import re
+
+    base = re.sub(r"[^A-Za-z0-9_.+-]", "_", base) or "jlc"
+    nick, n = base, 2
+    while nick in taken:
+        nick, n = f"{base}_{n}", n + 1
+    return nick
+
+
+def _footprint_nickname(fp_dir: Path) -> tuple[str, str, str]:
+    """Nickname for an add WITHOUT ``--footprint-lib``: ``(nick, source, note)``.
+
+    The footprints land in ``fp_dir`` either way; the question is what the
+    symbol's Footprint field must call that directory for KiCad to find them.
+    The nearest project ``fp-lib-table`` answers it when exactly ONE of its
+    entries points at ``fp_dir`` (``source`` ``"fp-lib-table"``). Otherwise the
+    historic ``footprint`` stays (``"default"``) and ``note`` — a stderr line,
+    ``""`` when there is nothing to do — says how to make it resolve. The
+    table is only ever READ: registering a library is the user's edit.
+
+    Best-effort by design: an unreadable table costs the lookup, not the add.
+    """
+    from .. import libtable
+    from ..sexpr.writer import quote
+
+    nick = _DEFAULT_FP_LIB
+    head = f"note: the symbol's Footprint field uses the nickname '{nick}:'"
+    project_dir, table_path = libtable.nearest_project_table(fp_dir)
+    target = fp_dir.resolve()
+    if project_dir is None:
+        uri = target.as_posix()                  # no project to be relative to
+    else:
+        rel = target.relative_to(project_dir).as_posix()
+        uri = "${KIPRJMOD}" if rel == "." else "${KIPRJMOD}/" + rel
+    if table_path is None:
+        where = (f"{project_dir} has no fp-lib-table. Register the library "
+                 "there" if project_dir is not None else
+                 "no KiCad project (fp-lib-table or .kicad_pro) was found at "
+                 f"or above {fp_dir}. Register the library in your project's "
+                 "fp-lib-table")
+        return nick, "default", (
+            f"{head}, and {where} with this line:\n  {_fp_lib_line(nick, uri)}")
+    try:
+        table = libtable.read_table(table_path)
+        matches = libtable.nicknames_for_dir(table, fp_dir)
+    except Exception as exc:                     # noqa: BLE001 — advisory lookup
+        return nick, "default", (
+            f"{head}; {table_path} could not be read ({exc}), so it was not "
+            "consulted. Once it is fixed, the line to register the library "
+            f"is:\n  {_fp_lib_line(nick, uri)}")
+    # The converter interpolates the nickname into the symbol unescaped, so a
+    # name that would need escaping is not one it can carry.
+    matches = [m for m in matches if quote(m) == f'"{m}"']
+    if len(matches) == 1:
+        return matches[0], "fp-lib-table", (
+            f"note: Footprint field nickname '{matches[0]}:' taken from "
+            f"{table_path} (its entry for {fp_dir})")
+    if nick in matches:
+        return nick, "default", ""               # registered as-is: resolves
+    if matches:
+        return nick, "default", (
+            f"{head}; {table_path} registers {fp_dir} under {len(matches)} "
+            f"nicknames ({', '.join(matches)}), so none was picked. Rewrite "
+            "the field with one of them: akcli library repair "
+            f"{project_dir} --rename-footprint-lib {nick}={matches[0]} --apply")
+    if table.get(nick) is None:
+        return nick, "default", (
+            f"{head}, which {table_path} does not register. Add this line "
+            f"to it:\n  {_fp_lib_line(nick, uri)}")
+    free = _free_nickname(target.parent.name, {e.name for e in table.entries})
+    return nick, "default", (
+        f"{head}, which {table_path} registers for a different directory. "
+        "Add this line to it, then re-run with --force so the symbol picks "
+        f"the nickname up:\n  {_fp_lib_line(free, uri)}")
+
+
+def _add_overwrite_targets(out_dir: Path, lib_name: str, fp_lib: str, *,
+                           footprints: bool) -> list[Path]:
+    """EXISTING library files a `jlc add` into ``out_dir`` can rewrite.
+
+    The symbol library is rewritten in place by every add (the converter
+    appends the new symbol, or replaces it under ``--force``). An existing
+    footprint is only touched when ``footprints`` — ``--force`` overwrites it,
+    ``--3d-path absolute`` re-points its model path — and which one is not
+    known until the part has been fetched, so all of them are candidates.
+    A file that does not exist yet cannot be open in KiCad and is not listed.
+    """
+    targets = [out_dir / "symbol" / f"{lib_name}.kicad_sym"]
+    if footprints:
+        targets.extend(sorted((out_dir / fp_lib).glob("*.kicad_mod")))
+    return [t for t in targets if t.exists()]
 
 
 def _cmd_jlc_add(args: argparse.Namespace) -> int:
@@ -520,6 +633,29 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
         parts_root = _load_cfg(args, None).paths.get("parts_dir") or "akcli-parts"
         out_dir = str(Path(parts_root) / lcsc)
     with_3d = bool(getattr(args, "with_3d", False))
+    lib_name = getattr(args, "lib_name", None) or "akcli"
+    # --footprint-lib names BOTH the footprint directory and the nickname in
+    # the symbol's Footprint field. Left out, the directory keeps its historic
+    # name and the nickname is whatever the project's fp-lib-table calls that
+    # directory — two values from here on, never one.
+    fp_flag = getattr(args, "footprint_lib", None)
+    fp_dirname = fp_flag or _DEFAULT_FP_LIB
+    if fp_flag:
+        fp_nick, fp_source, fp_note = fp_flag, "flag", ""
+    else:
+        fp_nick, fp_source, fp_note = _footprint_nickname(
+            Path(out_dir) / fp_dirname)
+    model_path = getattr(args, "model_path", None) or "relative"
+    force = bool(getattr(args, "force", False))
+
+    # GUI-open guard, before the first network call: the same invariant as
+    # `draw --apply`, over the library files this add can rewrite.
+    from .. import safety
+    safety.refuse_if_gui_locked(
+        _add_overwrite_targets(Path(out_dir), lib_name, fp_dirname,
+                               footprints=force or model_path == "absolute"),
+        allow_open=bool(getattr(args, "allow_open", False)),
+        what="the library write")
 
     # Advisory EasyEDA lookup: what is being fetched + whether 3D exists.
     info = _enrich(lcsc)
@@ -531,27 +667,23 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
 
     from ..drivers import jlc2kicad  # lazy: vendored converter (networked)
 
-    fp_lib = getattr(args, "footprint_lib", None) or "footprint"
-    model_path = getattr(args, "model_path", None) or "relative"
     result = jlc2kicad.convert(
         lcsc,
         out_dir,
         with_3d=with_3d,
-        lib_name=getattr(args, "lib_name", None) or "akcli",
-        footprint_lib=fp_lib,
+        lib_name=lib_name,
+        footprint_lib=fp_dirname,
+        footprint_nickname=fp_nick,
         model_path=model_path,
-        force=bool(getattr(args, "force", False)),
+        force=force,
     )
 
     if result.error_code is not None:
         sys.stderr.write(f"ERROR: {result.error_code}: {result.message}\n")
         return _ADD_EXIT.get(result.error_code, EXIT["OPLIST"])
 
-    if fp_lib == "footprint":
-        sys.stderr.write(
-            "note: the symbol's Footprint field uses the nickname 'footprint:'; "
-            "pass --footprint-lib <nickname> to match your project's "
-            "fp-lib-table (or register the library as 'footprint').\n")
+    if fp_note:
+        sys.stderr.write(fp_note + "\n")
     if with_3d and model_path == "relative":
         sys.stderr.write(
             "note: 3D model paths are bare-relative (resolve only next to the "
@@ -566,7 +698,7 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
     place_doc = None
     place_path = None
     if place:
-        place_doc = _build_place_oplist(result, args, value)
+        place_doc = _build_place_oplist(result, args, value, fp_nick)
         if place_doc is not None:
             place_path = Path(out_dir) / "place.json"
             try:
@@ -580,6 +712,8 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
 
     if args.json:
         payload = _stamp(result.to_dict())
+        payload["footprint_lib"] = fp_nick
+        payload["footprint_lib_source"] = fp_source
         payload["note"] = _VERIFY_CAVEAT
         if place:
             payload["place"] = place_doc
@@ -588,6 +722,7 @@ def _cmd_jlc_add(args: argparse.Namespace) -> int:
         lines = [
             f"converted {lcsc} -> kicad (in-process, vendored JLC2KiCadLib)",
             f"out: {result.out_dir}",
+            f"footprint nickname: {fp_nick} ({fp_source})",
             "artifacts:",
         ]
         for a in result.artifacts:
@@ -726,12 +861,13 @@ def register(sub, common) -> None:
     pa.add_argument("--lib-name", metavar="NAME", default="akcli",
                     help="KiCad symbol library name (default: akcli)")
     pa.add_argument("--footprint-lib", dest="footprint_lib", metavar="NICKNAME",
-                    default="footprint",
+                    default=None,
                     help="fp-lib-table nickname written into the symbol's "
                          "Footprint field AND used as the footprint output "
-                         "directory (default: footprint) — set it to the "
-                         "nickname your project registers or KiCad will not "
-                         "find the package")
+                         "directory. Default: directory 'footprint', and the "
+                         "nickname of the ONE project fp-lib-table entry "
+                         "pointing at it — else 'footprint', with the table "
+                         "line to add printed on stderr")
     pa.add_argument("--3d-path", dest="model_path", metavar="MODE",
                     default="relative",
                     help="how footprints reference the 3D model: 'relative' "
@@ -741,6 +877,9 @@ def register(sub, common) -> None:
                          "(portable via a KiCad path variable)")
     pa.add_argument("--force", action="store_true",
                     help="overwrite existing artifacts")
+    pa.add_argument("--allow-open", dest="allow_open", action="store_true",
+                    help="write even when a KiCad GUI lock file is present "
+                         "next to an existing library file this add rewrites")
     pa.add_argument("--place", action="store_true",
                     help="also emit a place_component op-list")
     pa.add_argument("--designator", metavar="REF",

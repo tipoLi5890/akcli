@@ -1,0 +1,11 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "set_title_block", "title": "Sensor divider", "rev": "B", "company": "Example Labs", "comment1": "ECO-17: documentation only"},
+  {"op": "add_rectangle", "start": [1500, 1600], "end": [2700, 3000], "key": "frame_divider"},
+  {"op": "add_text", "text": "DIVIDER", "at": [1550, 1550], "key": "title_divider"},
+  {"op": "add_text_box", "text": "VMID = VIN x 10k / (5.1k + 10k)\nKeep C1 next to the ADC pin", "at": [3000, 1600], "size": [1600, 400], "key": "note_vmid"}
+ ]
+}

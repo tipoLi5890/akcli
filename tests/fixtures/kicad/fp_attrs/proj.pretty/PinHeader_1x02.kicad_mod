@@ -1,0 +1,80 @@
+(footprint "PinHeader_1x02"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0 -2 0)
+		(layer "F.SilkS")
+		(uuid "5e3d1b61-231f-45a4-a3d3-34bf84e46527")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "PinHeader_1x02"
+		(at 0 2 0)
+		(layer "F.Fab")
+		(uuid "3081393f-e9e2-4602-9bdc-1aed2580d201")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "a3c871c1-51b2-473f-a7e2-4b928168c89b")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "98482e43-f1b6-4804-a194-1e2c619fa084")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr through_hole)
+	(duplicate_pad_numbers_are_jumpers no)
+	(pad "1" thru_hole rect
+		(at 0 0)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "b27999f9-8454-43d8-828a-cb4f665ace6f")
+	)
+	(pad "2" thru_hole oval
+		(at 0 2.54)
+		(size 1.7 2.2)
+		(drill oval 1 1.5)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "f6e044ce-6435-4814-bb35-c2a73af2c533")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/3d/PinHeader_1x02.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

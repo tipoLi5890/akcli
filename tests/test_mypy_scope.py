@@ -27,7 +27,7 @@ _UNTYPED_PREFIXES = (
     "commands/", "webui/", "drivers/", "adapters/",
     "readers/",          # except sexpr.py (typed, listed in files)
     "writers/",          # except geometry.py / symbol_lib.py (incl. handlers/)
-    "checks/",           # except diff.py
+    "checks/",           # except diff.py / integrity.py
     "review/", "sim/",
     "sexpr/writer.py",
     # R7 half 2 split ops.py into the akcli.ops package (base/vocab/lints/

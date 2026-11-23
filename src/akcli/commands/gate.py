@@ -163,7 +163,9 @@ def _cmd_gate(args: argparse.Namespace) -> int:
         from ..checks import schpcb
         from ..readers import kicad as kreader
         pcb = kreader.read_pcb(str(pcb_path))
-        gates.append(_gate("sch-pcb", schpcb.run(sch, pcb)))
+        sp_findings, _w, _d = _report.apply_waivers(
+            schpcb.run(sch, pcb), cfg.waivers)
+        gates.append(_gate("sch-pcb", sp_findings))
     else:
         gates.append(_skipped(
             "sch-pcb", "no --pcb board given and no [paths].pcb configured"))

@@ -1,0 +1,107 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "",
+    "ignored_checks": [
+        {
+            "description": "Footprint has no courtyard defined",
+            "key": "missing_courtyard"
+        },
+        {
+            "description": "Track endpoint not centered on via",
+            "key": "track_not_centered_on_via"
+        },
+        {
+            "description": "Tuning profile track geometries",
+            "key": "tuning_profile_track_geometries"
+        },
+        {
+            "description": "Footprint doesn't match symbol's footprint filters",
+            "key": "footprint_filters_mismatch"
+        },
+        {
+            "description": "Footprint component type doesn't match footprint pads",
+            "key": "footprint_type_mismatch"
+        },
+        {
+            "description": "Footprint not found in libraries",
+            "key": "lib_footprint_issues"
+        },
+        {
+            "description": "Footprint doesn't match copy in library",
+            "key": "lib_footprint_mismatch"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning"
+    ],
+    "kicad_version": "10.0.4",
+    "schematic_parity": [],
+    "source": "drc_demo.kicad_pcb",
+    "unconnected_items": [
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "1 上 [+3V3] 的焊盤 R1 F.Cu",
+                    "pos": {
+                        "x": 99.49,
+                        "y": 100.0
+                    },
+                    "uuid": "00000000-0000-4000-8000-000000000111"
+                },
+                {
+                    "description": "1 上 [+3V3] 的焊盤 C1 F.Cu",
+                    "pos": {
+                        "x": 109.49,
+                        "y": 100.0
+                    },
+                    "uuid": "00000000-0000-4000-8000-000000000211"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        }
+    ],
+    "violations": [
+        {
+            "description": "間隙違規 ( 間隙 0.2000 mm; 實際 0.0500 mm)",
+            "items": [
+                {
+                    "description": "走線 [GND] (F.Cu), 長度: 10.0000 mm",
+                    "pos": {
+                        "x": 100.51,
+                        "y": 102.0
+                    },
+                    "uuid": "00000000-0000-4000-8000-000000000402"
+                },
+                {
+                    "description": "走線 [SIG] (F.Cu), 長度: 4.0000 mm",
+                    "pos": {
+                        "x": 103.0,
+                        "y": 102.25
+                    },
+                    "uuid": "00000000-0000-4000-8000-000000000404"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Track has unconnected end",
+            "items": [
+                {
+                    "description": "走線 [SIG] (F.Cu), 長度: 4.0000 mm",
+                    "pos": {
+                        "x": 103.0,
+                        "y": 102.25
+                    },
+                    "uuid": "00000000-0000-4000-8000-000000000404"
+                }
+            ],
+            "severity": "warning",
+            "type": "track_dangling"
+        }
+    ]
+}

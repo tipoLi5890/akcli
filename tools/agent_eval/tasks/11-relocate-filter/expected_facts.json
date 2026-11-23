@@ -1,0 +1,10 @@
+{
+ "components": {
+  "R1": {"x_mil": 2000, "y_mil": 2000},
+  "R2": {"x_mil": 2000, "y_mil": 2600},
+  "R3": {"x_mil": 4500, "y_mil": 2450, "rotation": 90},
+  "C1": {"x_mil": 5100, "y_mil": 2750}
+ },
+ "forbid_findings": ["DANGLING_ENDPOINT", "NET_LABEL_UNATTACHED"],
+ "net_diff": {"equivalent": true}
+}

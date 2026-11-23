@@ -1,0 +1,14 @@
+{
+ "components": {
+  "R1": {"value": "2.2k", "footprint": "Resistor_SMD:R_0402_1005Metric", "parameters": {"Tolerance": "1%"}},
+  "R2": {"value": "2.2k", "footprint": "Resistor_SMD:R_0402_1005Metric", "parameters": {"Tolerance": "1%"}},
+  "C1": {"value": "100n"}
+ },
+ "net_diff": {
+  "equivalent": false,
+  "risk": false,
+  "lines": [
+   "= RENAME 3V3 -> VDD_IO (3 pins)"
+  ]
+ }
+}

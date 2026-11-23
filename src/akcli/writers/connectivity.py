@@ -323,10 +323,15 @@ def _symbol_reference(sym: SNode) -> str | None:
     return None
 
 
-def _symbol_path_references(sym: SNode) -> list[str]:
-    """One reference per ``(path ...)`` entry (a twice-instantiated sheet's
-    symbol carries two — each its own annotation scope)."""
-    out: list[str] = []
+def _symbol_scoped_references(sym: SNode) -> list[tuple[str, str]]:
+    """``(scope, reference)`` per ``(path ...)`` entry.
+
+    The scope is the path's first segment — the root sheet uuid of the project
+    that entry belongs to. A sheet shared between projects keeps one entry per
+    project, and each project is its own annotation scope: the same reference
+    under two different roots is one part seen twice, not a duplicate.
+    """
+    out: list[tuple[str, str]] = []
     inst = sym.find("instances")
     if inst is None:
         return out
@@ -334,7 +339,8 @@ def _symbol_path_references(sym: SNode) -> list[str]:
         for path in proj.find_all("path"):
             rv = _av(path.find("reference"), 1)
             if rv:
-                out.append(rv)
+                scope = (_av(path, 1) or "").strip("/").split("/", 1)[0]
+                out.append((scope, rv))
     return out
 
 
@@ -507,21 +513,27 @@ def verify(doc: SNode, *, tol_nm: int = 0,
     # annotation scope, so it counts per PATH ENTRY, not per symbol node: one
     # symbol carrying the same ref on two paths is two placements of that ref).
     # Distinct UNITS of one part legitimately share a reference.
-    ref_units: Counter[tuple[str, str]] = Counter()
+    # Path entries are counted per PROJECT (the path's root uuid): a sheet
+    # shared between projects carries one entry per project, and the same ref
+    # under two roots is not a duplicate.
+    scoped_units: Counter[tuple[str, str, str]] = Counter()
     for sym in _placed_symbols(doc):
         unit_node = sym.find("unit")
         unit = _av(unit_node, 1) or "1" if unit_node is not None else "1"
-        path_refs = _symbol_path_references(sym)
+        path_refs = _symbol_scoped_references(sym)
         refs_here = path_refs if path_refs else (
-            [_symbol_reference(sym)] if _symbol_reference(sym) else [])
-        for ref in refs_here:
+            [("", _symbol_reference(sym) or "")])
+        for scope, ref in refs_here:
             if not ref or "?" in ref:
                 # An UNANNOTATED symbol ("R?", "#PWR?"): KiCad writes the same
                 # placeholder on every unannotated part, so N of them are N
                 # placeholders, not N duplicates of one part. Counting them
                 # refused every write to an unannotated sheet.
                 continue
-            ref_units[(ref, unit)] += 1
+            scoped_units[(scope, ref, unit)] += 1
+    ref_units: dict[tuple[str, str], int] = {}
+    for (_scope, ref, unit), count in scoped_units.items():
+        ref_units[(ref, unit)] = max(ref_units.get((ref, unit), 0), count)
     for (ref, unit), count in ref_units.items():
         if count > 1:
             findings.append(

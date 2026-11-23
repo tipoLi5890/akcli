@@ -8,8 +8,8 @@ build-backend = "setuptools.build_meta"
 # package and CLI stay `akcli` (see src/akcli/__init__.py name cascade);
 # keep the three in lockstep.
 name = "akcli-kicad"
-version = "0.22.0"
-description = "AI-native schematic design agent, purpose-built for KiCad: draw and edit .kicad_sch from JSON op-lists with net-diff safety rails, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
+version = "0.23.0"
+description = "Verification layer for AI-authored KiCad schematics: draw and edit .kicad_sch from JSON op-lists that are dry-run by default, net-diffed and connectivity-gated, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
@@ -47,6 +47,9 @@ where = ["src"]
 # examples/circuits/*/ops.json mirrored by tools/examples_mirror.py; loaded at
 # runtime via Path(__file__) so `project new --example` works from a wheel.
 "akcli.examples" = ["*/ops.json"]
+# examples/fab/*.toml fab profiles mirrored by tools/examples_mirror.py; read
+# via importlib.resources so `fab check --profile <id>` works from a wheel.
+"akcli.fab_profiles" = ["*.toml"]
 # sim/builtin.lib is loaded at runtime via Path(__file__); it MUST ship in the
 # wheel or `akcli sim` with a builtin model breaks on a non-editable install.
 "akcli.sim" = ["*.lib"]
@@ -94,6 +97,8 @@ files = [
     "src/akcli/netbuild.py", "src/akcli/sexpr/parser.py", "src/akcli/sexpr/__init__.py", "src/akcli/sexpr/query.py",
     "src/akcli/sexpr/build.py",
     "src/akcli/checks/diff.py", "src/akcli/geometry",
+    # 0.23: the tree-scoped integrity walk (`check --integrity`) is born typed.
+    "src/akcli/checks/integrity.py",
     "src/akcli/intentgen.py",
     # 0.21 R4: the write-pipeline engines are born typed (as is every module
     # extracted alongside them).
@@ -110,6 +115,11 @@ files = [
     "src/akcli/scaffold.py",
     "src/akcli/readers/kicad_pro.py",
     "src/akcli/examples/__init__.py",
+    # 0.23: the packaged fab-profile index, born typed like its sibling.
+    "src/akcli/fab_profiles/__init__.py",
+    # 0.23: the library baseline and the PCB <-> library check are born typed.
+    "src/akcli/library_baseline.py",
+    "src/akcli/checks/fplib.py",
 ]
 python_version = "3.11"
 disallow_untyped_defs = true

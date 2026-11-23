@@ -44,6 +44,7 @@ def get(url: str, headers: dict | None = None, timeout: float = _TIMEOUT_S) -> R
             status = getattr(resp, "status", None) or resp.getcode() or 200
             return Response(status_code=int(status), content=body)
     except urllib.error.HTTPError as exc:  # non-2xx: report the code, never raise
+        exc.close()  # an HTTPError is the open response itself: release it
         return Response(status_code=int(exc.code), content=b"")
     except (urllib.error.URLError, OSError, TimeoutError):
         return Response(status_code=599, content=b"")

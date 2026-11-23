@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from .. import classify
 from ..calc.registry import CalcError
+from ..calc.si import leading_value_token as _leading_value_token
 from ..calc.si import parse_value as _si_parse_value
 from ..checks.power import net_candidate_names
 from ..model import Component, Net, Schematic
@@ -136,11 +137,23 @@ _LETTER_FOLD = str.maketrans({"U": "u", "N": "n", "P": "p",
                               "Ω": "R", "μ": "µ"})
 
 
+def _parse_value_token(token: str) -> float | None:
+    """One value spelling (unit tail stripped, multipliers folded) or ``None``."""
+    s = _UNIT_TAIL_RX.sub("", token.strip()).strip().translate(_LETTER_FOLD)
+    if not s:
+        return None
+    try:
+        return _si_parse_value(s)
+    except (CalcError, ValueError, KeyError):
+        return None
+
+
 def parse_value(text: str | None) -> float | None:
     """Engineering-notation component value, or ``None`` — never a guess.
 
     Accepts ``4700`` / ``4.7k`` / ``4k7`` / ``1R0`` / ``100n`` / ``10uF`` /
-    ``2.2µF`` / ``0R`` / ``10U`` (Altium-style upper case).
+    ``2.2µF`` / ``0R`` / ``10U`` (Altium-style upper case), and a BOM-style
+    value with trailing qualifiers (``8p C0G`` / ``10u/16V`` / ``10k 1%``).
 
     The number crunching is :func:`akcli.calc.si.parse_value` — the same
     parser the calculators use — so a value the CLI can compute with is a
@@ -152,13 +165,13 @@ def parse_value(text: str | None) -> float | None:
     """
     if not text:
         return None
-    s = _UNIT_TAIL_RX.sub("", str(text).strip()).strip().translate(_LETTER_FOLD)
-    if not s:
-        return None
-    try:
-        return _si_parse_value(s)
-    except (CalcError, ValueError, KeyError):
-        return None
+    value = _parse_value_token(str(text))
+    if value is not None:
+        return value
+    # BOM-style Value: the number followed by qualifiers ("8p C0G",
+    # "10u/16V", "10k 1%") — the shared grammar decides what the value token is.
+    head = _leading_value_token(str(text))
+    return _parse_value_token(head) if head is not None else None
 
 
 # --------------------------------------------------------------------------- #

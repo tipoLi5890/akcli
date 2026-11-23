@@ -29,7 +29,7 @@ import re
 
 from .. import si_prefix
 
-__all__ = ["parse_value", "parse_plain", "fmt_eng"]
+__all__ = ["parse_value", "parse_plain", "fmt_eng", "leading_value_token"]
 
 # Canonical prefix meanings. ``m``/``M`` are the *only* case-significant entry
 # (milli vs mega); every other ASCII letter below is mirrored to its other case
@@ -47,6 +47,32 @@ _RX = re.compile(r"^([0-9]*\.?[0-9]+)\s*(["
 # ``inf``/``nan``/``infinity`` and the ``1_000`` digit-separator form that
 # ``float()`` would happily accept.
 _PLAIN_RX = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
+
+
+# Qualifier tokens a BOM-style Value carries after the number: dielectric,
+# tolerance, voltage / power rating, chip package size.
+_VALUE_SPLIT_RX = re.compile(r"[\s,/;]+")
+_QUALIFIER_RX = re.compile(
+    r"C0G|NP0|X5R|X7R|X7S|X6S|Y5V|Z5U"
+    r"|±?\d+(?:\.\d+)?%"
+    r"|\d+(?:\.\d+)?[kK]?V(?:DC|AC)?"
+    r"|\d+(?:\.\d+)?m?W"
+    r"|0201|0402|0603|0805|1206|1210|1812|2010|2512",
+    re.IGNORECASE)
+
+
+def leading_value_token(text: str) -> str | None:
+    """The value token of a BOM-style Value (``8p C0G`` -> ``8p``), or ``None``.
+
+    Only the LEADING token is the value, and only when every other token is a
+    recognized qualifier (``10u/16V``, ``10k 1%``) — anything else is ``None``
+    rather than a guess. A single-token text is not BOM-style: ``None``.
+    """
+    tokens = [t for t in _VALUE_SPLIT_RX.split(text.strip()) if t]
+    if len(tokens) < 2 or not all(_QUALIFIER_RX.fullmatch(t)
+                                  for t in tokens[1:]):
+        return None
+    return tokens[0]
 
 
 def parse_plain(s: str) -> float | None:

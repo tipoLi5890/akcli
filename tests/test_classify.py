@@ -111,6 +111,26 @@ def test_connector_and_crystal_never_both():
                                      value="USBLC6")
 
 
+def test_test_point_is_never_a_connector():
+    # `Connector:TestPoint` carries the connector LIBRARY name ("conn"), but a
+    # probe pad is not a mating interface — by library or by footprint.
+    assert not classify.is_connector("TP1", "Connector:TestPoint")
+    assert not classify.is_connector("TP2", "Connector:TestPoint_Probe")
+    assert not classify.is_connector(
+        "TP3", "Connector_Generic:Conn_01x01",
+        footprint="TestPoint:TestPoint_Pad_D1.0mm")
+    assert not classify.is_connector("TP4", "my_lib:TEST_POINT_SMD")
+    # the exclusion beats the designator prefix too (J/P are connector
+    # prefixes), exactly like the crystal and TVS exclusions above
+    assert not classify.is_connector("J9", "Connector:TestPoint")
+    assert not classify.is_connector("P9", None,
+                                     footprint="TestPoint_Pad_1.0x1.0mm")
+    # ...and it does not leak onto real connectors
+    assert classify.is_connector("J1", "Connector_Generic:Conn_01x01")
+    assert classify.is_connector("J2", "Connector:Conn_Coaxial")
+    assert classify.is_connector("TP5", "Connector_Generic:Conn_01x02")
+
+
 def test_tvs_by_library_or_value_only():
     assert classify.is_tvs("U6", "corpus_jlc:TPD4E05U06DQAR", "TPD4E05U06")
     assert classify.is_tvs("D1", "Power_Protection:USBLC6-2SC6", "USBLC6")

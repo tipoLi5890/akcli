@@ -42,7 +42,8 @@ def _get(port: int, path: str, headers: dict | None = None):
         with urllib.request.urlopen(req) as r:
             return r.status, r.read(), dict(r.headers)
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read(), dict(exc.headers)
+        with exc:               # an HTTPError is the open response itself
+            return exc.code, exc.read(), dict(exc.headers)
 
 
 def _post(port: int, path: str, body: bytes = b"",
@@ -53,7 +54,8 @@ def _post(port: int, path: str, body: bytes = b"",
         with urllib.request.urlopen(req) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read()
+        with exc:
+            return exc.code, exc.read()
 
 
 def _serve(dash: Dash):

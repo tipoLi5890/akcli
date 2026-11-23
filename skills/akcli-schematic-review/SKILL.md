@@ -55,7 +55,8 @@ A review is **strictly read-only**. Never modify the schematic under review, and
   (`note`/`info`) a finding by `code`/`refs`, but a review may only rely on a
   waiver that carries an explicit `reason` string justifying it — an
   unexplained waiver is itself a Minor finding. Read the header's
-  `config-waived: N (M demoted)` line every run: a waiver-cleaned pass is NOT an
+  `config-waived: N (M demoted)` line every run (`check`, `library audit` and
+  `verify <sch> <pcb>` all print it): a waiver-cleaned pass is NOT an
   intrinsically clean pass, and each waived code must be re-justified against the
   current schematic (waivers are `[[waiver]]`, distinct from the ERC-only
   `[[erc_waiver]]`).
@@ -259,6 +260,25 @@ so nets are compared by which pads actually group together. Findings:
 (a schematic pin has no corresponding PCB pad), `SCHPCB_FOOTPRINT_MISMATCH`. Power
 symbols (`#PWR`) and No-ERC/PWR_FLAG markers (`#FLG`) are excluded from the comparison —
 do not report those refdes as missing on the PCB side, that is expected.
+
+For a KiCad schematic + KiCad board it also compares assembly flags:
+`SCHPCB_DNP_MISMATCH` / `SCHPCB_BOM_FLAG_MISMATCH` (the schematic's DNP / in-BOM flag
+disagrees with the footprint's `dnp` / `exclude_from_bom` attribute — a BOM-vs-placement
+disagreement in the making; report it). A footprint on the board with no symbol is
+`SCHPCB_EXTRA_ON_PCB`: a WARNING, unless KiCad marks it *Not in schematic* (`board_only` —
+mounting holes, fiducials), which is expected and arrives as a NOTE — do not escalate it.
+
+Add `--library` to also compare each board footprint with its definition in the
+**project** `fp-lib-table` (`FPLIB_PAD_SET_DRIFT`, `FPLIB_PAD_DRILL_DRIFT`,
+`FPLIB_SOURCE_MISSING` — warnings; `FPLIB_MODEL_MISSING` — note):
+
+```bash
+akcli verify board.kicad_sch board.kicad_pcb --library --exit-zero
+```
+
+A pad drift may be a deliberate local edit — ask, do not assume a defect. **Always quote the
+`library:` coverage line**: footprints from KiCad's own (global-table) libraries are NOT
+compared, so "no drift" is a statement about the compared footprints only.
 
 ## Electrical heuristics the tool does not run — apply them yourself
 

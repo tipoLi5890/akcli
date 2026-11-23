@@ -100,11 +100,14 @@ def _extract_target(tokens: list[str]) -> str | None:
 def _had_prior_plan(target: str, ops_sha: str) -> bool:
     journal = os.path.join(os.path.dirname(os.path.abspath(target)) or ".",
                            ".akcli", "journal.jsonl")
-    try:
-        with open(journal, encoding="utf-8") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return False
+    lines: list[str] = []
+    # the rotated generation too: a plan recorded just before a rotation counts
+    for part in (journal + ".1", journal):
+        try:
+            with open(part, encoding="utf-8") as fh:
+                lines.extend(fh.readlines())
+        except OSError:
+            continue
     for line in lines:
         try:
             entry = json.loads(line)

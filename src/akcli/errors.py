@@ -348,7 +348,7 @@ REMEDIATION: dict[str, str] = {
         "the kicad-cli run timed out; retry, or skip the advisory run with "
         "--no-erc (akcli's own gates still apply)",
     "KICAD_CLI_MISSING":
-        "install KiCad (bundles kicad-cli) or set AKCLI_KICAD_CLI; "
+        "install KiCad (bundles kicad-cli) or set KICAD_CLI; "
         "`akcli doctor` shows what is discovered",
     # reserved transport codes (no live driver; see ERROR_CODES note)
     "BRIDGE_BUSY":

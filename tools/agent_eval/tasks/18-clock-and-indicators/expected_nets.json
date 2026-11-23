@@ -1,0 +1,13 @@
+{
+ "nets": [
+  {"name": "3V3", "members": ["R11.1", "R12.1", "R13.1"]},
+  {"name": "BTN0", "members": ["R11.2"]},
+  {"name": "BTN1", "members": ["R12.2"]},
+  {"name": "BTN2", "members": ["R13.2"]},
+  {"name": "GND", "members": ["C1.2", "C2.2", "D1.1"]},
+  {"name": "OSC_IN", "members": ["C1.1", "Y1.1"]},
+  {"name": "OSC_OUT", "members": ["C2.1", "Y1.2"]},
+  {"name": "STATUS", "members": ["R1.1"]},
+  {"name": "STATUS_A", "members": ["D1.2", "R1.2"]}
+ ]
+}

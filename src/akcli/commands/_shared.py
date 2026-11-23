@@ -92,12 +92,14 @@ def _require_path(value: str | None, what: str = "input file") -> Path:
     return Path(value)
 
 
-def _sniff_ole(path: Path) -> str:
-    """Classify a bare OLE2/CFBF container by its storage/stream layout.
+def _sniff_ole_ex(path: Path) -> tuple[str, bool]:
+    """Classify a bare OLE2/CFBF container; returns ``(format, decisive)``.
 
-    An unknown OLE file is NEVER assumed to be a schematic: an unrecognized
-    layout returns ``"unknown"`` so the caller fails loudly (exit 5) instead of
-    silently producing an empty import (the historic ``.PcbLib``-as-SchDoc trap).
+    ``decisive`` is True only when the storage/stream layout positively
+    identifies the document type. An unknown OLE file is NEVER assumed to be a
+    schematic: an unrecognized layout returns ``"unknown"`` so the caller fails
+    loudly (exit 5) instead of silently producing an empty import (the historic
+    ``.PcbLib``-as-SchDoc trap).
     """
     try:
         from ..readers import _cfbf  # lazy
@@ -105,41 +107,66 @@ def _sniff_ole(path: Path) -> str:
     except Exception:
         # A corrupt container is still *an OLE file*; route it to the Altium
         # schematic reader so the structured ALTIUM_* parse error surfaces.
-        return "altium_sch"
+        return "altium_sch", False
     names = set(streams)
     tops = {n.split("/", 1)[0] for n in names}
+    header = streams.get("FileHeader", b"")[:256]
+    # A schematic-family FileHeader is checked BEFORE the storage names: a
+    # SchLib keeps one storage per SYMBOL, named by the user, so a symbol
+    # called "Library" (or "Board6…") must not read as a PCB container now
+    # that a decisive answer can overrule the extension.
+    if b"Schematic Library" in header:
+        return "altium_schlib", True
+    if b"Schematic Capture" in header:
+        return "altium_sch", True
     if any(t.startswith("Board6") for t in tops):
-        return "altium_pcb"
+        return "altium_pcb", True
     if "Library" in tops and any(n.startswith("Library/") for n in names):
         # PcbLib containers carry a Library storage plus per-footprint storages.
-        return "altium_pcblib"
-    header = streams.get("FileHeader", b"")
-    if header:
-        if b"Schematic Library" in header[:256]:
-            return "altium_schlib"
-        if b"Schematic Capture" in header[:256]:
-            return "altium_sch"
-        if b"PCB" in header[:256] and b"Library" in header[:256]:
-            return "altium_pcblib"
-        if b"PCB" in header[:256]:
-            return "altium_pcb"
-        # A FileHeader we cannot classify: most likely a schematic-family doc.
-        return "altium_sch"
-    return "unknown"
+        return "altium_pcblib", True
+    if b"PCB" in header and b"Library" in header:
+        return "altium_pcblib", True
+    if b"PCB" in header:
+        return "altium_pcb", True
+    return "unknown", False
+
+
+def _sniff_ole(path: Path) -> str:
+    """The format half of :func:`_sniff_ole_ex`."""
+    return _sniff_ole_ex(path)[0]
+
+
+_OLE_FORMATS = frozenset({"altium_sch", "altium_schlib", "altium_pcb",
+                          "altium_pcblib"})
 
 
 def _detect_format_ex(path: Path) -> tuple[str, str]:
     """Detect the file format; returns ``(format, detection_method)``.
 
-    ``detection_method`` is one of ``"extension"``, ``"content"``, ``"none"``.
+    ``detection_method`` is one of ``"extension"``, ``"content"``,
+    ``"content-over-extension"``, ``"none"``. The extension decides, except
+    for an Altium container whose layout positively identifies a DIFFERENT
+    document type (a ``.PcbLib`` saved as ``.SchDoc``): there the content wins,
+    with a warning, rather than reading the file through the wrong decoder.
     """
     ext = path.suffix.lower()
-    if ext in _EXT_FORMAT:
-        return _EXT_FORMAT[ext], "extension"
+    by_ext = _EXT_FORMAT.get(ext)
+    if by_ext is not None and by_ext not in _OLE_FORMATS:
+        return by_ext, "extension"
     try:
-        head = path.open("rb").read(64)
+        with path.open("rb") as fh:
+            head = fh.read(64)
     except OSError:
-        return "unknown", "none"
+        return (by_ext, "extension") if by_ext else ("unknown", "none")
+    if by_ext is not None:
+        if head.startswith(_OLE_MAGIC):
+            sniffed, decisive = _sniff_ole_ex(path)
+            if decisive and sniffed != by_ext:
+                sys.stderr.write(
+                    f"warning: {path.name}: extension says {by_ext} but the "
+                    f"container is {sniffed}; reading it as {sniffed}\n")
+                return sniffed, "content-over-extension"
+        return by_ext, "extension"
     if head.startswith(_OLE_MAGIC):
         return _sniff_ole(path), "content"
     stripped = head.lstrip()
@@ -288,6 +315,28 @@ def _findings_exit(findings: list, args: argparse.Namespace) -> int:
     if any(_report._SEV_RANK.get(f.severity, 0) >= threshold for f in findings):
         return EXIT["FINDINGS"]
     return EXIT["OK"]
+
+
+def _apply_config_waivers(findings: list, cfg) -> tuple[list, str, list[dict]]:
+    """Apply config ``[[waiver]]`` entries the way ``akcli check`` does.
+
+    For the findings-emitting commands that build their own output
+    (``library audit``, ``verify <sch> <board>``) instead of going through
+    :func:`..report.render`. Returns ``(kept, summary, detail)``: ``summary``
+    is check's ``config-waived`` header value (``"N (M demoted)"``) and
+    ``detail`` holds one record per waived finding (code, refs, action,
+    reason). Every waived finding is also named on stderr, in check's own
+    line format — a run that only a waiver cleaned must never read as an
+    intrinsically clean one.
+    """
+    detail: list[dict] = []
+    kept, waived, demoted = _report.apply_waivers(
+        findings, cfg.waivers, detail_out=detail)
+    for d in detail:
+        sys.stderr.write(
+            f"waived: {d['code']} [{','.join(d['refs']) or '*'}] {d['action']}"
+            + (f" — {d['reason']}" if d["reason"] else "") + "\n")
+    return kept, f"{waived} ({demoted} demoted)", detail
 
 
 def _add_exit_policy_flags(parser: argparse.ArgumentParser) -> None:

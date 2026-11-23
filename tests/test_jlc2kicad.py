@@ -190,6 +190,21 @@ def test_convert_footprint_lib_nickname_flows_into_symbol(tmp_path, offline_http
     assert '"footprint:' not in text
 
 
+def test_convert_footprint_nickname_is_separate_from_the_directory(tmp_path,
+                                                                  offline_http):
+    """A project that registers the default ``footprint`` directory under its
+    own nickname: the files stay put, only the Footprint field's prefix moves."""
+    res = jlc2kicad.convert("C25804", str(tmp_path / "out"),
+                            footprint_nickname="proj_jlc")
+    assert res.error_code is None, res.message
+    mod = next(a for a in res.artifacts if a.endswith(".kicad_mod"))
+    assert Path(mod).parent.name == "footprint"
+    sym = next(a for a in res.artifacts if a.endswith(".kicad_sym"))
+    text = Path(sym).read_text(encoding="utf-8")
+    assert f'"Footprint" "proj_jlc:{Path(mod).stem}"' in text
+    assert '"footprint:' not in text
+
+
 def test_convert_rejects_bad_model_path(tmp_path):
     res = jlc2kicad.convert("C25804", str(tmp_path / "out"),
                             model_path="portable")

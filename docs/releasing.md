@@ -88,7 +88,8 @@ so the mistake surfaces at step 3, not after the Release is public.
 
 `tests/test_docs_conformance.py` runs in CI and guards the docs against drift, so
 keep it in mind when editing any `README*.md`, `INSTALL.md`, `ROADMAP.md`,
-`docs/*.md`, `skills/*/SKILL.md`, or `commands/*.md`:
+`docs/**/*.md` (recursive; `docs/assets/` excluded), `skills/*/SKILL.md`, or
+`commands/*.md`:
 
 - **Every ` ```-fenced `akcli …` line is validated** against a live
   `build_parser()` — an unknown subcommand or an unknown `--flag` fails the test.
@@ -102,6 +103,20 @@ keep it in mind when editing any `README*.md`, `INSTALL.md`, `ROADMAP.md`,
   `commands/*.md` file counts. When you add an op, macro, calculator, skill or
   plugin command, update every count in the docs in the same change or the
   gate fails.
+- **`N schemas`, `N rules` and `N … eval tasks` counts** are gated the same way:
+  against the files in `schemas/` (what `akcli schema` lists, so
+  `ops.capabilities.json` counts), the review rule registry, and the task
+  directories under `tools/agent_eval/tasks/`. `N rules` means the registry
+  total; a qualified count (`N pre-compliance rules`) is not gated. A task count
+  needs a qualifier (`N eval tasks`, `N ground-truthed design tasks`), except in
+  `tools/agent_eval/README.md`, where a bare `N tasks` is gated.
+- **Only digits are gated.** A count written as a word (`fourteen schemas`) is
+  invisible to the gate; write counts in digits.
+- **A recipe under `docs/recipes/` repeats its workflow commands in a fenced
+  `bash` block.** A YAML `run: akcli …` line does not start with `akcli`, so the
+  fence gate cannot see it; the recipe gate requires every `akcli` invocation in
+  a recipe's `yaml` fences to appear, character for character, in its `bash`
+  block, where the fence gate validates it.
 
 Run it locally with `python -m pytest tests/test_docs_conformance.py -q`.
 
@@ -122,6 +137,17 @@ repo root). Adding, renaming or deleting an example requires
 `python3 tools/examples_mirror.py build` in the same commit; CI runs
 `python3 tools/examples_mirror.py check` as a drift gate (also asserted by
 `tests/test_examples.py`).
+
+The same tool mirrors the fab profiles: `akcli fab check --profile <id>` reads
+from the packaged `src/akcli/fab_profiles/` mirror of the profiles under
+`examples/fab/` (a file there is a profile when it has an `id` and a `[source]`
+table; the example order manifest is not mirrored). A profile is one dated
+vendor revision — when the vendor page changes, add a new file with a new `id`
+rather than editing a released one — and adding, renaming or deleting one needs
+the same `build` in the same commit; `check` covers both mirrors (also asserted
+by `tests/test_fab_profiles.py`). A bundled profile older than 12 months raises
+the `FAB_PROFILE_STALE` note for users, so re-verify the bundled set against
+its source urls before a release.
 
 ## PyPI publishing
 

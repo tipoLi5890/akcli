@@ -40,7 +40,9 @@ jobs:
         run: python3 tools/schemas.py check
       # examples/circuits/*/ops.json is the canonical corpus; the packaged
       # akcli/examples mirror is what `project new --example` ships in a wheel.
-      - name: packaged example mirror matches examples/circuits
+      # The same tool (and the same `check`) covers the fab profiles under
+      # examples/fab -> akcli/fab_profiles, what `fab check --profile <id>` reads.
+      - name: packaged example + fab-profile mirrors match examples/
         run: python3 tools/examples_mirror.py check
       - name: Install mypy (dev extra)
         run: python -m pip install -e ".[dev]"
@@ -134,6 +136,16 @@ jobs:
           "$RUNNER_TEMP/smoke/bin/akcli" --version
           "$RUNNER_TEMP/smoke/bin/akcli" ops list
           "$RUNNER_TEMP/smoke/bin/akcli" ops template add_wire
+          # Package data that only a non-editable install can prove shipped:
+          # the bundled fab profiles (importlib.resources, akcli.fab_profiles).
+          # Run from $RUNNER_TEMP so nothing resolves against the checkout.
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/smoke/bin/akcli" fab profiles
+          # At least one profile must be listed, and selectable by its id
+          # (an empty list means the wheel was built without the *.toml).
+          pid="$("$RUNNER_TEMP/smoke/bin/akcli" fab profiles --json \
+            | "$RUNNER_TEMP/smoke/bin/python" -c 'import json,sys; print(json.load(sys.stdin)["profiles"][0]["id"])')"
+          "$RUNNER_TEMP/smoke/bin/akcli" fab explain FAB_VIA_IN_PAD --profile "$pid"
 
   # ---------------------------------------------------------------------------
   # Claude Code plugin + marketplace validation.
@@ -255,6 +267,8 @@ jobs:
           # a real KiCad at all.
           python -m pytest -q -rs \
             tests/test_e2e_draw.py tests/test_kicad_cli.py tests/test_kicad_parity.py \
+            tests/test_release_preflight.py \
+            tests/test_e2e_fab.py tests/test_fp_attrs.py \
             tests/test_e2e_project.py \
             | tee /tmp/kicad-tests.log
           # Matches the "kicad-cli not installed" skip reason in all four files;

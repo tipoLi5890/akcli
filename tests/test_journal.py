@@ -136,3 +136,60 @@ def test_journal_rotation(tmp_path: Path, monkeypatch):
     for _ in range(4):
         journal.record(target, "draw", "applied")
     assert (tmp_path / journal.DIR_NAME / "journal.jsonl.1").exists()
+
+
+# --------------------------------------------------------------------------- #
+# the rotated generation (journal.jsonl.1) is still history
+# --------------------------------------------------------------------------- #
+def _write_journal(tmp_path: Path, name: str, cmds: list[str]) -> None:
+    jdir = tmp_path / journal.DIR_NAME
+    jdir.mkdir(exist_ok=True)
+    (jdir / name).write_text(
+        "".join(json.dumps({"cmd": c, "target": "board.kicad_sch",
+                            "status": "applied"}) + "\n" for c in cmds),
+        encoding="utf-8", newline="\n")
+
+
+def test_read_entries_survives_a_rotation(tmp_path: Path, monkeypatch):
+    # The read side used to open only the live file, so the record() call
+    # that rotated the journal made the whole history vanish from `akcli log`.
+    monkeypatch.setattr(journal, "_MAX_BYTES", 64)
+    target = tmp_path / "board.kicad_sch"
+    for n in range(4):
+        journal.record(target, "draw", "applied", op_count=n)
+    # one rotated generation is kept: the entry that tripped the last
+    # rotation, then the live file's
+    assert [e["op_count"] for e in journal.read_entries(target)] == [2, 3]
+
+
+def test_read_entries_only_rotated_file_present(tmp_path: Path):
+    # right after a rotation the live file may not exist yet
+    _write_journal(tmp_path, "journal.jsonl.1", ["plan", "draw"])
+    assert not journal.journal_path(tmp_path).exists()
+    assert [e["cmd"] for e in journal.read_entries(tmp_path)] == ["plan", "draw"]
+
+
+def test_read_entries_orders_rotated_before_live(tmp_path: Path):
+    _write_journal(tmp_path, "journal.jsonl.1", ["plan", "draw"])
+    _write_journal(tmp_path, journal.FILE_NAME, ["arrange", "undo"])
+    cmds = [e["cmd"] for e in journal.read_entries(tmp_path)]
+    assert cmds == ["plan", "draw", "arrange", "undo"]        # oldest -> newest
+
+
+def test_read_entries_limit_spans_both_generations(tmp_path: Path):
+    _write_journal(tmp_path, "journal.jsonl.1", ["plan", "draw"])
+    _write_journal(tmp_path, journal.FILE_NAME, ["arrange", "undo"])
+    # the newest N, counted across the rotation boundary
+    assert [e["cmd"] for e in journal.read_entries(tmp_path, limit=3)] == [
+        "draw", "arrange", "undo"]
+    assert [e["cmd"] for e in journal.read_entries(tmp_path, limit=1)] == ["undo"]
+    # target filtering applies to both generations before the limit does
+    assert journal.read_entries(tmp_path, target="other.kicad_sch", limit=3) == []
+
+
+def test_log_shows_rotated_history(tmp_path: Path, capsys):
+    _write_journal(tmp_path, "journal.jsonl.1", ["plan"])
+    _write_journal(tmp_path, journal.FILE_NAME, ["draw"])
+    assert main(["log", str(tmp_path), "--json"]) == EXIT["OK"]
+    doc = json.loads(capsys.readouterr().out)
+    assert [e["cmd"] for e in doc["entries"]] == ["plan", "draw"]

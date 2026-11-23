@@ -1,0 +1,8 @@
+{
+ "nets": [
+  {"name": "ADC_IN", "members": ["C1.1", "R3.2"]},
+  {"name": "GND", "members": ["C1.2", "R2.2"]},
+  {"name": "NTC_OUT", "members": ["R1.2", "R2.1", "R3.1"]},
+  {"name": "V3V3", "members": ["R1.1"]}
+ ]
+}

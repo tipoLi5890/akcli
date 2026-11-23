@@ -1,0 +1,120 @@
+(kicad_sch
+	(version 20231120)
+	(generator "eeschema")
+	(generator_version "8.0")
+	(uuid "92d933b0-d758-5eee-9191-29905e2a1922")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Generic:CONN_1x4"
+		(pin_names (offset 1.016))
+		(exclude_from_sim yes)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "J"
+			(at 0 6.35 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "CONN_1x4"
+			(at 0 -7.62 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Generic 1x4 header (test fixture)"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "CONN_1x4_0_1"
+			(rectangle
+				(start -2.54 -5.08)
+				(end 2.54 5.08)
+				(stroke (width 0.254) (type default))
+				(fill (type background))))
+		(symbol "CONN_1x4_1_1"
+			(pin passive line
+				(at -7.62 3.81 0)
+				(length 5.08)
+				(name "P1" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at -7.62 1.27 0)
+				(length 5.08)
+				(name "P2" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at -7.62 -1.27 0)
+				(length 5.08)
+				(name "P3" (effects (font (size 1.27 1.27))))
+				(number "3" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at -7.62 -3.81 0)
+				(length 5.08)
+				(name "P4" (effects (font (size 1.27 1.27))))
+				(number "4" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:R"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "R"
+			(at 2.032 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "R"
+			(at 0 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at -1.778 0 90)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Resistor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "R_0_1"
+			(rectangle
+				(start -1.016 -2.54)
+				(end 1.016 2.54)
+				(stroke (width 0.254) (type default))
+				(fill (type none))))
+		(symbol "R_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))))
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(symbol (lib_id "Generic:CONN_1x4") (at 76.2 50.8 0) (unit 1) (uuid "d01b25cf-1e54-5c31-a58c-dea65872f9cd") (pin "1" (uuid "9f9fa045-0707-5f8e-8ff5-ed13d660b61e")) (pin "2" (uuid "9957f834-6c48-50f0-99a9-2d95b1d2d904")) (pin "3" (uuid "ac2ed72c-be2d-597b-8f75-4deafb153f85")) (pin "4" (uuid "e00bfafa-8e24-5af6-9616-10bce9e857ba")) (property "Reference" "J1" (at 80.01 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/92d933b0-d758-5eee-9191-29905e2a1922" (reference "J1") (unit 1))))
+	(property "Value" "I2C" (at 80.01 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 35.56 35.56 0) (unit 1) (uuid "457c84e0-0185-5b0c-925e-715eefe5a5a1") (pin "1" (uuid "d228f757-17a3-5463-bd6f-7ba320e7828b")) (pin "2" (uuid "cc03818b-0d8a-5f9d-a42b-908ae7bcc7af")) (property "Reference" "R1" (at 37.846 34.29 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/92d933b0-d758-5eee-9191-29905e2a1922" (reference "R1") (unit 1))))
+	(property "Value" "4.7k" (at 37.846 36.83 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 50.8 35.56 0) (unit 1) (uuid "ba81207e-a479-5a41-98cf-6653239f1a0e") (pin "1" (uuid "060243b2-5949-53ad-b03c-0c29841b3676")) (pin "2" (uuid "f5a13d96-3bc1-5559-9a91-77bb8882939d")) (property "Reference" "R2" (at 53.086 34.29 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/92d933b0-d758-5eee-9191-29905e2a1922" (reference "R2") (unit 1))))
+	(property "Value" "4.7k" (at 53.086 36.83 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 35.56 66.04 90) (unit 1) (uuid "11db254a-81a1-5b4a-882a-52709438a17c") (pin "1" (uuid "b6ebf621-6876-5808-b99d-9ab9a9fd5e3e")) (pin "2" (uuid "f73e5dbf-1bae-50ad-bdf1-e92517ce89ec")) (property "Reference" "R3" (at 35.56 63.754 90) (effects (font (size 1.27 1.27)))) (instances (project "noname" (path "/92d933b0-d758-5eee-9191-29905e2a1922" (reference "R3") (unit 1))))
+	(property "Value" "33" (at 35.56 68.326 90) (effects (font (size 1.27 1.27)))))
+	(symbol (lib_id "Device:R") (at 35.56 78.74 90) (unit 1) (uuid "1a7d62dc-e3dc-539b-8df0-567053b9fd1e") (pin "1" (uuid "6efa8490-e3d1-5e67-add1-1801895e2f89")) (pin "2" (uuid "cb4eaaa4-e711-509f-b183-a639b3a53aeb")) (property "Reference" "R4" (at 35.56 76.454 90) (effects (font (size 1.27 1.27)))) (instances (project "noname" (path "/92d933b0-d758-5eee-9191-29905e2a1922" (reference "R4") (unit 1))))
+	(property "Value" "33" (at 35.56 81.026 90) (effects (font (size 1.27 1.27)))))
+	(label "3V3" (at 35.56 31.75 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "bd05cc82-90f8-53ed-8204-95aeb7d63ed1"))
+	(label "3V3" (at 50.8 31.75 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "44f5292b-71c1-59c7-8669-d544e918990b"))
+	(label "SDA" (at 35.56 39.37 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "2210f398-3ead-5ba3-b767-edd7e748496c"))
+	(label "SCL" (at 50.8 39.37 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "ab002d9c-d346-50b5-88dd-bd90cd45b553"))
+	(label "SDA_MCU" (at 31.75 66.04 180) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "75cbe79e-1f26-5d9b-b18e-39b44ac382bf"))
+	(label "SDA" (at 39.37 66.04 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "8191ca52-826e-5301-9452-4400171fa6d5"))
+	(label "SCL_MCU" (at 31.75 78.74 180) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "a427f6c0-5fb3-52e9-ad36-2bdf4927336e"))
+	(label "SCL" (at 39.37 78.74 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "f38ea65a-d4b0-5ecb-a638-5de2f9ac3df8"))
+	(label "3V3" (at 68.58 46.99 180) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "af548c3c-137a-52be-8c16-0572fdbd6711"))
+	(label "SDA" (at 68.58 49.53 180) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "da668b5d-056e-5897-99eb-b71099bba29d"))
+	(label "SDA" (at 68.58 52.07 180) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "56ae8985-9eb6-5e27-8c12-d48f5810734f"))
+	(label "GND" (at 68.58 54.61 180) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "668f39cc-4c73-5ebe-9ba7-72b3cac82306"))
+)

@@ -27,6 +27,7 @@ from pathlib import Path
 from .. import model, netbuild, units
 from ..errors import fail
 from ..kicad_escape import unescape_string
+from ..geometry import outline as _outline
 from ..geometry import transform as geometry
 from ..model import (
     Component,
@@ -136,6 +137,20 @@ def _reference(
     ``want_path`` is the current sheet-instance path (``/<root>/<sheet>...``): a
     file instantiated twice carries one reference PER path, so the exact match
     must win — falling back to the first entry, then the Reference property.
+
+    The first-entry fallback is eeschema's own rule, not a convenience. On a
+    sheet instance the symbol has NO entry for, kicad-cli 10.0.4 answers with
+    the symbol's first ``(path ...)`` entry in document order and ignores the
+    ``Reference`` property (which only decides when there is no
+    ``(instances ...)`` block at all) — so that instance shares a designator
+    with the first one. That duplicate is real: KiCad warns of annotation
+    errors and writes the same ref on both netlist comps, and the reader
+    reports it the same way (``duplicate designator`` warning). Ground truth:
+    ``tests/fixtures/kicad/hier_partial/`` +
+    ``netlist_hier_partial_root.kicad10.net`` (``tests/test_e2e_netlist.py``).
+    Probed but not committed: a stale entry from ANOTHER project listed first
+    is used the same way, and a child opened as its own root resolves every
+    symbol to its first entry.
     """
     inst = sym.find("instances")
     first: str | None = None
@@ -557,6 +572,16 @@ def sheet_refs(path: os.PathLike | str) -> tuple[str, list[tuple[str, str, str]]
     may be ``""`` for a sheet node that names no file.
     """
     root = _parse_root(path, "kicad_sch")
+    return _av(root.find("uuid"), 1) or "", doc_sheet_refs(root)
+
+
+def doc_sheet_refs(root: sexpr.SNode) -> list[tuple[str, str, str]]:
+    """:func:`sheet_refs` for an ALREADY-PARSED document: ``[(uuid, name,
+    sheetfile), …]``, one per ``(sheet ...)`` node, in document order.
+
+    For a caller that holds the tree anyway (``checks.integrity`` parses each
+    file once and verifies it too) — same fields, same fallbacks, no re-read.
+    """
     refs: list[tuple[str, str, str]] = []
     for sh in root.find_all("sheet"):
         props = _props(sh)
@@ -564,7 +589,28 @@ def sheet_refs(path: os.PathLike | str) -> tuple[str, list[tuple[str, str, str]]
         sname = props.get("Sheetname") or props.get("Sheet name") or suuid
         sfile = props.get("Sheetfile") or props.get("Sheet file") or ""
         refs.append((suuid, sname, sfile))
-    return _av(root.find("uuid"), 1) or "", refs
+    return refs
+
+
+def sheet_instance_refs(
+    root: sexpr.SNode, want_path: str | None
+) -> list[tuple[str, int]]:
+    """``(reference, unit)`` of every placed symbol AS RESOLVED on one sheet
+    instance (``want_path`` — see :func:`_reference`), in document order.
+
+    The document-level view of the rule :func:`read_sch` applies, for a caller
+    that must agree with the reader about which designator a symbol answers to
+    on a given instance without building the model: ``checks.integrity``
+    counts these across a sheet tree, so it and the reader resolve a reference
+    by ONE rule. A symbol with no reference at all is omitted (the reader
+    synthesizes ``$U<n>`` for it — never a duplicate).
+    """
+    out: list[tuple[str, int]] = []
+    for sym in _placed_symbols(root):
+        ref = _reference(sym, _props(sym), want_path)
+        if ref:
+            out.append((ref, int(_fnum(sym.find("unit"), 1, 1.0))))
+    return out
 
 
 def read_embedded_library(path: os.PathLike | str) -> model.Library | None:
@@ -614,6 +660,298 @@ def _node_net_name(node, net_by_idx: dict[str, str]) -> str | None:
     return net_by_idx.get(arg.value or "")
 
 
+def _pad_drill(pad) -> tuple[float | None, str | None,
+                             tuple[float, float] | None]:
+    """A pad's ``(drill ...)`` -> ``(first size, shape, (w, h))``.
+
+    The shapes kicad-cli 10.0.4 writes (``tests/fixtures/kicad/fab/``):
+    ``(drill 0.8)``, ``(drill oval 0.8 2.2)``, ``(drill oval 0.9)`` — an oval
+    whose two sizes are equal is written with ONE number — and any of them
+    with a trailing ``(offset x y)`` list, which is not a size. The first
+    element is the historical ``pad["drill"]`` value (an oval's X size).
+    """
+    drill = pad.find("drill")
+    if drill is None:
+        return None, None, None
+    atoms = [c.value for c in (drill.children or ())[1:] if c.is_atom]
+    shape = "round"
+    if atoms and atoms[0] == "oval":
+        shape, atoms = "oval", atoms[1:]
+    sizes: list[float] = []
+    for atom in atoms[:2]:
+        try:
+            sizes.append(float(atom))
+        except (TypeError, ValueError):
+            break
+    if not sizes:
+        return None, None, None
+    width = sizes[0]
+    height = sizes[1] if shape == "oval" and len(sizes) > 1 else width
+    return width, shape, (width, height)
+
+
+# --------------------------------------------------------------------------- #
+# vias: type and tenting
+# --------------------------------------------------------------------------- #
+_OUTER_COPPER = ("F.Cu", "B.Cu")
+
+
+def _via_type(via, layers: list[str]) -> str:
+    """``through`` | ``blind`` | ``buried`` | ``micro``.
+
+    KiCad 10 (file version 20260206) writes ``(via buried ...)`` as its own
+    token. KiCad <= 9 has one ``blind`` token for both kinds, and kicad-cli
+    10.0.4 keeps that token when it re-saves such a board — so a ``blind`` via
+    whose layer pair touches neither outer copper layer is reported as what it
+    physically is: buried. (KiCad's own board statistics count it as blind.)
+    """
+    token = next((c.value for c in (via.children or ())[1:]
+                  if c.is_atom and c.value in ("blind", "buried", "micro")),
+                 None)
+    if token is None:
+        return "through"
+    if (token == "blind" and len(layers) >= 2
+            and not any(name in _OUTER_COPPER for name in layers)):
+        return "buried"
+    return token
+
+
+def _tenting_sides(node) -> tuple[bool | None, bool | None, bool]:
+    """A ``(tenting ...)`` node -> ``(front, back, nested)``.
+
+    Two dialects. KiCad 10 nests one list per side — ``(tenting (front yes)
+    (back no))``, a via may also say ``none`` — and each side is ``True`` /
+    ``False`` / ``None`` (not stated). KiCad 9 lists bare tokens —
+    ``(tenting front back)``, ``(tenting front)``, ``(tenting none)`` — where
+    a NAMED side is ``True`` and an unnamed one comes back ``None`` for the
+    caller to interpret (the board and a via read it differently).
+    """
+    sides: dict[str, bool | None] = {"front": None, "back": None}
+    nested = False
+    for child in (node.children or ())[1:]:
+        if child.is_list and child.tag in sides:
+            nested = True
+            word = _av(child, 1)
+            sides[child.tag] = (True if word == "yes"
+                                else False if word == "no" else None)
+        elif child.is_atom and child.value in sides:
+            sides[child.value] = True
+    return sides["front"], sides["back"], nested
+
+
+def _board_tenting(setup) -> dict:
+    """Board-wide via tenting: ``{front, back, source}``.
+
+    * KiCad 10: ``(setup (tenting (front yes) (back yes)))``.
+    * KiCad 9: ``(setup (tenting front back))`` — an unnamed side is NOT
+      tented (kicad-cli 10 re-saves ``(tenting front)`` as front yes/back no
+      and ``(tenting none)`` as no/no).
+    * KiCad <= 8: the board carries no tenting; the plot dialog's "do not tent
+      vias" option does, as ``(pcbplotparams (viasonmask true|false))`` —
+      which kicad-cli 10 migrates into the board setting (``true`` -> no/no).
+    * none of these: unknown (``None``/``None``, ``source`` ``None``) — a
+      board that states nothing is not assumed tented.
+    """
+    if setup is not None:
+        node = setup.find("tenting")
+        if node is not None:
+            front, back, nested = _tenting_sides(node)
+            if not nested:
+                front, back = bool(front), bool(back)
+            return {"front": front, "back": back, "source": "setup.tenting"}
+        plot = setup.find("pcbplotparams")
+        on_mask = _av(plot.find("viasonmask"), 1) if plot is not None else None
+        if on_mask in ("true", "yes", "false", "no"):
+            tented = on_mask in ("false", "no")
+            return {"front": tented, "back": tented,
+                    "source": "pcbplotparams.viasonmask"}
+    return {"front": None, "back": None, "source": None}
+
+
+def _via_tenting(via, board_tenting: dict) -> dict:
+    """One via's effective tenting per side (``True``/``False``/``None``).
+
+    No ``(tenting ...)`` child: the via follows the board. KiCad 10's nested
+    form overrides per side, ``none`` meaning "follow the board". KiCad 9's
+    bare form names the tented sides; what an UNNAMED side means there is not
+    established — kicad-cli 10 reads it as "follow the board", while the form
+    itself suggests "not tented" — so it resolves only where both readings
+    agree (the board side is itself not tented) and is otherwise unknown.
+    """
+    out = {"front": board_tenting["front"], "back": board_tenting["back"]}
+    node = via.find("tenting")
+    if node is None:
+        return out
+    front, back, nested = _tenting_sides(node)
+    for side, stated in (("front", front), ("back", back)):
+        if stated is not None:
+            out[side] = stated
+        elif not nested and out[side] is not False:
+            out[side] = None
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# board outline (Edge.Cuts)
+# --------------------------------------------------------------------------- #
+def _on_edge_cuts(node) -> bool:
+    for tag in ("layer", "layers"):
+        lnode = node.find(tag)
+        if lnode is not None and any(
+                c.is_atom and c.value == "Edge.Cuts"
+                for c in (lnode.children or ())[1:]):
+            return True
+    return False
+
+
+def _edge_cuts_graphics(parent, prefix: str, xf, acc: dict) -> None:
+    """Collect ``parent``'s own Edge.Cuts graphics into ``acc``.
+
+    ``prefix`` is ``gr_`` on the board and ``fp_`` inside a footprint; ``xf``
+    maps a point of that frame to the board frame. Lines and arcs are loose
+    segments (they close only by meeting other segments); ``rect``, ``circle``
+    and ``poly`` are closed shapes on their own. Shapes proven against real
+    KiCad output — ``tests/fixtures/kicad/fab/`` and its README:
+
+    * arc, KiCad >= 6: ``(start) (mid) (end)``;
+    * arc, KiCad <= 5: ``(start <centre>) (end <first point>) (angle <deg>)``;
+    * circle: ``(center) (end <a point on it>)``;
+    * rect: ``(start) (end)``, and from KiCad 10 an optional ``(radius r)``
+      for rounded corners;
+    * poly: ``(pts (xy ..) (arc (start) (mid) (end)) ..)``, implicitly closed
+      (a rounded ``fp_rect`` in a rotated footprint is re-saved as a poly of
+      four arcs and nothing else).
+
+    A Bezier ``curve`` has no model here: its control points widen the bounding
+    box and it is counted in ``acc["curves"]``, which keeps the outline from
+    being reported as closed.
+    """
+    def pt(node) -> tuple[float, float]:
+        return xf(_fnum(node, 1), _fnum(node, 2))
+
+    for gr in parent.find_all(prefix + "line"):
+        if _on_edge_cuts(gr):
+            acc["loose"].append(_outline.line(pt(gr.find("start")),
+                                              pt(gr.find("end"))))
+    for gr in parent.find_all(prefix + "arc"):
+        if not _on_edge_cuts(gr):
+            continue
+        start, mid, end = gr.find("start"), gr.find("mid"), gr.find("end")
+        angle = gr.find("angle")
+        if mid is not None:
+            acc["loose"].append(_outline.arc(pt(start), pt(mid), pt(end)))
+        elif angle is not None:
+            # a rigid footprint transform keeps the sweep's sign
+            acc["loose"].extend(_outline.legacy_arc(
+                pt(start), pt(end), _fnum(angle, 1)))
+        else:
+            acc["malformed"] += 1
+    for gr in parent.find_all(prefix + "rect"):
+        if _on_edge_cuts(gr):
+            s, e = gr.find("start"), gr.find("end")
+            # built in its own frame first, THEN transformed: a rectangle in
+            # a rotated footprint is not axis-aligned on the board
+            local = _outline.rounded_rectangle(
+                (_fnum(s, 1), _fnum(s, 2)), (_fnum(e, 1), _fnum(e, 2)),
+                _fnum(gr.find("radius"), 1))
+            acc["shapes"].append([
+                _outline.Segment(xf(*seg.a), xf(*seg.b),
+                                 None if seg.mid is None else xf(*seg.mid))
+                for seg in local])
+    for gr in parent.find_all(prefix + "circle"):
+        if _on_edge_cuts(gr):
+            c, e = gr.find("center"), gr.find("end")
+            radius = ((_fnum(e, 1) - _fnum(c, 1)) ** 2
+                      + (_fnum(e, 2) - _fnum(c, 2)) ** 2) ** 0.5
+            acc["shapes"].append(_outline.circle(pt(c), radius))
+    for gr in parent.find_all(prefix + "poly"):
+        if not _on_edge_cuts(gr):
+            continue
+        pts = gr.find("pts")
+        run: list = []
+        last = None
+        for child in (pts.children or ())[1:] if pts is not None else ():
+            if child.tag == "xy":
+                here = pt(child)
+                if last is not None:
+                    run.append(_outline.line(last, here))
+                last = here
+            elif child.tag == "arc":
+                seg = _outline.arc(pt(child.find("start")),
+                                   pt(child.find("mid")), pt(child.find("end")))
+                if last is not None and last != seg.a:
+                    run.append(_outline.line(last, seg.a))
+                run.append(seg)
+                last = seg.b
+        if run:
+            acc["shapes"].append(_outline.path(run))
+        else:
+            acc["malformed"] += 1
+    for gr in parent.find_all(prefix + "curve"):
+        if _on_edge_cuts(gr):
+            pts = gr.find("pts")
+            acc["hull"].extend(pt(xy) for xy in
+                               (pts.find_all("xy") if pts is not None else ()))
+            acc["curves"] += 1
+
+
+def _board_outline(root) -> dict | None:
+    """Everything on ``Edge.Cuts`` -> the ``board["outline"]`` dict, or
+    ``None`` when the layer is empty.
+
+    Footprint graphics count: kicad-cli 10.0.4's own outline builder includes
+    them (a dangling ``fp_line`` on Edge.Cuts turns its ``has_outline`` false),
+    and 187 of the footprints KiCad ships draw there (reverse-mount LEDs,
+    battery holders, mouse-bites). They are stored in the footprint's frame
+    and placed with the same rotation the pads use; a back-side footprint
+    needs no extra mirror (proven by ``fab/outline_footprint.kicad_pcb``).
+    KiCad <= 5 calls the node ``module``; its graphics are read the same way
+    (``fab/legacy_v5.kicad_pcb``).
+    """
+    acc: dict = {"loose": [], "shapes": [], "hull": [], "curves": 0,
+                 "malformed": 0}
+    _edge_cuts_graphics(root, "gr_", lambda x, y: (x, y), acc)
+    for fp in [*root.find_all("footprint"), *root.find_all("module")]:
+        at = fp.find("at")
+        fx, fy = (_fnum(at, 1), _fnum(at, 2)) if at is not None else (0.0, 0.0)
+        rot = _fnum(at, 3) if at is not None else 0.0
+
+        def place(x: float, y: float, fx: float = fx, fy: float = fy,
+                  rot: float = rot) -> tuple[float, float]:
+            dx, dy = _rot_ccw(x, y, rot)
+            return (fx + dx, fy + dy)
+
+        _edge_cuts_graphics(fp, "fp_", place, acc)
+
+    problems = []
+    if acc["curves"]:
+        problems.append(f"{acc['curves']} Bezier curve(s) on Edge.Cuts are "
+                        "not modelled")
+    if acc["malformed"]:
+        problems.append(f"{acc['malformed']} Edge.Cuts shape(s) could not be "
+                        "read")
+    result = _outline.assemble(acc["loose"], acc["shapes"],
+                               extra_points=acc["hull"], problems=problems)
+    if result.bbox is None:
+        return None
+
+    def box(b) -> tuple[tuple[float, float], tuple[float, float]]:
+        return ((round(b[0][0], 6), round(b[0][1], 6)),
+                (round(b[1][0], 6), round(b[1][1], 6)))
+
+    return {
+        "closed": result.closed,
+        # board bodies minus cutouts, mm^2; None unless every shape closed
+        "area_mm2": None if result.area is None else round(result.area, 6),
+        "bbox": box(result.bbox),
+        "loops": [{"area_mm2": round(lp.area, 6), "bbox": box(lp.bbox),
+                   "depth": lp.depth, "cutout": lp.is_cutout}
+                  for lp in result.loops],
+        "open_ends": result.open_ends,
+        "problems": list(result.problems),
+    }
+
+
 def _pcb_pad(pad, ref: str, fx: float, fy: float, frot: float,
              fp_layer: str | None, net_by_idx: dict[str, str]) -> dict:
     """One footprint pad -> a board-frame pad dict (mm, +Y down)."""
@@ -624,16 +962,7 @@ def _pcb_pad(pad, ref: str, fx: float, fy: float, frot: float,
     layers_node = pad.find("layers")
     layers = [c.value for c in (layers_node.children or ())[1:]
               if c.is_atom and c.value] if layers_node is not None else []
-    drill = pad.find("drill")
-    drill_mm = None
-    if drill is not None:
-        v = _av(drill, 1)
-        if v == "oval":
-            v = _av(drill, 2)
-        try:
-            drill_mm = float(v) if v is not None else None
-        except (TypeError, ValueError):
-            drill_mm = None
+    drill_mm, drill_shape, drill_size = _pad_drill(pad)
     return {
         "component": ref,
         "number": _av(pad, 1) or "",
@@ -645,8 +974,26 @@ def _pcb_pad(pad, ref: str, fx: float, fy: float, frot: float,
         "layers": layers,
         "footprint_layer": fp_layer,
         "drill": drill_mm,
+        "drill_shape": drill_shape,   # "round" | "oval" | None (no hole)
+        "drill_size": drill_size,     # (w, h) mm, pad-local axes
         "net": _node_net_name(pad, net_by_idx),
     }
+
+
+def _footprint_attr_tokens(fp) -> set[str]:
+    """Bare tokens of a board footprint's ``(attr ...)`` node(s).
+
+    ``(attr smd exclude_from_pos_files exclude_from_bom dnp)``: the footprint
+    type (``smd``/``through_hole``, absent for "unspecified") followed by flag
+    tokens, in KiCad 6 through 10 alike (ground truth:
+    ``tests/fixtures/kicad/fp_attrs/``). Only the footprint's OWN ``attr``
+    children are read: KiCad 10's per-footprint ``(variant (name "A") (dnp
+    yes) ...)`` blocks are assembly-variant overrides, not the base flags. A
+    footprint with no ``(attr ...)`` at all carries no flag — KiCad writes
+    none for an unspecified-type, flag-less footprint.
+    """
+    return {c.value for attr in fp.find_all("attr")
+            for c in (attr.children or ())[1:] if c.is_atom and c.value}
 
 
 def read_pcb(path: os.PathLike | str) -> Pcb:
@@ -692,6 +1039,10 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
         at = fp.find("at")
         fx, fy = (_fnum(at, 1), _fnum(at, 2)) if at is not None else (0.0, 0.0)
         rot = _fnum(at, 3) if at is not None else 0.0
+        attrs = _footprint_attr_tokens(fp)
+        # KiCad <= 5 `virtual` == "not in BOM, not in position files"
+        # (kicad-cli 10 rewrites it to exactly those two tokens).
+        virtual = "virtual" in attrs
         footprints.append(
             MFootprint(
                 designator=ref or "",
@@ -699,6 +1050,13 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
                 layer=layer,
                 rotation=rot,
                 value=value,
+                at=(fx, fy),
+                dnp="dnp" in attrs,
+                exclude_from_bom=virtual or "exclude_from_bom" in attrs,
+                exclude_from_pos=virtual or "exclude_from_pos_files" in attrs,
+                board_only="board_only" in attrs,
+                models=[m for m in (_av(n, 1) for n in fp.find_all("model"))
+                        if m],
             )
         )
         for pad in fp.find_all("pad"):
@@ -716,12 +1074,8 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
         })
 
     vias: list[dict] = []
+    tenting = _board_tenting(root.find("setup"))
     for via in root.find_all("via"):
-        kind = "through"
-        for c in (via.children or ())[1:]:
-            if c.is_atom and c.value in ("blind", "micro"):
-                kind = c.value
-                break
         at = via.find("at")
         layers_node = via.find("layers")
         vlayers = [c.value for c in (layers_node.children or ())[1:]
@@ -731,7 +1085,9 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
             "size": _fnum(via.find("size"), 1),
             "drill": _fnum(via.find("drill"), 1),
             "layers": vlayers,
-            "type": kind,
+            "type": _via_type(via, vlayers),   # through|blind|buried|micro
+            # effective solder-mask tenting per side: True/False/None(unknown)
+            "tenting": _via_tenting(via, tenting),
             "net": _net_ref(via),
         })
 
@@ -788,19 +1144,16 @@ def read_pcb(path: os.PathLike | str) -> Pcb:
                 setup_vals[child.tag] = vals
         board["setup"] = setup_vals
 
-    # Edge.Cuts extent (board outline bbox) from gr_lines/gr_rects/gr_arcs.
-    exs: list[float] = []
-    eys: list[float] = []
-    for gr in list(root.find_all("gr_line")) + list(root.find_all("gr_rect")):
-        if _av(gr.find("layer"), 1) != "Edge.Cuts":
-            continue
-        for tag in ("start", "end"):
-            node = gr.find(tag)
-            if node is not None:
-                exs.append(_fnum(node, 1))
-                eys.append(_fnum(node, 2))
-    if exs:
-        board["outline_bbox"] = ((min(exs), min(eys)), (max(exs), max(eys)))
+    # Board-wide via tenting ({front, back, source}; all None = not stated).
+    board["tenting"] = tenting
+
+    # Board outline: every Edge.Cuts shape, on the board and in footprints,
+    # chained into loops (akcli.geometry.outline). ``outline_bbox`` is the
+    # historical key — the extent of all of it, arcs and circles included.
+    outline = _board_outline(root)
+    if outline is not None:
+        board["outline"] = outline
+        board["outline_bbox"] = outline["bbox"]
 
     return Pcb(
         source_path=str(path),

@@ -1,0 +1,10 @@
+{
+ "components": {
+  "R1": {"value": "100k"},
+  "R2": {"value": "33k"},
+  "R3": {"value": "1k"},
+  "C1": {"value": "100n"},
+  "C2": {"value": "100n"},
+  "R4": {"value": "10k"}
+ }
+}

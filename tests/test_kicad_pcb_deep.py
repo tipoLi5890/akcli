@@ -100,5 +100,5 @@ def test_export_is_json_native(pcb):
     import json
     doc = pcb.export()
     json.dumps(doc)                          # must not raise
-    assert doc["schema_version"] == "2.0"
+    assert doc["schema_version"] == "2.1"
     assert doc["pads"][0]["component"] == "U1"

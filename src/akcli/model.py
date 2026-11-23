@@ -26,6 +26,9 @@ from dataclasses import dataclass, field, fields, is_dataclass
 #      power port and a local label no longer depends on read order). Shipped
 #      with op-list protocol 2 (four op fields renamed) as one migration
 #      boundary; see docs/migration-0.21.md.
+# 2.1: Footprint gains at/dnp/exclude_from_bom/exclude_from_pos/board_only/
+#      models; FootprintDef gains graphics; vias and pads gain the fields
+#      fab check reads; all optional adds.
 SCHEMA_VERSION = contract.SCHEMA_VERSIONS["schematic"]   # the registry is the source
 
 # (designator, pin_number) — a PUBLIC identity, not an implementation detail:
@@ -175,6 +178,18 @@ class Footprint:
     layer: str | None
     rotation: float = 0.0
     value: str | None = None
+    # Placement + assembly attributes (additive; consumers ignore unknown
+    # keys). Populated by the KiCad board reader from ``(at ...)`` /
+    # ``(attr ...)`` / ``(model ...)``; a reader that cannot know keeps the
+    # defaults — never a guess (same rule as ``Component.dnp``). ``at`` is the
+    # footprint origin in the reader's own board frame (KiCad: mm, +Y down —
+    # the frame ``Pcb.pads[*]["at"]`` uses); the angle stays in ``rotation``.
+    at: tuple[float, float] | None = None
+    dnp: bool = False               # KiCad `(attr ... dnp)`: placed, not populated
+    exclude_from_bom: bool = False  # `exclude_from_bom` (legacy `virtual`)
+    exclude_from_pos: bool = False  # `exclude_from_pos_files` (legacy `virtual`)
+    board_only: bool = False        # `board_only`: KiCad's "not in schematic"
+    models: list[str] = field(default_factory=list)   # 3D model paths as written
 
 
 @dataclass
@@ -193,6 +208,12 @@ class Pcb:
     pads: list[dict] = field(default_factory=list)
     # Schema 1.2 additive fields: board setup (layers/thickness/design rules,
     # KiCad reader), copper zones, and reader-side metadata/warnings.
+    # The KiCad reader's dict keys grew additively in schema 2.1 (nothing
+    # was renamed or removed): a via carries `type`
+    # (through|blind|buried|micro) and `tenting` {front, back}; a pad carries
+    # `drill_shape` + `drill_size` (w, h) beside `drill`; `board` carries
+    # `tenting` {front, back, source} and `outline` {closed, area_mm2, bbox,
+    # loops, open_ends, problems} beside the historical `outline_bbox`.
     zones: list[dict] = field(default_factory=list)
     board: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -246,6 +267,14 @@ class FootprintDef:
     courtyard: bool = False       # has any *.Courtyard graphics
     format_version: str | None = None   # KiCad (version ...) token, None = legacy/unknown
     warnings: list[str] = field(default_factory=list)
+    # Outline/silkscreen graphics in source order (additive; library frame: mm,
+    # +Y down). Lines, arcs and circles only — every item carries ``kind``,
+    # ``layer`` (KiCad name), ``source_layer`` (Altium name, None for a KiCad
+    # source) and ``width``, plus:
+    #   line   -> ``start``, ``end``
+    #   arc    -> ``start``, ``mid``, ``end`` (the KiCad ``fp_arc`` triple)
+    #   circle -> ``center``, ``radius``
+    graphics: list[dict] = field(default_factory=list)
 
 
 @dataclass

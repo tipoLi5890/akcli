@@ -1,6 +1,6 @@
 """`akcli schema` — print a packaged JSON Schema, byte-for-byte.
 
-Fourteen schemas ship inside the wheel (mirrored from the repo's canonical
+Fifteen schemas ship inside the wheel (mirrored from the repo's canonical
 ``schemas/``, byte-identity CI-gated), but until this command none of them was
 reachable through the CLI: an orchestrator that ``pip install``-ed akcli had no
 way to obtain ``ops.schema.json`` for client-side validation without digging

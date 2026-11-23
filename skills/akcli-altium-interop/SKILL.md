@@ -60,9 +60,10 @@ Parses:
   cross-validated item-by-item against KiCad's own Altium importer on real boards.
   `Fills6`/`Regions6`/`Texts6`/`Polygons6` are still skipped.
 - **`.PcbLib`** — decodes each footprint's pads (number, position, size, drill, shape,
-  rotation, NPTH vs plated) into the `FootprintDef` model. Undecoded primitives (silk,
-  text, 3D bodies) surface as `UNSUPPORTED_PRIMITIVE` warnings rather than failing the
-  read. Read-only, same as every other Altium input.
+  rotation, NPTH vs plated) and its tracks and arcs (`graphics`: lines, arcs, circles on
+  a KiCad layer) into the `FootprintDef` model. Text, fills, regions, 3D bodies, vias and
+  keepout objects are NOT imported: each surfaces as an `UNSUPPORTED_PRIMITIVE` warning
+  with a count rather than failing the read. Read-only, same as every other Altium input.
 
 Refused loudly with `ERROR: ALTIUM_UNSUPPORTED` and **exit 5** (unsupported, not
 corrupt): binary `.SchLib` symbol records, and an unknown record type inside a
@@ -78,7 +79,7 @@ exit-1 failure rather than a quiet empty result.
 ## Getting designs OUT of Altium
 
 ```bash
-akcli read main.SchDoc --json > model.json        # full normalized model (schema_version "2.0")
+akcli read main.SchDoc --json > model.json        # full normalized model (schema_version "2.1")
 akcli net main.SchDoc --json > netlist.json       # structured netlist (stable_id per net)
 akcli export main.SchDoc --format protel -o board.net   # Altium/Protel .NET for other EDA tools
 akcli export main.SchDoc --format kicad -o board.net.kicad   # KiCad legacy eeschema netlist
@@ -151,10 +152,19 @@ artwork. Migrate by re-drawing in KiCad and proving net equivalence:
    ```bash
    akcli library import-altium part.PcbLib --out vendor.pretty --courtyard 0.25 --apply
    ```
-   Pads convert verbatim and are cross-validated against KiCad's own Altium importer;
-   the run writes a `provenance.json` alongside the output (source file SHA-256,
-   converter version, and every declared transformation — e.g. a synthesized courtyard).
-   Dry-run by default; `--apply` is required to write the files.
+   Pads convert verbatim; tracks and arcs become `fp_line`/`fp_arc`/`fp_circle` on the
+   layer KiCad's own Altium importer would use. Text, fills, regions and 3D bodies are
+   not imported — say so when the warnings list them. Altium mechanical layers carry no
+   fixed meaning, so they land on `User.N` with a `MECHANICAL_LAYER` warning; never
+   assume which one is the courtyard — ask, or read the vendor's layer legend, then
+   assign it:
+   ```bash
+   akcli library import-altium part.PcbLib --out vendor.pretty --layer-map Mechanical15=F.CrtYd --apply
+   ```
+   The run writes a `provenance.json` alongside the output (source file SHA-256,
+   converter version, the layer map applied, imported/skipped primitive counts and every
+   declared transformation — e.g. a synthesized courtyard). Dry-run by default; `--apply`
+   is required to write the files.
 3. **Draw into KiCad.** Author the op-list, then (see the akcli-circuit-design skill):
    ```bash
    akcli plan board.kicad_sch --ops ops.json

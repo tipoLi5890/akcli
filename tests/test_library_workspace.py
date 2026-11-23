@@ -219,6 +219,204 @@ def test_cli_library_repair_dry_run_ignores_gui_lock(project, capsys):
     assert "dry-run" in capsys.readouterr().out
 
 
+def test_cli_library_repair_allow_open_overrides_the_lock(project, capsys):
+    """`--allow-open` is the same explicit risk acceptance `draw` offers; the
+    refusal it overrides is a TARGET_LOCKED envelope under --json."""
+    from akcli.writers import kicad as kwriter
+
+    sch = project / "board.kicad_sch"
+    lck = kwriter.gui_lock_path(sch)
+    lck.write_text("locked\n", encoding="utf-8", newline="\n")
+    argv = ["library", "repair", str(project),
+            "--rename-footprint-lib", "footprint=proj_jlc", "--apply"]
+
+    assert main([*argv, "--json"]) == 6
+    err = json.loads(capsys.readouterr().out)["error"]
+    assert err["code"] == "TARGET_LOCKED" and err["exit"] == 6
+    assert lck.name in err["message"] and "--allow-open" in err["remediation"]
+    assert '"footprint:LED-X"' in sch.read_text()             # untouched
+
+    assert main([*argv, "--allow-open", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["applied"] is True
+    assert '"proj_jlc:LED-X"' in sch.read_text()
+
+
+# --------------------------------------------------------------------------- #
+# config [[waiver]] entries: `library audit` applies them as `check` does
+# --------------------------------------------------------------------------- #
+def _waive(project: Path, *entries: str) -> Path:
+    cfg = project / "akcli.toml"
+    cfg.write_text("\n".join(f"[[waiver]]\n{e}\n" for e in entries),
+                   encoding="utf-8", newline="\n")
+    return cfg
+
+
+def test_audit_findings_carry_the_refs_a_waiver_scopes_on(project):
+    refs = {f.code: f.refs for f in libtable.audit(libtable.discover(project))}
+    assert refs["FOOTPRINT_LIB_UNREGISTERED"] == ["D1"]       # the component
+    assert refs["MODEL_MISSING"] == ["proj_jlc:LED-X"]        # one footprint
+    assert refs["FOOTPRINT_LEGACY_FORMAT"] == ["proj_jlc:OLD_ONE"]
+
+    (project / "fp-lib-table").write_text(_FP_TABLE.replace("jlc.pretty", "nope.pretty"))
+    refs = {f.code: f.refs for f in libtable.audit(libtable.discover(project))}
+    assert refs["LIB_PATH_MISSING"] == ["proj_jlc"]           # the table entry
+
+
+def test_cli_library_audit_waiver_by_designator(project, capsys):
+    # discovered by walking up FROM the project directory — no -C
+    _waive(project, 'code = "FOOTPRINT_LIB_UNREGISTERED"\nrefs = ["D1"]\n'
+                    'severity = "off"\nreason = "assigned at layout"')
+    code = main(["library", "audit", str(project), "--json", "--fail-on", "error"])
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert code == 0                    # the only ERROR was waived
+    assert "FOOTPRINT_LIB_UNREGISTERED" not in {f["code"] for f in doc["findings"]}
+    assert doc["config_waived"] == "1 (0 demoted)"
+    assert doc["waived"] == [{"code": "FOOTPRINT_LIB_UNREGISTERED", "refs": ["D1"],
+                              "action": "dropped", "reason": "assigned at layout"}]
+    # same stderr line as `akcli check`
+    assert ("waived: FOOTPRINT_LIB_UNREGISTERED [D1] dropped — assigned at layout"
+            in io.err)
+    # what is left still gates at the default threshold (3D/legacy warnings)
+    assert main(["library", "audit", str(project), "--json"]) == 1
+    left = json.loads(capsys.readouterr().out)["findings"]
+    assert all(f["refs"] for f in left)                      # refs are exported
+
+
+@pytest.mark.parametrize("entry", [
+    'code = "FOOTPRINT_LIB_UNREGISTERED"\nrefs = ["D9"]',     # another component
+    'code = "FOOTPRINT_MISSING"\nrefs = ["D1"]',             # another code
+    'code = "FOOTPRINT_LIB_UNREGISTERED"\nrefs = ["proj_jlc:*"]',  # a library ref
+])
+def test_cli_library_audit_non_matching_waiver_waives_nothing(project, capsys, entry):
+    _waive(project, entry)
+    code = main(["library", "audit", str(project), "--json", "--fail-on", "error"])
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert code == 1
+    assert "FOOTPRINT_LIB_UNREGISTERED" in {f["code"] for f in doc["findings"]}
+    assert doc["config_waived"] == "0 (0 demoted)" and doc["waived"] == []
+    assert "waived:" not in io.err
+
+
+def test_cli_library_audit_waiver_demotes_and_scopes_a_library(project, tmp_path_factory,
+                                                               capsys):
+    # an explicit -C from outside the project; a library-scoped ref
+    cfg = _waive(tmp_path_factory.mktemp("cfg"),
+                 'code = "MODEL_*"\nrefs = "proj_jlc:*"\nseverity = "note"')
+    main(["-C", str(cfg), "library", "audit", str(project), "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["config_waived"] == "1 (1 demoted)"
+    (model,) = [f for f in doc["findings"] if f["code"] == "MODEL_MISSING"]
+    assert model["severity"] == "note"                       # kept, demoted
+
+
+def test_cli_library_audit_text_never_reads_clean_when_waivers_cleaned_it(project,
+                                                                          capsys):
+    assert main(["library", "audit", str(project)]) == 1
+    assert "config-waived: 0 (0 demoted)" in capsys.readouterr().out
+
+    _waive(project, 'code = "*"')
+    assert main(["library", "audit", str(project)]) == 0
+    out = capsys.readouterr().out
+    assert "config-waived: 3 (0 demoted)" in out
+    assert "every finding was config-waived" in out
+    assert "all resolve" not in out
+
+
+# --------------------------------------------------------------------------- #
+# `library repair --apply`: the post-apply audit decides the exit
+# --------------------------------------------------------------------------- #
+def test_cli_library_repair_apply_exits_1_when_a_repaired_file_still_errors(
+        project, capsys):
+    # renaming to a nickname no table registers leaves board.kicad_sch — a
+    # file this repair rewrote — with FOOTPRINT_LIB_UNREGISTERED
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=bogus", "--apply", "--json"])
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert code == 1
+    assert doc["schema_version"] and doc["applied"] is True
+    assert doc["post_audit"] == {"errors": 1,
+                                 "remaining": ["FOOTPRINT_LIB_UNREGISTERED"],
+                                 "unrelated_errors": 0}
+    assert "post-repair audit: 1 error(s) remain" in io.err
+    # the write stands (it is reported, not rolled back) and left its .bak
+    assert '"bogus:LED-X"' in (project / "board.kicad_sch").read_text()
+    assert (project / "board.kicad_sch.bak").exists()
+
+
+def test_cli_library_repair_apply_text_mode_exits_1_too(project, capsys):
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=bogus", "--apply"])
+    io = capsys.readouterr()
+    assert code == 1
+    assert "applied 2 file(s)" in io.out
+    assert "FOOTPRINT_LIB_UNREGISTERED" in io.err
+
+
+@pytest.mark.parametrize("breakage", ["other-schematic", "table"])
+def test_cli_library_repair_apply_ignores_errors_in_files_it_did_not_touch(
+        project, capsys, breakage):
+    if breakage == "other-schematic":
+        # no 'footprint:' field in it, so the rename never rewrites it
+        (project / "other.kicad_sch").write_text(
+            _SCH.replace('"footprint:LED-X"', '"proj_jlc:GONE"'))
+        want = "FOOTPRINT_MISSING"
+    else:
+        (project / "sym-lib-table").write_text(_SYM_TABLE.replace(
+            ")\n)", ")\n  (lib (name \"gone\")(type \"KiCad\")"
+            "(uri \"${KIPRJMOD}/libs/gone.kicad_sym\")(options \"\")(descr \"\"))\n)"))
+        want = "LIB_PATH_MISSING"
+    assert want in _codes(libtable.audit(libtable.discover(project)))
+
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=proj_jlc", "--apply", "--json"])
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert code == 0                    # the repair itself left nothing broken
+    assert doc["post_audit"] == {"errors": 0, "remaining": [],
+                                 "unrelated_errors": 1}
+    assert "1 error(s) in files this repair did not touch" in io.err
+
+
+def test_cli_library_repair_post_audit_honours_waivers(project, capsys):
+    # `library audit` would call this project clean of errors; so must repair
+    _waive(project, 'code = "FOOTPRINT_LIB_UNREGISTERED"\nrefs = "D1"')
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=bogus", "--apply", "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert doc["post_audit"]["errors"] == 0 and doc["post_audit"]["remaining"] == []
+
+
+def test_cli_library_repair_bad_config_refuses_before_any_write(project, capsys):
+    # the post-apply audit reads akcli.toml; a broken one must stop the repair
+    # up front, not between the write and the report
+    (project / "akcli.toml").write_text("[[waiver]]\nseverity = \"off\"\n",
+                                        encoding="utf-8", newline="\n")
+    before = (project / "board.kicad_sch").read_text()
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=proj_jlc", "--apply"])
+    assert code == 2
+    assert "BAD_CONFIG" in capsys.readouterr().err
+    assert (project / "board.kicad_sch").read_text() == before
+    assert not (project / "board.kicad_sch.bak").exists()
+    # the dry-run plan never needed the config
+    assert main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=proj_jlc"]) == 0
+
+
+def test_cli_library_repair_dry_run_json_shape_is_unchanged(project, capsys):
+    code = main(["library", "repair", str(project),
+                 "--rename-footprint-lib", "footprint=bogus", "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert set(doc) == {"schema_version", "project", "applied", "edits"}
+    assert doc["applied"] is False and len(doc["edits"]) == 2
+    assert '"footprint:LED-X"' in (project / "board.kicad_sch").read_text()
+
+
 # --------------------------------------------------------------------------- #
 # library import-altium (.PcbLib -> .pretty)
 # --------------------------------------------------------------------------- #
@@ -292,3 +490,53 @@ def test_import_altium_is_deterministic(tmp_path):
     assert main(["library", "import-altium", str(src), "--out", str(out1), "--apply"]) == 0
     assert main(["library", "import-altium", str(src), "--out", str(out2), "--apply"]) == 0
     assert (out1 / "FP-WEIRD.kicad_mod").read_text() == (out2 / "FP-WEIRD.kicad_mod").read_text()
+
+
+def test_import_altium_reimport_refuses_a_gui_locked_output(tmp_path, capsys):
+    """A re-import OVERWRITES the footprints of the first one — the same
+    invariant as `draw --apply`: never write a file KiCad holds open."""
+    from akcli.writers import kicad as kwriter
+
+    src = _make_pcblib(tmp_path)
+    out = tmp_path / "weird.pretty"
+    argv = ["library", "import-altium", str(src), "--out", str(out), "--apply"]
+    assert main(argv) == 0
+    capsys.readouterr()
+    mod = out / "FP-WEIRD.kicad_mod"
+    before = mod.read_bytes()
+    prov_before = (out / "provenance.json").read_bytes()
+    lck = kwriter.gui_lock_path(mod)
+    lck.write_text("locked\n", encoding="utf-8", newline="\n")
+
+    # a different courtyard would change the bytes — if anything were written
+    assert main([*argv, "--courtyard", "0.5", "--json"]) == 6
+    io = capsys.readouterr()
+    err = json.loads(io.out)["error"]
+    assert err["code"] == "TARGET_LOCKED" and err["exit"] == 6
+    assert lck.name in err["message"] and "--allow-open" in err["remediation"]
+    assert "TARGET_LOCKED" in io.err
+    assert mod.read_bytes() == before                         # untouched
+    assert (out / "provenance.json").read_bytes() == prov_before
+
+    # the dry-run preview is never blocked: it writes nothing
+    assert main(argv[:-1]) == 0
+    capsys.readouterr()
+
+    assert main([*argv, "--courtyard", "0.5", "--allow-open", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["applied"] is True
+    assert mod.read_bytes() != before
+
+
+def test_import_altium_first_import_ignores_a_stray_lock(tmp_path, capsys):
+    # Only an EXISTING output can be open in KiCad: a leftover lock in an
+    # otherwise empty .pretty must not block the first import.
+    from akcli.writers import kicad as kwriter
+
+    src = _make_pcblib(tmp_path)
+    out = tmp_path / "weird.pretty"
+    out.mkdir()
+    kwriter.gui_lock_path(out / "FP-WEIRD.kicad_mod").write_text(
+        "locked\n", encoding="utf-8", newline="\n")
+    assert main(["library", "import-altium", str(src), "--out", str(out),
+                 "--apply"]) == 0
+    assert (out / "FP-WEIRD.kicad_mod").is_file()

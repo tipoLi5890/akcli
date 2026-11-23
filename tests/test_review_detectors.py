@@ -71,6 +71,48 @@ def test_detector_sees_an_altium_upper_case_value():
     assert [f.code for f in fs] == ["REVIEW_XTAL_LOAD"]
 
 
+def test_parse_value_accepts_bom_style_trailing_qualifiers():
+    # A real BOM Value carries the dielectric / tolerance / rating / package
+    # after the number. Every one of these used to parse to None, which
+    # silently dropped the part from every value-reading detector.
+    cases = {
+        "8p C0G": 8e-12, "18p NP0": 18e-12, "10u/16V": 10e-6,
+        "10k 1%": 10e3, "4.7uF 10V": 4.7e-6, "100nF/50V": 100e-9,
+        "100n X7R 0402 50V ±10%": 100e-9, "2.2uF,6.3V,X5R": 2.2e-6,
+        "10K 0.1W": 10e3, "22P NP0": 22e-12, "0R 0603": 0.0,
+    }
+    for text, want in cases.items():
+        got = topo.parse_value(text)
+        assert got is not None and abs(got - want) <= 1e-9 * max(want, 1e-12), text
+
+
+def test_parse_value_qualifier_fallback_never_guesses():
+    # Only a LEADING value followed by nothing but known qualifiers parses.
+    for bad in (
+        "ATmega328", "LM358", "3V3", "32.768kHz", "DNP",   # not values at all
+        "10k foo",                 # an unknown trailing token
+        "0402 10k", "50V 10u",     # the value is not the leading token
+        "5V 1W", "10 V", "10 %",   # ratings alone / a detached unit
+        "32.768kHz 7pF 20ppm",     # a crystal's Value is not a capacitance
+        "/", ",", " ; ",           # nothing but separators (used to raise)
+    ):
+        assert topo.parse_value(bad) is None, bad
+
+
+def test_crystal_load_caps_with_bom_qualifiers_are_evaluated():
+    # end-to-end: "8p C0G" load caps were invisible to the crystal review
+    # (parse -> None -> "unverifiable: silence"); now CL is computed.
+    fs = _run(crystal, _xtal_sch("8p C0G", "8p C0G"))
+    assert [f.code for f in fs] == ["REVIEW_XTAL_LOAD"]
+    calc = fs[0].evidence["calc"]
+    assert calc["inputs"]["c1"] == calc["inputs"]["c2"] == 8e-12
+    # CL = 4 pF series + 4 pF stray = 8 pF
+    assert abs(calc["results"]["cl_pf"] - 8.0) < 0.01
+    # ...and a mismatched qualified pair is still caught as asymmetric
+    fs = _run(crystal, _xtal_sch("8p C0G", "18p NP0"))
+    assert [f.code for f in fs] == ["REVIEW_XTAL_ASYMMETRIC"]
+
+
 # --------------------------------------------------------------------------- #
 # divider
 # --------------------------------------------------------------------------- #
@@ -268,6 +310,26 @@ def test_power_only_connector_is_not_flagged():
     sch = _sch([_comp("J2", "Connector:Barrel_Jack", "PWR")],
                [("VIN", [("J2", "1")]), ("GND", [("J2", "2")])])
     assert _run(protection, sch) == []
+
+
+def _probe_sch(ref, lib):
+    """One part hanging off an MCU signal net that reaches no TVS."""
+    return _sch([_comp(ref, lib, "TestPoint"),
+                 _comp("U1", "MCU:MCU", "MCU", pins=(("1", "IO1"),))],
+                [("I2C_SCL", [(ref, "1"), ("U1", "1")])])
+
+
+def test_test_point_is_not_an_unprotected_connector():
+    # `Connector:TestPoint` lives in the Connector library, but a probe pad is
+    # not a board-edge interface: demanding a TVS on every test point buried
+    # the real connector findings.
+    assert _run(protection, _probe_sch("TP7", "Connector:TestPoint")) == []
+    # ...whatever it is designated (J/P are connector prefixes)
+    assert _run(protection, _probe_sch("J7", "Connector:TestPoint_Probe")) == []
+    # control: the same net on a real header is still reported
+    fs = _run(protection, _probe_sch("J7", "Connector_Generic:Conn_01x01"))
+    assert [f.code for f in fs] == ["REVIEW_CONN_UNPROTECTED"]
+    assert fs[0].refs == ["J7", "I2C_SCL"]
 
 
 # --------------------------------------------------------------------------- #

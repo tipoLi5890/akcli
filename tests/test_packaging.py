@@ -73,6 +73,9 @@ def test_package_data_declares_shipped_assets(pyproject: dict):
     # never notice it missing, only a non-editable wheel install does — so the
     # declaration itself is the guard against a silently broken `akcli sim`.
     assert "*.lib" in data["akcli.sim"]
+    # Bundled fab profiles are read via importlib.resources: without this row
+    # `fab check --profile <id>` works from a checkout and from nowhere else.
+    assert "*.toml" in data["akcli.fab_profiles"]
 
 
 def test_runtime_resources_next_to_their_loaders_are_declared():
@@ -94,6 +97,7 @@ def test_runtime_resources_next_to_their_loaders_are_declared():
     assert covered("akcli.sim", "builtin.lib")
     assert covered("akcli.webui", "hub.html")
     assert covered("akcli.schemas", "ops.schema.json")
+    assert covered("akcli.fab_profiles", "jlc-4l-1oz.toml")
 
 
 def test_ruff_lint_gate_is_configured(pyproject: dict):

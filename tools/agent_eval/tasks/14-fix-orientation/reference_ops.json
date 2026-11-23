@@ -1,0 +1,9 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "set_component_transform", "designator": "D1", "rotation": 180},
+  {"op": "set_component_transform", "designator": "U1", "mirror": "none"}
+ ]
+}

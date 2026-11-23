@@ -1,0 +1,10 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "delete_component", "designator": "R1", "cascade": true},
+  {"op": "delete_component", "designator": "D1", "cascade": true},
+  {"op": "delete_object", "match": {"kind": "label", "name": "LED_A"}}
+ ]
+}

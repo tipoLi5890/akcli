@@ -333,10 +333,12 @@ def _fetch_json_once(url: str, *, opener: urllib.request.OpenerDirector,
         resp = opener.open(req, timeout=timeout)
     except urllib.error.HTTPError as e:      # subclass of URLError — must come first
         reason = getattr(e, "reason", "") or ""
+        retry_after = _parse_retry_after(e)
+        e.close()       # an HTTPError IS the open response: release it now
         raise EasyEdaError(
             f"easyeda returned HTTP {e.code} {reason}".strip(), kind="http",
             retryable=(e.code == 429 or 500 <= e.code < 600),
-            retry_after=_parse_retry_after(e)) from e
+            retry_after=retry_after) from e
     except urllib.error.URLError as e:
         raise EasyEdaError(f"could not reach easyeda: {getattr(e, 'reason', e)}",
                            kind="network", retryable=True) from e

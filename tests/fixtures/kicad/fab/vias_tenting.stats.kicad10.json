@@ -1,0 +1,124 @@
+{
+  "metadata": {
+    "date": "",
+    "generator": "KiCad 10.0.4",
+    "project": "vias_tenting",
+    "board_name": "vias_tenting"
+  },
+  "board": {
+    "has_outline": true,
+    "width": "30.0000 mm",
+    "height": "20.0000 mm",
+    "area": "600.00 mm²",
+    "front_component_density": "0.00",
+    "back_component_density": "0.00",
+    "front_copper_area": "1.594 mm²",
+    "back_copper_area": "1.745 mm²",
+    "min_track_clearance": "2147.4836 mm",
+    "min_track_width": "2147.4836 mm",
+    "min_drill_diameter": "0.1000 mm",
+    "board_thickness": "1.6000 mm",
+    "front_footprint_area": "0.00 mm²",
+    "back_footprint_area": "0.00 mm²",
+    "front_footprint_density": "0.00",
+    "back_footprint_density": "0.00"
+  },
+  "pads": {
+    "through_hole": 0,
+    "smd": 0,
+    "connector": 0,
+    "npth": 0,
+    "castellated": 0,
+    "press_fit": 0
+  },
+  "vias": {
+    "through": 3,
+    "blind": 3,
+    "buried": 1,
+    "micro": 1
+  },
+  "components": {
+    "tht": {
+      "front": 0,
+      "back": 0,
+      "total": 0
+    },
+    "smd": {
+      "front": 0,
+      "back": 0,
+      "total": 0
+    },
+    "unspecified": {
+      "front": 0,
+      "back": 0,
+      "total": 0
+    },
+    "total": {
+      "front": 0,
+      "back": 0,
+      "total": 0
+    }
+  },
+  "drill_holes": [
+    {
+      "count": 2,
+      "shape": "Round",
+      "x_size": "0.5000 mm",
+      "y_size": "0.5000 mm",
+      "plated": true,
+      "source": "Via",
+      "start_layer": "F.Cu",
+      "stop_layer": "B.Cu"
+    },
+    {
+      "count": 2,
+      "shape": "Round",
+      "x_size": "0.3000 mm",
+      "y_size": "0.3000 mm",
+      "plated": true,
+      "source": "Via",
+      "start_layer": "In1.Cu",
+      "stop_layer": "In2.Cu"
+    },
+    {
+      "count": 1,
+      "shape": "Round",
+      "x_size": "0.3000 mm",
+      "y_size": "0.3000 mm",
+      "plated": true,
+      "source": "Via",
+      "start_layer": "F.Cu",
+      "stop_layer": "B.Cu"
+    },
+    {
+      "count": 1,
+      "shape": "Round",
+      "x_size": "0.3000 mm",
+      "y_size": "0.3000 mm",
+      "plated": true,
+      "source": "Via",
+      "start_layer": "F.Cu",
+      "stop_layer": "In1.Cu"
+    },
+    {
+      "count": 1,
+      "shape": "Round",
+      "x_size": "0.1000 mm",
+      "y_size": "0.1000 mm",
+      "plated": true,
+      "source": "Via",
+      "start_layer": "F.Cu",
+      "stop_layer": "In1.Cu"
+    },
+    {
+      "count": 1,
+      "shape": "Round",
+      "x_size": "0.5000 mm",
+      "y_size": "0.5000 mm",
+      "plated": true,
+      "source": "Via",
+      "start_layer": "In2.Cu",
+      "stop_layer": "B.Cu"
+    }
+  ]
+}

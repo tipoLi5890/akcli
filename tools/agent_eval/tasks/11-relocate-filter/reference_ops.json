@@ -1,0 +1,9 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "move_component", "designator": "R3", "x_mil": 4500, "y_mil": 2450, "carry_labels": true, "carry_wires": true},
+  {"op": "move_component", "designator": "C1", "x_mil": 5100, "y_mil": 2750, "carry_labels": true}
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "place_component", "lib_id": "Device:Fuse", "designator": "F1", "x_mil": 1000, "y_mil": 1000, "rotation": 90, "value": "500mA"},
+  {"op": "place_component", "lib_id": "Device:D", "designator": "D1", "x_mil": 2100, "y_mil": 1000, "value": "SS34"},
+  {"op": "place_component", "lib_id": "Generic:REG3", "designator": "U1", "x_mil": 3500, "y_mil": 1100, "mirror": "y", "value": "REG3"},
+  {"op": "place_component", "lib_id": "Device:C", "designator": "C1", "x_mil": 4400, "y_mil": 1200, "value": "100n"},
+  {"op": "place_component", "lib_id": "Device:R", "designator": "R1", "x_mil": 5000, "y_mil": 1200, "value": "240"},
+  {"op": "place_component", "lib_id": "Device:R", "designator": "R2", "x_mil": 5000, "y_mil": 2000, "value": "390"},
+  {"op": "add_net_label", "at": "F1.1", "name": "VBAT"},
+  {"op": "connect_and_label", "from": "F1.2", "to": "D1.1", "net": "VBAT_F"},
+  {"op": "connect_and_label", "from": "D1.2", "to": "U1.2", "net": "VIN_PROT"},
+  {"op": "add_net_label", "at": "U1.3", "name": "VOUT"},
+  {"op": "add_net_label", "at": "U1.1", "name": "VADJ"},
+  {"op": "add_net_label", "at": "C1.1", "name": "VOUT"},
+  {"op": "add_net_label", "at": "C1.2", "name": "GND"},
+  {"op": "add_net_label", "at": "R1.1", "name": "VOUT"},
+  {"op": "connect_and_label", "from": "R1.2", "to": "R2.1", "net": "VADJ", "orientation": 0},
+  {"op": "add_net_label", "at": "R2.2", "name": "GND"}
+ ]
+}

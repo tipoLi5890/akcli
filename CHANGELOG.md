@@ -17,7 +17,7 @@ All notable changes to `akcli` are documented here. The format is based on
   - **MINOR** — backwards-compatible new subcommands, flags, checks, readers, or ops.
   - **PATCH** — backwards-compatible bug fixes and internal changes.
 
-- **`schema_version`** (stamped on every `Schematic`/`Pcb`/`Library` JSON export; currently `"2.0"` — `akcli.contract.SCHEMA_VERSIONS` is the single source of truth and `model.SCHEMA_VERSION` an alias of it).
+- **`schema_version`** (stamped on every `Schematic`/`Pcb`/`Library` JSON export; currently `"2.1"` — `akcli.contract.SCHEMA_VERSIONS` is the single source of truth and `model.SCHEMA_VERSION` an alias of it).
   Bumped independently of the package version. A **minor** schema bump only adds optional fields
   (consumers must ignore unknown keys); a **major** schema bump may remove or rename fields and
   coincides with a package MAJOR bump.
@@ -30,6 +30,226 @@ All notable changes to `akcli` are documented here. The format is based on
 When in doubt, prefer additive, backwards-compatible changes and leave the version contracts untouched.
 
 ## [Unreleased]
+
+## [0.23.0] - 2026-10-12
+
+A design-integrity hardening release: the verification side grows — KiCad DRC,
+a library baseline, a PCB ↔ library check and tree-scoped integrity join the
+release gates; `fab check` reads the board it is judging (true outline area,
+buried vias, real tenting, project design rules); the net diff labels a pin
+move as a move — while previously deferred defects are closed and the agent
+eval now covers the whole op vocabulary. The op vocabulary stays 22 ops + 10
+macros; `protocol_version` is unchanged. The export `schema_version` moves
+2.0 → 2.1 (optional fields only).
+
+### Added
+
+- Net diff: MOVED classification — a minority pin group that leaves one net for
+  another existing net is reported as one `! MOVE <pins>: <from> -> <to>` line
+  (`~ MOVE` when no named net is involved) instead of a SPLIT plus a MERGE. An
+  even reshuffle, pins leaving for a new net, and a wholly absorbed net stay
+  SPLIT/MERGE. `--strict-nets` and `net_diff.risk` answer exactly as before.
+- `check --integrity` is tree-scoped: the file given and every sheet below it
+  are verified (a child's findings are prefixed with its file), and
+  `DUPLICATE_DESIGNATOR` is also judged across sheets, per live sheet instance,
+  by the reference eeschema resolves there. `check --json` gains
+  `metadata.skipped_checks` when the sheet tree cannot be loaded.
+- `release preflight`: the `check` gate includes the tree-scoped integrity
+  checks for a `.kicad_sch`; the `library-audit` and `sch-pcb` gates apply
+  config `[[waiver]]` entries (as does `akcli gate`'s `sch-pcb`).
+- `release preflight --drc`: KiCad's own DRC as a gate. Runs `kicad-cli pcb
+  drc` on a staged copy of the board (the project is never modified; zone fills
+  are evaluated as saved, not refilled). Violations become
+  `KICAD_DRC_VIOLATION` and unrouted connections `KICAD_DRC_UNCONNECTED` at
+  KiCad's severity; `[[waiver]]` entries match on KiCad rule type, designator,
+  `REF.PAD` pin or net. A requested gate that cannot run fails
+  (`KICAD_CLI_MISSING`, `KICAD_DRC_FAILED`, `KICAD_CLI_TIMEOUT`); `--drc`
+  without `--pcb` is a usage error.
+- Release manifest evidence: `tool.kicad_cli` (version string or `null`),
+  `inputs.gerbers.file_hashes` (per-file SHA-256), `inputs.fab_profile.bundled`,
+  and `git.dirty_sha256` when the worktree is dirty (SHA-256 of `git diff HEAD
+  --binary` plus the untracked non-ignored paths — evidence of the dirty state
+  on that machine, not a cross-machine id).
+- `akcli fab profiles [--json]` lists the fab profiles bundled with akcli.
+  `fab check`/`fab explain --profile` and `release preflight --fab-profile`
+  accept a bundled profile id as well as a file (`FILE|ID`): an existing file
+  wins, then a bundled `id` or file stem, otherwise `BAD_CONFIG` listing the
+  bundled ids. Profiles ship in the wheel as `akcli.fab_profiles`, mirrored
+  from `examples/fab/` by `tools/examples_mirror.py build`/`check`.
+- `FAB_PROFILE_STALE` (note): a bundled profile whose `[source] retrieved_at`
+  is more than 12 months old, or missing, is flagged once per `fab check`.
+- `akcli fab explain` covers every code `fab check` can emit.
+- `library audit` and `verify <sch> <board.kicad_pcb>` apply config
+  `[[waiver]]` entries the way `check` does; their findings carry `refs`
+  (designator, `REF.PIN`, net name, or table nickname) so a waiver can scope
+  them. `--json` gains `findings[].refs`, `config_waived` and `waived`.
+- `jlc add` without `--footprint-lib` takes the Footprint nickname from the
+  project `fp-lib-table` when exactly one entry points at the footprint output
+  directory; otherwise it keeps `footprint` and prints the exact `(lib …)` line
+  to add, or the candidate nicknames. `--json` gains `footprint_lib` and
+  `footprint_lib_source` (`flag` | `fp-lib-table` | `default`). The lib table
+  is never edited.
+- `check --contract`: a `component` + `value` rule accepts a numeric range
+  table — `value = { nominal = "150k", tolerance = "1%" }` or
+  `value = { min = "100n", max = "1u" }` (inclusive, either bound optional).
+  The part's Value is read as engineering notation, trailing BOM qualifiers
+  allowed (`150k 1%`, `100n X7R`); a Value that cannot be parsed is a
+  `CONTRACT_FAIL`, never a pass. `evidence` entries may be
+  `{ source, page, url }` tables mixed with strings.
+- `--allow-open` on `akcli new --force`, `jlc add`, `library repair`,
+  `library import-altium`, `library relink` and `relink-symbols`.
+- `read --json` metadata: `detection_method` can be `content-over-extension`.
+- Ground-truth fixtures from kicad-cli 10.0.4: `hier_partial/` (reference
+  resolution for a sheet instance with no path entry) and `drc_demo/` (DRC
+  report shape, English and zh_TW).
+- Library baseline: `akcli library audit --write-baseline [FILE]` writes a
+  committed, deterministic record of every project `sym-lib-table` /
+  `fp-lib-table` entry — nickname, uri, project-relative path and a SHA-256 per
+  `.kicad_sym`, `.kicad_mod`, `provenance.json` and referenced 3D model — and
+  `--baseline [FILE]` reports `LIB_BASELINE_DRIFT` / `LIB_BASELINE_MISSING`
+  (error) and `LIB_BASELINE_UNTRACKED` (warning) against it. FILE defaults to
+  `[paths].library_baseline`, else `akcli-library.baseline.json` beside the
+  `.kicad_pro`. KiCad's own stock files and global-table libraries are recorded
+  by reference only. Format: `schemas/library-baseline.schema.json`.
+- `release preflight`: `library-baseline` gate (`--library-baseline FILE`, the
+  config key, or the default file beside the schematic) and `pcb-library` gate
+  (with `--pcb`).
+- `verify <sch> <board.kicad_pcb> --library`: compares each board footprint
+  with its definition in the project `fp-lib-table` — `FPLIB_PAD_SET_DRIFT`,
+  `FPLIB_PAD_DRILL_DRIFT`, `FPLIB_SOURCE_MISSING` (warning),
+  `FPLIB_MODEL_MISSING` (note). The output states how many footprints were
+  compared and how many were not, by reason.
+- `verify` / `gate` / `release preflight` sch-pcb: `SCHPCB_DNP_MISMATCH` and
+  `SCHPCB_BOM_FLAG_MISMATCH` (warning) when the schematic's DNP / in-BOM flags
+  disagree with the footprint's attributes.
+- KiCad board reader: footprints carry `at`, `dnp`, `exclude_from_bom`,
+  `exclude_from_pos`, `board_only` and `models` (additive in `read --json`).
+- `library import-altium`: footprint tracks and arcs are imported as `fp_line`
+  / `fp_arc` / `fp_circle` (previously pads only), with layers following
+  KiCad's own Altium importer; each mechanical layer used raises a
+  `MECHANICAL_LAYER` warning. `--layer-map ALTIUM=KICAD` (repeatable or
+  comma-separated) puts an Altium layer's graphics on a KiCad layer, e.g.
+  `Mechanical15=F.CrtYd`. Text, fills, regions, 3D bodies, vias and keepout
+  objects stay skipped, each with a counted `UNSUPPORTED_PRIMITIVE` warning.
+  The plan, `--json` and `provenance.json` carry `layer_map` and per-footprint
+  `primitives` counts.
+- `read` of a `.PcbLib`, `.kicad_mod` or `.pretty`: `footprints[].graphics`
+  (additive, `schema_version` 2.1).
+- `docs/recipes/`: a GitHub Actions workflow recipe that gates schematic pull
+  requests — `check` SARIF upload, a `check` gate, and `review diff
+  --fail-on-new` against the base revision.
+- `docs/stability.md`: the public contract surfaces and the test that gates
+  each, what is not contract, the versioning rules, a proposed deprecation
+  policy for 1.0, and the open decisions before the freeze. `docs/README.md`
+  indexes the documentation.
+- Docs-conformance gate: scans `docs/**/*.md` recursively; asserts digit-form
+  "N schemas", "N rules" and "N … eval tasks" claims against the repository;
+  requires every `akcli` invocation in a recipe's workflow YAML to appear in
+  its parser-validated `bash` block.
+- Agent-eval corpus doubled to 20 tasks covering the whole op vocabulary
+  (32/32): six edit tasks that start from a committed schematic and four that
+  draw from macros and real power symbols; ground truth beyond the netlist
+  (`expected_facts.json`); a vocabulary-coverage gate that fails when an op or
+  macro has no eval task.
+- `fab check`: board area and drill density use the true `Edge.Cuts` outline —
+  lines, arcs, circles, rectangles (incl. KiCad 10 rounded `(radius r)`),
+  polygons, on the board and inside footprints — chained into closed loops with
+  exact arc areas and cutouts subtracted. `read` exposes it as `board.outline`.
+- `fab check`: buried vias are recognised (KiCad 10 `buried` token, or a
+  `blind` via between two inner layers on older boards) and caught by
+  `forbid_blind_buried`; via tenting is read from the board (board setup,
+  per-via overrides, the KiCad ≤ 8 `viasonmask` plot option).
+- `fab check --project FILE`: the board's own DRC minimums (`.kicad_pro`
+  `board.design_settings.rules`, auto-discovered beside the board) are compared
+  with the profile's; `FAB_RULES_LOOSER_THAN_PROFILE` (warning) names each rule
+  the project allows below them.
+- Fab profiles: optional `[cost.error_if]` (same keys as `[cost.warn_if]`,
+  raises the same `FAB_COST_*` code as an error), `[slot]` and `[rules]`
+  tables, validated on load. `FAB_SLOT_BELOW_MIN` (error) flags an oval pad
+  drill narrower than the `[slot]` minimum; `FAB_TENTING_UNKNOWN` (note) covers
+  oversize vias whose tenting neither the board nor an order states.
+- Bundled profile `jlc-4l-1oz-free-vias-2026-07-r2`: the 2026-07 snapshot plus
+  a `[slot]` table.
+- `fab check --json`: `via_types`, `outline`, `tenting`, `project`.
+
+### Changed
+
+- `check` on a root whose child or grandchild sheet is missing reports
+  `SHEET_FILE_MISSING` and exits 1 when the integrity family is selected (was
+  `FILE_NOT_FOUND`, exit 4). Without integrity, and for a missing root, it is
+  still exit 4.
+- `plan`/`draw` "Net changes" block: the two host nets of a MOVE no longer
+  print a redundant `~` line when the move is their only delta; the
+  `--strict-nets` refusal reads "net split/merge/move touches a named net".
+- `akcli new --force`, `jlc add` (into an existing library) and `library
+  import-altium --apply` (over existing outputs) refuse with `TARGET_LOCKED`
+  (exit 6) when KiCad has the file open.
+- `library repair --apply` exits `1` when the post-apply audit still reports an
+  ERROR in a file the repair rewrote; `--json` gains `post_audit`.
+- `fab check --json`: `profile` is `{id, vendor, path, bundled, sha256}`;
+  `path` is `null` for a bundled profile. The manifest's `inputs.fab_profile`
+  follows the same shape.
+- `check --contract`: a rule with `waived = true` must carry a non-empty
+  `owner` and `reason`; `evidence` must be a list of strings and/or tables; a
+  rule with only one of `component`/`value` is rejected. All are `BAD_CONFIG`
+  on load.
+- Altium files are checked against their container: a document saved under the
+  wrong extension (a `.PcbLib` named `.SchDoc`) is read as what it is, with a
+  warning. A bare OLE container with an unclassifiable `FileHeader` is
+  `unknown` (exit 5) instead of being assumed a schematic.
+- Test points (`Connector:TestPoint`, `TestPoint_*` footprints) are no longer
+  treated as connectors: no `REVIEW_CONN_UNPROTECTED`. An input wired only to
+  a test point stays clear of `ERC_FLOATING_INPUT`, as in KiCad's own ERC.
+- Review detectors read BOM-style values with trailing qualifiers (`8p C0G`,
+  `10u/16V`, `10k 1%`), so such parts are evaluated instead of skipped.
+- `DUPLICATE_DESIGNATOR` counts instance-path entries per project root: the
+  same reference kept under another project's root (a shared sheet) is not a
+  duplicate.
+- `SCHPCB_EXTRA_ON_PCB` is a NOTE, not a WARNING, for a footprint KiCad marks
+  `board_only` (mounting holes, fiducials).
+- `set_component_parameters` on a multi-unit part edits every placed unit
+  (value, footprint, fields and a rename); it used to change only the first.
+- README, plugin manifests and package description lead with verification:
+  writes are dry-run by default, net-diffed and connectivity-gated.
+- ROADMAP: the shipped-milestones table covers every release through 0.22.0,
+  shipped blocks moved out of "Milestones ahead", stale figures corrected, and
+  a design-integrity backlog section added.
+- `fab check`: `max_tented_drill_mm` applies only to vias the board file marks
+  tented, or to every via when the order manifest declares
+  `via_covering = "tented"`; previously every via was flagged.
+- `fab check`: when the outline does not close, the area falls back to the
+  bounding box and the finding says so; `FAB_NO_OUTLINE` now means nothing is
+  on `Edge.Cuts`. `board.outline_bbox` spans arcs, circles, polygons and
+  footprint-drawn edges, which the EMC and gerber review detectors also read.
+- `release preflight`: the `fab` gate receives `--order` and the project
+  file's design rules.
+- `ORDER_REVIEW_REQUIRED` messages state that V-cut/panel features and the
+  ENIG exposed-copper area are not computed.
+
+### Fixed
+
+- `check --integrity` could not see a duplicate designator in or among child
+  sheets, nor a missing grandchild; `project check` reported one missing child
+  sheet twice.
+- A per-component `[[waiver]]` could never match a `library audit` or sch↔PCB
+  `verify` finding.
+- `akcli log` and the PreToolUse draw guard lost the journal history right
+  after a rotation (`journal.jsonl.1` is now read).
+- Format detection left a file handle open on extensionless inputs; HTTP error
+  responses are closed promptly in `jlc` and `doctor`.
+- A component Value consisting only of separators (`/`) crashed review value
+  parsing.
+- `library audit` / `release preflight` with a relative project directory:
+  `${KIPRJMOD}` lib-table uris no longer resolve to `<dir>/<dir>/…` (false
+  `LIB_PATH_MISSING`), and `${KIPRJMOD}` 3D-model paths are no longer looked
+  up inside the `.pretty` (false `MODEL_MISSING`).
+- `.PcbDoc` layer names: Altium layer ids 56–73 were named one position off
+  and ids 40–55 were left numeric; they now match KiCad's importer.
+- The `KICAD_CLI_MISSING` remediation named `AKCLI_KICAD_CLI`; the variable
+  akcli reads is `KICAD_CLI`.
+- Symbol sources were re-parsed on every placement op; they are cached per
+  process (a 17-op list against a standard KiCad library: ~11 s → ~0.1 s).
+- Agent-eval briefs 01–08 told agents to author `"protocol_version": 1`.
 
 ## [0.22.0] - 2026-08-25
 

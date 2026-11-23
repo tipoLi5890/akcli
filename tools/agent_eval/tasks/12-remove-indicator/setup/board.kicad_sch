@@ -1,0 +1,149 @@
+(kicad_sch
+	(version 20231120)
+	(generator "eeschema")
+	(generator_version "8.0")
+	(uuid "6a8807f6-2fba-538b-b634-3da00b876537")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Device:C"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "C"
+			(at 0.635 2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Value" "C"
+			(at 0.635 -2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Footprint" ""
+			(at 0.9652 -3.81 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Unpolarized capacitor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "C_0_1"
+			(polyline
+				(pts (xy -2.032 -0.762) (xy 2.032 -0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none)))
+			(polyline
+				(pts (xy -2.032 0.762) (xy 2.032 0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none))))
+		(symbol "C_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:R"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "R"
+			(at 2.032 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "R"
+			(at 0 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at -1.778 0 90)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Resistor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "R_0_1"
+			(rectangle
+				(start -1.016 -2.54)
+				(end 1.016 2.54)
+				(stroke (width 0.254) (type default))
+				(fill (type none))))
+		(symbol "R_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:LED"
+		(pin_numbers (hide yes))
+		(pin_names (offset 1.016) (hide yes))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "D"
+			(at 0 2.54 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "LED"
+			(at 0 -2.54 0)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Light emitting diode"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "LED_0_1"
+			(polyline
+				(pts (xy -1.27 1.27) (xy -1.27 -1.27))
+				(stroke (width 0.254) (type default))
+				(fill (type none)))
+			(polyline
+				(pts (xy -1.27 0) (xy 1.27 1.27) (xy 1.27 -1.27) (xy -1.27 0))
+				(stroke (width 0.254) (type default))
+				(fill (type none))))
+		(symbol "LED_1_1"
+			(pin passive line
+				(at -3.81 0 0)
+				(length 2.54)
+				(name "K" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 3.81 0 180)
+				(length 2.54)
+				(name "A" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))))
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(symbol (lib_id "Device:C") (at 50.8 50.8 0) (unit 1) (uuid "8483262c-c178-5ed9-a4a6-c2a99eae15d2") (pin "1" (uuid "cbc14d08-a5b5-537b-97bb-37406c2a3475")) (pin "2" (uuid "140ab79f-4a2c-521b-92c8-575f83a5e214")) (property "Reference" "C1" (at 54.102 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/6a8807f6-2fba-538b-b634-3da00b876537" (reference "C1") (unit 1))))
+	(property "Value" "100n" (at 54.102 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 66.04 50.8 0) (unit 1) (uuid "c45152c6-d0bf-5246-84dd-62cab1dcf868") (pin "1" (uuid "7c23e40a-341b-5152-920c-cb008e30691a")) (pin "2" (uuid "a18bee9b-f205-53d1-8ef9-48b9acc91b0c")) (property "Reference" "R2" (at 68.326 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/6a8807f6-2fba-538b-b634-3da00b876537" (reference "R2") (unit 1))))
+	(property "Value" "10k" (at 68.326 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 86.36 50.8 0) (unit 1) (uuid "876602fa-9942-576c-8d31-25db2c07fe49") (pin "1" (uuid "ce1ea0a7-1edf-57e5-8046-ac5f8f3ed127")) (pin "2" (uuid "94a50aff-199e-56de-8ed1-4ce9c4e45058")) (property "Reference" "R1" (at 88.646 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/6a8807f6-2fba-538b-b634-3da00b876537" (reference "R1") (unit 1))))
+	(property "Value" "330" (at 88.646 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:LED") (at 86.36 66.04 90) (unit 1) (uuid "c499f243-afa4-5a91-9d92-27f029199457") (pin "1" (uuid "89480809-5490-5fea-9f30-0b5f44c335aa")) (pin "2" (uuid "daa1454a-cf3e-57c8-b6fb-2f91408b66b8")) (property "Reference" "D1" (at 88.9 64.77 90) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/6a8807f6-2fba-538b-b634-3da00b876537" (reference "D1") (unit 1))))
+	(property "Value" "GREEN" (at 88.9 67.31 90) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 50.8 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "1d86d0e5-3871-54ef-8124-b5c820b0156d"))
+	(label "GND" (at 50.8 54.61 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "7c341b60-4403-5b38-a817-5773344d798b"))
+	(label "3V3" (at 66.04 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "548b95f7-e67b-595e-83d5-a1cb3f4d5977"))
+	(label "EN" (at 66.04 54.61 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "166c8059-fd2a-59f2-9531-b0bc411cc04e"))
+	(label "3V3" (at 86.36 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "e6ee9316-5510-5c06-ab40-d5d4d7a9e5b2"))
+	(wire (pts (xy 86.36 54.61) (xy 86.36 62.23)) (stroke (width 0) (type default)) (uuid "5e64139d-5844-5786-baf9-d11d4458a0de"))
+	(label "LED_A" (at 86.36 58.42 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "2a34d2b0-ffb6-5515-a47f-e0d73ff17ff7"))
+	(label "GND" (at 86.36 69.85 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "65e7d0b6-01c3-5454-a0e1-9cf2455a53fe"))
+)

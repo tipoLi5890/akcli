@@ -100,7 +100,7 @@ the netlist: every pin travels with the label that names it. `carry_labels`
 makes that guarantee real for a single move; the connectivity verify still runs
 after every apply and refuses the write on any connectivity ERROR (dangling
 endpoint, duplicate uuid/designator, stacked power ports). It does not compare
-netlists: for that, `draw --strict-nets` refuses when a split/merge touches a
+netlists: for that, `draw --strict-nets` refuses when a split/merge/move touches a
 named net, and `arrange --groups` refuses on any net change at all.
 
 ### `arrange --groups` — functional-block re-layout

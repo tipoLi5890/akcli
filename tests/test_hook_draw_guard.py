@@ -106,6 +106,19 @@ def test_silent_after_plan(workspace: Path, monkeypatch):
     assert proc.stderr == ""
 
 
+def test_silent_after_plan_that_was_rotated_away(workspace: Path, monkeypatch):
+    # The plan entry sits in the rotated generation: still a prior plan.
+    monkeypatch.chdir(workspace)
+    assert main(["plan", "board.kicad_sch", "--ops", "good.json"]) == EXIT["OK"]
+    journal = workspace / ".akcli" / "journal.jsonl"
+    journal.replace(journal.with_suffix(".jsonl.1"))
+    proc = run_hook(
+        bash_payload("akcli draw board.kicad_sch --ops good.json --apply"),
+        workspace)
+    assert proc.returncode == 0
+    assert proc.stderr == ""
+
+
 def test_fails_open_on_garbage_stdin(workspace: Path):
     proc = subprocess.run([sys.executable, str(HOOK)], input="not json",
                           capture_output=True, text=True, cwd=workspace,

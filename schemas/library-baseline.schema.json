@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tipoLi5890/akcli/schemas/library-baseline.schema.json",
+  "title": "AkcliLibraryBaseline",
+  "description": "The library baseline `akcli library audit --write-baseline` writes (default `akcli-library.baseline.json` beside the .kicad_pro) and `library audit --baseline` / `release preflight --library-baseline` compare against: a committed, hashed record of every PROJECT sym-lib-table / fp-lib-table entry. Deterministic and machine-independent: sorted keys and lists, `\\n` newlines, no timestamps, no tool version, no absolute paths. Hashes are SHA-256 over raw bytes. src/akcli/library_baseline.py is the executable copy of this contract; tests/test_library_baseline.py asserts the two agree.",
+  "type": "object",
+  "required": ["schema_version", "symbol_libraries", "footprint_libraries", "global_libraries"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "description": "A minor bump only adds optional fields; a reader accepts any 1.x and refuses another major."
+    },
+    "symbol_libraries": {
+      "type": "array",
+      "description": "One record per project sym-lib-table entry, sorted by nickname.",
+      "items": {"$ref": "#/$defs/library"}
+    },
+    "footprint_libraries": {
+      "type": "array",
+      "description": "One record per project fp-lib-table entry, sorted by nickname.",
+      "items": {
+        "allOf": [{"$ref": "#/$defs/library"}],
+        "required": ["models"]
+      }
+    },
+    "global_libraries": {
+      "type": "object",
+      "description": "Library nicknames the project's schematics use that the PROJECT tables do not register — reached, if at all, through the per-user global table. Recorded by nickname only: their paths and bytes belong to the KiCad install, not to the project.",
+      "required": ["symbol", "footprint"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "footprint": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "library": {
+      "type": "object",
+      "required": ["nickname", "uri", "path", "status", "files"],
+      "additionalProperties": false,
+      "properties": {
+        "nickname": {
+          "type": "string",
+          "description": "The lib-table nickname."
+        },
+        "uri": {
+          "type": "string",
+          "description": "The table entry's uri exactly as written (variables unexpanded)."
+        },
+        "path": {
+          "type": ["string", "null"],
+          "description": "Where the uri resolved, relative to the project directory (posix). null when it lies outside the project, or when status is `unresolved` or `builtin`."
+        },
+        "status": {
+          "enum": ["ok", "missing", "unresolved", "builtin"],
+          "description": "`ok`: resolved, exists, files hashed. `missing`: resolved to a path that does not exist. `unresolved`: the uri uses a ${VAR} that does not expand. `builtin`: the uri goes through a KiCad built-in ${KICAD<N>_*_DIR} variable — KiCad's own stock library, recorded by reference only and never hashed."
+        },
+        "files": {
+          "type": "object",
+          "description": "File name (relative to the library) -> SHA-256. A symbol library: its .kicad_sym. A footprint library: every .kicad_mod of the .pretty, plus `provenance.json` when one sits in it (a single-file library of another plugin type: that file). Empty unless status is `ok`.",
+          "additionalProperties": {"$ref": "#/$defs/sha256"}
+        },
+        "models": {
+          "type": "array",
+          "description": "Footprint libraries only: every 3D model the library's footprints reference, sorted by (file, ref). Never silently dropped: a model that cannot be hashed stays listed with its status.",
+          "items": {
+            "type": "object",
+            "required": ["file", "ref", "path", "sha256", "status"],
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "type": "string",
+                "description": "The .kicad_mod (a key of `files`) that references the model."
+              },
+              "ref": {
+                "type": "string",
+                "description": "The model path exactly as the footprint writes it."
+              },
+              "path": {
+                "type": ["string", "null"],
+                "description": "The resolved model file relative to the project directory (posix); null when outside the project or not resolved."
+              },
+              "sha256": {
+                "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}],
+                "description": "Set exactly when status is `hashed`."
+              },
+              "status": {
+                "enum": ["hashed", "missing", "unresolved", "builtin"],
+                "description": "`hashed`: resolved and exists. `missing`: resolved, file absent. `unresolved`: uses a ${VAR} that does not expand. `builtin`: referenced through a KiCad built-in ${KICAD<N>_3DMODEL_DIR}-style variable — a stock model, recorded by reference only."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

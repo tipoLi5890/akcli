@@ -10,7 +10,7 @@ ceramics:
 ## Contract (same for every task)
 
 Author a single akcli op-list JSON document:
-`{"protocol_version": 1, "target_format": "kicad", "target_file": "board.kicad_sch", "ops": [...]}`.
+`{"protocol_version": 2, "target_format": "kicad", "target_file": "board.kicad_sch", "ops": [...]}`.
 It will be validated with `akcli ops validate` and applied to a fresh blank
 sheet with `akcli draw --apply --strict-nets`. Available symbols: `Device:R`,
 `Device:C`, `Device:C_Polarized`, `Device:L` (all two-pin: pin 1 / pin 2) and

@@ -1,0 +1,104 @@
+(kicad_sch
+	(version 20231120)
+	(generator "eeschema")
+	(generator_version "8.0")
+	(uuid "af514419-2f90-530b-b12e-55e900e9c805")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Device:R"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "R"
+			(at 2.032 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "R"
+			(at 0 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at -1.778 0 90)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Resistor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "R_0_1"
+			(rectangle
+				(start -1.016 -2.54)
+				(end 1.016 2.54)
+				(stroke (width 0.254) (type default))
+				(fill (type none))))
+		(symbol "R_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:C"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "C"
+			(at 0.635 2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Value" "C"
+			(at 0.635 -2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Footprint" ""
+			(at 0.9652 -3.81 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Unpolarized capacitor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "C_0_1"
+			(polyline
+				(pts (xy -2.032 -0.762) (xy 2.032 -0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none)))
+			(polyline
+				(pts (xy -2.032 0.762) (xy 2.032 0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none))))
+		(symbol "C_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))))
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(symbol (lib_id "Device:R") (at 50.8 50.8 0) (unit 1) (uuid "7f78291f-3cfb-5173-ac7b-3a0522c9a82d") (pin "1" (uuid "a6caedf7-7233-548d-911d-bde4ec784162")) (pin "2" (uuid "8b467b75-11ca-5b5c-a844-49a00e0b165c")) (property "Reference" "R1" (at 53.086 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/af514419-2f90-530b-b12e-55e900e9c805" (reference "R1") (unit 1))))
+	(property "Value" "4.7k" (at 53.086 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 66.04 50.8 0) (unit 1) (uuid "9927e088-89d0-52c7-b875-e0250ba26fdd") (pin "1" (uuid "7f7a62d9-e9c6-54c8-8240-d890d5c5cee7")) (pin "2" (uuid "9e589db8-c98c-599b-8d2a-d14e52de5653")) (property "Reference" "R2" (at 68.326 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/af514419-2f90-530b-b12e-55e900e9c805" (reference "R2") (unit 1))))
+	(property "Value" "4.7k" (at 68.326 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:C") (at 81.28 50.8 0) (unit 1) (uuid "940af917-550d-5292-93b6-6a508d09f5c9") (pin "1" (uuid "7f166de0-3742-5241-b7ee-295ab9000588")) (pin "2" (uuid "3f47e7b3-0411-5ec7-bc19-a4364c3f13cb")) (property "Reference" "C1" (at 84.582 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/af514419-2f90-530b-b12e-55e900e9c805" (reference "C1") (unit 1))))
+	(property "Value" "100n" (at 84.582 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "3V3" (at 50.8 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "c04ff776-131c-5e50-9b06-f5a6dd155a43"))
+	(label "3V3" (at 66.04 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "7d8c1499-983e-5870-9613-bb851e4e2325"))
+	(label "3V3" (at 81.28 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "814b65ee-11d6-5e8f-a45f-3499b7306a5f"))
+	(label "SDA" (at 50.8 54.61 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "df857bd9-d8b5-5dbb-8a15-471a22bcd377"))
+	(label "SCL" (at 66.04 54.61 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "b010dba9-5aaa-53c4-8ec9-c6321c4ae6f8"))
+	(label "GND" (at 81.28 54.61 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "45aeda61-0813-51ed-92c6-11a3a6c4b750"))
+)

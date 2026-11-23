@@ -2,8 +2,9 @@
 name: akcli-circuit-design
 description: >-
   Read, analyze, diff, and draw electronic schematics with the `akcli` CLI —
-  AI-native schematic design, purpose-built for KiCad; Altium files are a
-  read-only import surface. Use this
+  the verification layer for AI-authored KiCad schematics (writes are dry-run by
+  default, net-diffed and connectivity-gated); Altium files are a read-only
+  import surface. Use this
   skill whenever the task involves: reading or parsing an Altium .SchDoc/.SchLib/.PcbDoc
   or a KiCad .kicad_sch/.kicad_sym/.kicad_pcb; extracting a netlist; running ERC,
   power-rail, BOM, or a design review on a schematic; producing a pin map / pinout /
@@ -47,7 +48,7 @@ checkout instead use `PYTHONPATH=src python3 -m akcli ...` or `bin/akcli ...`.
 akcli capabilities --json         # COLD-START: the full CLI surface manifest (commands, flags,
                                   # exit/error tables, op vocabulary, schemas) in one document
 akcli capabilities --command draw # ONE command's entry (~3% of the manifest) — prefer slices
-                                  # over the full ~96 KB document (--section exit_codes|ops|...)
+                                  # over the full ~106 KB document (--section exit_codes|ops|...)
 akcli schema ops                  # any packaged JSON Schema, byte-for-byte (ops, findings,
                                   # netlist, draw-result, ...) for client-side validation
 akcli read <file> --summary --json  # counts + metadata ONLY — start big boards here, never
@@ -95,6 +96,7 @@ akcli pinmap <file> -C akcli.toml
 akcli pinmap <file> --mcu U3 --expected pins.csv     # expected = .csv or .json
 
 akcli verify sch.kicad_sch board.kicad_pcb --strict   # schematic <-> PCB net/refdes/footprint equivalence
+akcli verify sch.kicad_sch board.kicad_pcb --library  # + board footprints vs the project fp-lib-table (prints what was NOT compared)
 akcli check board.kicad_sch --contract contract.toml   # topology require/forbid rules ERC can't express
 ```
 

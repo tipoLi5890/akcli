@@ -1,5 +1,5 @@
 ---
-description: Run the akcli release gate — every applicable preflight gate (check/intent/contract/library/project/sch-pcb/fab/order/review/gerber/git, optional sim) with a traceable manifest — and report GO / NO-GO with skipped gates named.
+description: Run the akcli release gate — every applicable preflight gate (check/intent/contract/library/project/library-baseline/sch-pcb/pcb-library/fab/order/review/gerber/git, optional sim) with a traceable manifest — and report GO / NO-GO with skipped gates named.
 argument-hint: --sch <board.kicad_sch> [--pcb board.kicad_pcb] [--gerbers DIR] [--sim sim.json] [--out manifest.json]
 ---
 
@@ -8,10 +8,11 @@ Gate a hardware release with `akcli release preflight` and report GO / NO-GO.
 Arguments: `$ARGUMENTS`
 - The schematic goes in as `--sch <board.kicad_sch>` — `release preflight` takes no
   positional argument (a bare path exits `2`). Every additional input enables its gate: `--pcb`
-  (sch-pcb + fab), `--gerbers` (gerber package), `--intent`/`--contract` files,
+  (sch-pcb + pcb-library + fab), `--gerbers` (gerber package), `--intent`/`--contract` files,
   `--sim <sim.json>` (quantitative simulation assertions), `--out` (the manifest). The `project`
   gate needs no flag of its own — it activates automatically when a `.kicad_pro` sits beside
-  `--sch`.
+  `--sch` — and neither does `library-baseline` when an `akcli-library.baseline.json` sits there
+  (`--library-baseline FILE` names another).
 - **Each omitted input is a skipped gate, recorded WITH its reason — never silent.**
 
 Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m akcli`):
@@ -28,7 +29,9 @@ Report:
 - **GO** — every gate PASS; list the skipped gates and why each skip is acceptable.
 - **NO-GO** — the failing gate's findings (code + message), the fix path
   (fix / waive-with-reason), and what to re-run.
+- Quote the `pcb-library` gate's summary line (footprints compared vs NOT compared): a pass
+  there covers only the footprints whose library the project `fp-lib-table` registers.
 - State what preflight does NOT cover: CPL/centroid export stays in KiCad, simulation
-  runs only if `--sim` was given, and the `check` gate is ERC/power/BOM/nets only — run
-  `akcli check <sch> --integrity --fail-on never` separately and report it too.
+  runs only if `--sim` was given, KiCad DRC only if `--drc` was given, and the `check` gate
+  is ERC/power/BOM/nets plus tree-scoped integrity (no layout/pairs lints).
 - This command is read-only except the manifest you explicitly asked for with `--out`.

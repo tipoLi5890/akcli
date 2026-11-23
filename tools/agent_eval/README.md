@@ -3,7 +3,7 @@
 The test suite proves the *tool* is correct; this harness measures the other
 half of the AI-native claim: **an LLM agent reading the skills/docs must
 produce an op-list that akcli validates, applies behind the safety rails, and
-that lands the intended netlist.** Nothing else in CI exercises that loop —
+that lands the intended design.** Nothing else in CI exercises that loop —
 a skill rewrite that subtly makes agents worse at authoring would otherwise
 ship silently.
 
@@ -11,27 +11,128 @@ ship silently.
 
 ```text
 tools/agent_eval/
-├── run_eval.py            # scorer + runners (dev-only, not wheel-packaged)
+├── run_eval.py             # scorer + runners (dev-only, not wheel-packaged)
+├── eval_facts.py           # ground truth beyond the netlist (expected_facts.json)
+├── build_setups.py         # regenerates the edit tasks' starting schematics
+├── symbols/EvalParts.kicad_sym   # LED, Crystal, OPAMP_DUAL, VCC, PWR_FLAG
 └── tasks/<nn>-<slug>/
-    ├── task.md            # the natural-language prompt the agent receives
-    ├── expected_nets.json # ground truth: named nets -> exact pin members
-    └── reference_ops.json # known-good solution (harness self-check)
+    ├── task.md             # the natural-language prompt the agent receives
+    ├── expected_nets.json  # ground truth: named nets -> exact pin members
+    ├── expected_facts.json # optional: everything a netlist cannot say
+    ├── reference_ops.json  # known-good solution (harness self-check)
+    ├── postcheck_arrange.json    # optional: re-pack the result, then score
+    └── setup/              # optional pre-made sheets
+        ├── board.kicad_sch # EDIT task: the schematic the op-list edits
+        └── setup_ops.json  # ...and the op-list that generated it
 ```
+
+The corpus holds **20 tasks**: 01–10 draw on a blank sheet (analog blocks,
+groups, the safe re-pack, hierarchy, buses), 11–16 EDIT an existing schematic
+(relocate, remove, ECO, re-orient, repair, document) and 17–20 draw from the
+block macros and real power symbols.
 
 ## Scoring
 
-Deterministic and offline. For a candidate op-list, per task:
+Deterministic, offline and hermetic. For a candidate op-list, per task:
 
-1. `akcli ops validate` — structural validity (fail -> score 0).
-2. `akcli new` + `akcli draw --apply --strict-nets` on a fresh sheet —
-   the same safety rails a real session runs behind (fail -> score 0).
-3. `akcli nets --json` — the named nets must match `expected_nets.json`
-   exactly (pin membership); spurious extra named nets fail the task;
-   unnamed nets are ignored. `score` = matched / expected.
+1. The workspace: a fresh `akcli new` sheet, or — for an edit task — a copy of
+   the task's `setup/board.kicad_sch` (plus any other `setup/*.kicad_sch`).
+2. `akcli ops validate` — structural validity (fail -> score 0).
+3. `akcli plan --json`, only when the task asserts the reported net diff.
+4. `akcli draw --apply --strict-nets` — the same safety rails a real session
+   runs behind (fail -> score 0). The two repair tasks whose POINT is a
+   named-net change (14, 15) declare it (`"net_diff": {"risk": true}`) and
+   are applied without `--strict-nets`; their exact result is still enforced.
+5. `akcli arrange --groups --apply`, only for a task that ships a
+   `postcheck_arrange.json` (07): the drawn sheet must survive the re-pack.
+6. `akcli nets --json` — the named nets must match `expected_nets.json`
+   exactly (pin membership); spurious extra named nets fail the task; unnamed
+   nets are ignored, and so are power-symbol pins (`#PWR03.1`), whose
+   auto-numbering follows op order.
+7. `expected_facts.json`, when present — each fact is one more check, read
+   back through `akcli read --json` / `nets --json` / `check --json` (and the
+   applied sheet itself for annotation objects):
+
+   | Fact | Passes when |
+   |---|---|
+   | `components` | the placed part matches every listed field: `x_mil`/`y_mil`, `rotation`, `mirror`, `value`, `footprint`, `lib_id`, `parameters` (subset) |
+   | `absent` | the designator is not placed |
+   | `no_connects` | the pin's tip carries a no-connect flag |
+   | `power_ports` / `pwr_flags` | the named net carries a real power symbol / a `PWR_FLAG` (a same-name label does not count) |
+   | `texts` / `text_boxes` | a top-level text / text box holds exactly this content |
+   | `rectangles` | a top-level rectangle contains every `encloses` part (origin and pin tips) and no `excludes` part |
+   | `title_block` | each listed field holds exactly this value |
+   | `forbid_findings` | `akcli check --integrity --nets` reports none of these codes |
+   | `net_diff` | the plan's `net_diff` block equals every listed key (`equivalent`, `risk`, exact `lines`) |
+
+   Unknown keys are an error: a typo'd fact can never silently pass.
+
+`score` = matched checks / all checks (nets + facts); a task passes only at
+100% with no extra named net.
+
+Every akcli call runs with `KICAD_CONFIG_HOME` pointed at an empty directory,
+so a `lib_id` nickname can never fall back to the scoring machine's global
+`sym-lib-table`: the only symbols are the ones in `run_eval.SYMBOLS`
+(`Device`, `power`, `Generic` fixtures + `EvalParts`), on a laptop with KiCad
+installed exactly as on a bare CI runner.
 
 `tests/test_agent_eval.py` scores every committed `reference_ops.json` and
-asserts 100%, so the tasks and ground truths can never drift from real CLI
-behavior — the harness itself is CI-verified even though no LLM runs in CI.
+asserts 100%, plans it cleanly and re-applies it byte-identically, and feeds
+the scorer one plausible WRONG answer per rail and fact kind — so the tasks
+and ground truths can never drift from real CLI behavior. The harness itself
+is CI-verified even though no LLM runs in CI.
+
+## Vocabulary coverage
+
+Which ops and macros each task's reference op-list AUTHORS (an op reached
+only through a macro's expansion is not counted — the agent never had to
+spell it). Generated by `python tools/agent_eval/run_eval.py --coverage`:
+
+| Task | Ops and macros its reference authors |
+|---|---|
+| `01-voltage-divider` | `place_component`, `add_net_label` |
+| `02-rc-lowpass` | `place_component`, `add_net_label` |
+| `03-pi-filter` | `place_component`, `add_net_label` |
+| `04-i2c-pullups` | `place_component`, `add_net_label` |
+| `05-decoupled-rail` | `place_component`, `add_net_label` |
+| `06-modular-blocks` | `place_component`, `route_net`, `add_net_label` |
+| `07-safe-repack` | `place_component`, `add_net_label` |
+| `08-protected-power-entry` | `place_component`, `add_net_label`, `connect_and_label` |
+| `09-hier-amp-sheet` | `place_component`, `add_net_label`, `add_sheet` |
+| `10-bus-fanout` | `place_component`, `add_wire`, `add_net_label`, `add_bus`, `add_bus_entry` |
+| `11-relocate-filter` | `move_component` |
+| `12-remove-indicator` | `delete_component`, `delete_object` |
+| `13-eco-rename-revalue` | `set_component_parameters`, `rename_net` |
+| `14-fix-orientation` | `set_component_transform` |
+| `15-repair-mislabeled-pin` | `delete_object`, `add_net_label` |
+| `16-document-sheet` | `add_text`, `add_rectangle`, `add_text_box`, `set_title_block` |
+| `17-battery-monitor-macros` | `place_divider`, `place_decoupling`, `place_pullup`, `place_rc_filter` |
+| `18-clock-and-indicators` | `add_net_label`, `place_led_indicator`, `place_crystal`, `place_array` |
+| `19-opamp-spare-unit` | `place_component`, `add_wire`, `add_net_label`, `place_gnd`, `place_vcc`, `place_decoupling`, `terminate_unused_unit` |
+| `20-supply-entry-ports` | `place_component`, `add_wire`, `add_junction`, `add_no_connect`, `add_net_label`, `place_power_port`, `place_gnd`, `place_pwr_flag` |
+
+Covered: **32 of 32** vocabulary items.
+
+The same computation gates CI: `test_reference_oplists_cover_the_op_vocabulary`
+fails when an op or macro in `src/akcli/opspec.py` has no eval task, unless it
+is listed — with its reason — in that test's `_UNCOVERED_ALLOWLIST` (empty
+today). Adding an op therefore means adding, or extending, a task.
+
+## Edit tasks and their starting schematics
+
+`setup/board.kicad_sch` is a generated artifact, never hand-written: `akcli
+new` + `akcli draw --apply` of `setup/setup_ops.json`, with the root-sheet
+uuid pinned per task so the bytes are reproducible.
+
+```bash
+python tools/agent_eval/build_setups.py           # rewrite after editing a setup_ops.json
+python tools/agent_eval/build_setups.py --check   # drift gate (also run by pytest)
+```
+
+A writer change that alters those bytes fails the drift gate first:
+regenerate, review the diff, commit. Every setup sheet must also stay clean
+under `akcli check --integrity`, and an edit task's untouched setup must NOT
+already satisfy its ground truth — both are tested.
 
 ## Running against a real agent
 
@@ -39,8 +140,9 @@ behavior — the harness itself is CI-verified even though no LLM runs in CI.
 # harness self-check (no LLM):
 python tools/agent_eval/run_eval.py --reference
 
-# any agent, via a shell command run once per task; it gets TASK_FILE and
-# must write the op-list JSON to OPS_OUT:
+# any agent, via a shell command run once per task; it gets TASK_FILE (the
+# prompt), TASK_DIR (its directory — an edit task's starting schematic is
+# $TASK_DIR/setup/board.kicad_sch) and must write the op-list JSON to OPS_OUT:
 python tools/agent_eval/run_eval.py --agent-cmd \
   'claude -p "$(cat "$TASK_FILE")" --output-format text > "$OPS_OUT"'
 
@@ -53,16 +155,30 @@ periodically against the models you actually use; track the pass rate over
 time. A model-authored run should be compared against `--reference` (always
 100%) to separate harness breakage from agent regression.
 
-## Known limitations (v1)
+## Adding a task
+
+1. `tasks/<nn>-<slug>/task.md` — the brief: exact designators, pins, net
+   names, and an "Also checked" list naming every fact.
+2. `expected_nets.json` (+ `expected_facts.json` for anything a netlist
+   cannot express) and a `reference_ops.json` that scores 100%.
+3. An edit task adds `setup/setup_ops.json`; run `build_setups.py` to
+   generate `setup/board.kicad_sch`.
+4. Refresh the coverage table above (`run_eval.py --coverage`) and the task
+   count in this file and in `ROADMAP.md` — both are test-gated.
+
+## Known limitations
 
 - Tasks prescribe designators, pin assignments, and net names, so scoring is
   exact-match on membership; an electrically-equivalent-but-relabeled answer
   scores as a miss. This deliberately tests instruction-following + tool use,
   not topology isomorphism.
-- Eight tasks: six small analog blocks, the safe re-pack discipline (07,
-  label-on-pin across groups) and the protected power entry (08, fuse +
-  reverse-polarity diode); grow the corpus (hierarchy, buses, multi-unit
-  parts) as skills cover more ground.
+- Coverage is of the VOCABULARY, not of every field: each op and macro is
+  authored by at least one reference, but options such as `route_net.style`,
+  `add_bus_entry.size` or per-instance designators on a reused sheet are not
+  each exercised. Multi-unit parts appear once (task 19).
+- Facts check presence and placement, not appearance: a frame must enclose
+  the right parts, but nothing scores whether a sheet is pleasant to read
+  (`akcli check --layout` findings are not part of any ground truth).
 - The harness scores the *artifact* (op-list), not the conversation — an
   agent that needed ten retries scores the same as one that nailed it. Wrap
   `--agent-cmd` with your own attempt/latency accounting if you need that.

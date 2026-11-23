@@ -53,9 +53,11 @@ error, a warning, a review flag, or an order-manifest fact:
 - small via drill/pad below the free minimum (paid small-via process)
 - via annular / via type (blind/buried) outside the profile
 - via-in-pad without a registered exception
-- a tented via whose drill exceeds the tenting cap
+- a tented via whose drill exceeds the tenting cap (tented per the board file,
+  or per the order manifest's `via_covering`; unknown → one note, not an error)
+- an oval pad drill (slot) narrower than the profile's `[slot]` minimum
 
-**B. Checkable from the PCB → cost warning (the profile may escalate to error):**
+**B. Checkable from the PCB → cost warning (escalate with `[cost.error_if]`):**
 - multilayer trace/space in the 3.0–3.5 mil band (≈0.076–0.089 mm) → fine-line surcharge
 - board length ≥ ~600 mm
 - single-board area > ~650 cm²
@@ -83,7 +85,10 @@ lead time, live promotions — the online calculator is the source of truth.
 A **fab profile** is a versioned TOML that turns the numbers above into a gate.
 `akcli fab check board.kicad_pcb --profile p.toml --order order.toml` runs the
 board and the declared order against it. Reference file:
-`examples/fab/jlc-4l-1oz.toml`. **Capability number → profile field:**
+`examples/fab/jlc-4l-1oz.toml` — also shipped inside akcli, so `--profile
+jlc-4l-1oz-free-vias-2026-07` works with no file at all (`akcli fab profiles`
+lists the bundled ids; a file path always wins over an id). **Capability number →
+profile field:**
 
 | Capability (from the reference tables) | Profile field |
 |---|---|
@@ -95,10 +100,13 @@ board and the declared order against it. Reference file:
 | tenting drill cap | `[via] max_tented_drill_mm` |
 | via-in-pad forbidden | `[via] forbid_via_in_pad = true` |
 | blind/buried not on this line | `[via] forbid_blind_buried = true` |
+| slot width (plated / non-plated) | `[slot] min_plated_width_mm`, `min_non_plated_width_mm` (`min_width_mm` for either) |
 | board length surcharge | `[cost.warn_if] board_length_mm_gte` |
 | board area surcharge | `[cost.warn_if] board_area_cm2_gt` |
 | drill-density surcharge | `[cost.warn_if] drill_density_per_m2_gt` |
 | fine multilayer trace surcharge | `[cost.warn_if] trace_width_mm_lte` |
+| a threshold that must fail, not warn | the same key under `[cost.error_if]` |
+| floors for the project's own DRC constraints | `[rules] min_clearance_mm`, `min_track_width_mm`, `min_via_diameter_mm`, `min_through_hole_mm`, `min_via_annular_mm`, `min_hole_to_hole_mm`, `min_hole_clearance_mm`, `min_copper_edge_clearance_mm` |
 | source URLs + date | `[source] urls`, `retrieved_at` (mandatory) |
 | an approved exception (thermal via) | `[[exception]] type/component/owner/reason/expires` |
 
@@ -112,6 +120,12 @@ with the profile is `ORDER_PROFILE_CONFLICT`.
 **Versioning discipline:** a profile is ONE vendor-capability revision. When the
 vendor page changes, cut a NEW file with a new `id` — never mutate an old
 revision (a released board must stay reproducible against the profile it passed).
+`jlc-4l-1oz-free-vias-2026-07-r2` (`examples/fab/jlc-4l-1oz-r2.toml`) is such a new
+file: the 2026-07 numbers unchanged, plus `[slot]` from `rigid-pcb.md` §half-hole &
+slots (multilayer plated ≥0.35 mm, non-plated ≥1.0 mm).
+The bundled profiles follow the same rule, and age the same way: a bundled profile
+whose `retrieved_at` is over 12 months old raises a `FAB_PROFILE_STALE` note on every
+`fab check` — a prompt to re-read the vendor pages, not a failure.
 
 ---
 
@@ -125,11 +139,17 @@ boundary so you neither over-trust it nor duplicate KiCad's DRC.
 | Area | Findings |
 |---|---|
 | Via geometry / covering | `FAB_VIA_PAID_PROCESS`, `FAB_VIA_TENTED_TOO_BIG`, `FAB_VIA_MIN_MARGIN` (note), `FAB_VIA_ANNULAR_BELOW_PREFERRED` (note) |
-| Via type / via-in-pad | `FAB_VIA_TYPE_FORBIDDEN`, `FAB_VIA_IN_PAD`, `FAB_VIA_IN_PAD_EXCEPTION` (allowed), `FAB_EXCEPTION_EXPIRED` |
+| Via type / via-in-pad | `FAB_VIA_TYPE_FORBIDDEN` (blind, buried, micro), `FAB_VIA_IN_PAD`, `FAB_VIA_IN_PAD_EXCEPTION` (allowed), `FAB_EXCEPTION_EXPIRED` |
+| Slots (oval pad drills) | `FAB_SLOT_BELOW_MIN` |
 | Stackup drift | `FAB_STACKUP_MISMATCH` |
-| Cost thresholds | `FAB_COST_BOARD_LENGTH`, `FAB_COST_BOARD_AREA`, `FAB_COST_DRILL_DENSITY`, `FAB_COST_TRACE_WIDTH` |
+| Cost thresholds | `FAB_COST_BOARD_LENGTH`, `FAB_COST_BOARD_AREA`, `FAB_COST_DRILL_DENSITY`, `FAB_COST_TRACE_WIDTH` — warning under `[cost.warn_if]`, error under `[cost.error_if]` |
+| Project DRC drift | `FAB_RULES_LOOSER_THAN_PROFILE` (the `.kicad_pro` allows less than the profile's minimums) |
 | Order manifest | `ORDER_INCOMPLETE`, `ORDER_REVIEW_REQUIRED`, `ORDER_PROFILE_CONFLICT` |
-| Meta / honesty | `FAB_NO_OUTLINE` (couldn't measure area — didn't pretend to), `FAB_UNSUPPORTED_SOURCE` |
+| Meta / honesty | `FAB_NO_OUTLINE` (nothing on Edge.Cuts — didn't pretend to measure), `FAB_TENTING_UNKNOWN` (note: tenting cap not applied), `FAB_UNSUPPORTED_SOURCE` |
+
+Area and drill density use the true `Edge.Cuts` outline — arcs exact, cutouts
+subtracted, footprint-drawn edges included. If the shapes do not close, the
+bounding box is used and the finding says so.
 
 Severity policy: direct violations = **error**; cost-threshold crossings =
 **warning** (with actual value vs threshold); boundary-exact geometry = **note**;
@@ -142,10 +162,12 @@ a registered exception passes as an explicit note (an expired one is an error).
 | minimum trace width / spacing (fab check only flags the fine-line *cost* band) | **`kicad-cli pcb drc`** (net-class rules) |
 | minimum annular ring (only a "below preferred" note) | `kicad-cli pcb drc` |
 | solder mask dam / mask-to-trace, silkscreen height/on-pad | `kicad-cli pcb drc` + `dfm-and-file-prep.md` |
-| slot width, board-edge clearance, min drilled hole | `kicad-cli pcb drc` |
-| ENIG exposed-copper %, V-Cut short edge, slot density | order-time review (`ORDER_REVIEW_REQUIRED` flags intent, does not compute area) |
+| width of a slot routed on `Edge.Cuts` (only oval pad drills are measured), board-edge clearance, min drilled hole | `kicad-cli pcb drc` |
+| ENIG exposed-copper %, V-Cut short edge, panel features, slot density | order-time review (`ORDER_REVIEW_REQUIRED` flags intent and says "NOT computed"; V-cut/panel data is not in the board file) |
 | component-to-edge, polarity, tombstoning (assembly DFA) | human review + `assembly-and-stencil.md` |
 
 **Bottom line:** gate with **both** — `kicad-cli pcb drc` for geometric design
 rules, `akcli fab check --profile --order` for vendor fab policy + cost + order
-completeness. Neither replaces the vendor's own order-time DFM/quote.
+completeness. `akcli release preflight --pcb … --drc --fab-profile … --order …` runs
+the two as gates of one release manifest (KiCad's DRC on a staged copy, zone fills
+checked as saved). Neither replaces the vendor's own order-time DFM/quote.

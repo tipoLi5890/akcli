@@ -22,11 +22,21 @@ Contract:
   after-nets) / MERGED (>=2 before-nets land in one after-net) / CREATED /
   REMOVED (no pin overlap with the other side at all). A net that both splits
   and feeds a merge appears in both entries — each is a distinct hazard.
+* MOVED refines that before SPLIT/MERGE are decided: a pin group that leaves
+  one net for another is a MOVE when it is a strict minority at BOTH ends —
+  its before-net keeps strictly more pins in another after-net, and its
+  after-net inherits strictly more pins from another before-net. Those pins
+  stop counting as overlap, so the two host nets read as MODIFIED instead of
+  one SPLIT plus one MERGE. A tie (half a net changing sides) is no minority
+  and stays SPLIT+MERGE; pins leaving for a NEW net stay a SPLIT, a whole net
+  absorbed stays a MERGE.
 * ``NetDiff.equivalent`` is True only when the netlists are IDENTICAL (same
   partitions AND same names); a pure rename still changes the emitted netlist.
-* ``has_risk(d)`` — True when any SPLIT or MERGE touches a NAMED net on either
-  side; the ``draw --strict-nets`` refusal gate. Splits/merges among purely
-  unnamed nets are ordinary wiring edits and do not trip it.
+* ``has_risk(d)`` — True when any SPLIT, MERGE or MOVE touches a NAMED net on
+  either side; the ``draw --strict-nets`` refusal gate. Splits/merges/moves
+  among purely unnamed nets are ordinary wiring edits and do not trip it.
+  MOVED is a relabelling only: the gate answers exactly as the plain
+  SPLIT+MERGE reading of the same edit would.
 * ``format_summary(d, limit=...)`` — compact one-line-per-change strings, most
   severe first. Unnamed nets render as ``<unnamed@PIN>`` anchored on their
   lexicographically-smallest member pin so lines are stable run-to-run.
@@ -40,7 +50,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # How many individual +pin/-pin tokens a MODIFIED line shows per direction
-# before collapsing the tail into "(+N more)".
+# (and how many pins a MOVE line lists) before collapsing the tail into
+# "(+N more)".
 _MAX_PIN_TOKENS = 3
 
 
@@ -99,6 +110,15 @@ class Merged:
     after: NetView
 
 
+@dataclass(frozen=True)
+class Moved:
+    """A minority pin group that left one net for another (both nets held)."""
+
+    pins: frozenset[str]        # the pins that changed nets
+    before: NetView             # the net they left (before side)
+    after: NetView              # the net they joined (after side)
+
+
 @dataclass
 class NetDiff:
     unchanged: list[NetView] = field(default_factory=list)
@@ -106,6 +126,9 @@ class NetDiff:
     modified: list[Modified] = field(default_factory=list)
     split: list[Split] = field(default_factory=list)
     merged: list[Merged] = field(default_factory=list)
+    # Each move's two host nets ALSO sit in ``modified`` (their membership did
+    # change), so every net still lands in a bucket of its own.
+    moved: list[Moved] = field(default_factory=list)
     created: list[NetView] = field(default_factory=list)
     removed: list[NetView] = field(default_factory=list)
 
@@ -114,7 +137,7 @@ class NetDiff:
         """True iff the two netlists are identical (partitions AND names)."""
         return not (
             self.renamed or self.modified or self.split
-            or self.merged or self.created or self.removed
+            or self.merged or self.moved or self.created or self.removed
         )
 
 
@@ -160,6 +183,27 @@ def diff(nets_before: "list | tuple", nets_after: "list | tuple") -> NetDiff:
                 sources[hit].add(i)
 
     d = NetDiff()
+
+    # MOVED refinement — decided on the untouched matrix, removed afterwards.
+    # Cell (i, j) is a move when it is a strict minority both ways: before[i]
+    # keeps MORE pins in some other after-net, and after[j] inherits MORE pins
+    # from some other before-net. Both tests are strict, so the largest cell
+    # of a row/column never moves (no net is emptied) and a tie stays
+    # SPLIT+MERGE. Dropping a non-largest cell changes neither maximum, which
+    # makes the outcome independent of the order cells are visited in.
+    keeps = [max(o.values(), default=0) for o in overlap]
+    inherits = [max((overlap[i][j] for i in src), default=0)
+                for j, src in enumerate(sources)]
+    for i, j in sorted(
+        (i, j) for i, o in enumerate(overlap) for j, n in o.items()
+        if n < keeps[i] and n < inherits[j]
+    ):
+        del overlap[i][j]
+        sources[j].discard(i)
+        d.moved.append(Moved(
+            pins=before[i].pins & after[j].pins, before=before[i], after=after[j],
+        ))
+
     for i, v in enumerate(before):
         if not overlap[i]:
             d.removed.append(v)
@@ -204,18 +248,40 @@ def diff(nets_before: "list | tuple", nets_after: "list | tuple") -> NetDiff:
     d.modified.sort(key=lambda m: _key(m.after))
     d.split.sort(key=lambda s: _key(s.before))
     d.merged.sort(key=lambda m: _key(m.after))
+    d.moved.sort(key=lambda mv: (_key(mv.before), _key(mv.after)))
     return d
 
 
+def _move_risks(d: NetDiff) -> list[bool]:
+    """Per ``d.moved`` entry: does the move touch a NAMED net (either side)?
+
+    Each endpoint net has two identities — the net the pins left also has an
+    after side, the net they joined also has a before side — and a name on any
+    of the four counts, exactly as the SPLIT+MERGE reading of the same edit
+    counts it. The far-side identity only differs when that host was renamed
+    in the same edit, and it then lives on the host's MODIFIED entry (a host
+    that is itself split/merged is covered by that entry's own check).
+    """
+    if not d.moved:
+        return []
+    named_later = {mo.before for mo in d.modified if mo.after.name}
+    named_earlier = {mo.after for mo in d.modified if mo.before.name}
+    return [
+        bool(mv.before.name or mv.after.name
+             or mv.before in named_later or mv.after in named_earlier)
+        for mv in d.moved
+    ]
+
+
 def has_risk(d: NetDiff) -> bool:
-    """True when any SPLIT/MERGE touches a NAMED net (either side)."""
+    """True when any SPLIT/MERGE/MOVE touches a NAMED net (either side)."""
     for s in d.split:
         if s.before.name or any(f.name for f, _ in s.fragments):
             return True
     for m in d.merged:
         if m.after.name or any(v.name for v in m.sources):
             return True
-    return False
+    return any(_move_risks(d))
 
 
 def _pin_tokens(sign: str, pins: frozenset[str]) -> list[str]:
@@ -225,6 +291,14 @@ def _pin_tokens(sign: str, pins: frozenset[str]) -> list[str]:
     if extra > 0:
         shown.append(f"(+{extra} more)")
     return shown
+
+
+def _pin_list(pins: frozenset[str]) -> str:
+    """Comma-joined member list of a MOVE line, capped like ``_pin_tokens``."""
+    ordered = sorted(pins)
+    text = ", ".join(ordered[:_MAX_PIN_TOKENS])
+    extra = len(ordered) - _MAX_PIN_TOKENS
+    return f"{text} (+{extra} more)" if extra > 0 else text
 
 
 def format_summary(d: NetDiff, limit: int | None = 20) -> list[str]:
@@ -242,7 +316,19 @@ def format_summary(d: NetDiff, limit: int | None = 20) -> list[str]:
     for m in d.merged:
         srcs = " + ".join(v.display for v in m.sources)
         lines.append(f"! MERGE {srcs} -> {m.after.display}")
+    # "!" only when the move trips the strict gate; an unnamed-to-unnamed move
+    # is an ordinary wiring edit and reads as a plain "~" change.
+    for mv, risk in zip(d.moved, _move_risks(d)):
+        lines.append(
+            f"{'!' if risk else '~'} MOVE {_pin_list(mv.pins)}: "
+            f"{mv.before.display} -> {mv.after.display}"
+        )
+    moved_pins: frozenset[str] = frozenset().union(*(mv.pins for mv in d.moved))
     for mo in d.modified:
+        # A host whose ONLY delta is the move(s) above has nothing left to say;
+        # a rename riding on it, or any other pin change, keeps the full line.
+        if moved_pins and not mo.renamed and (mo.added | mo.removed) <= moved_pins:
+            continue
         name = (f"{mo.before.display}->{mo.after.display}" if mo.renamed
                 else mo.after.display)
         delta = " ".join(_pin_tokens("+", mo.added) + _pin_tokens("-", mo.removed))

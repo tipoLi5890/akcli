@@ -17,27 +17,25 @@
   },
   "groups_board.kicad_sch": {
     "fingerprints": [
-      "1263fcdd392062085741287b56985c0c",
+      "0353f727a7c4204fe4ecf592962fdd86",
       "705b99222fb44e561e77d8ebc83c9bc9",
       "8fb96b97a67e56ed57903e160e6b8597",
-      "a827ca83be43d4676bb6c5628b606cfa",
       "bbb45c6b0a30c1ad334877b9f5bed672",
-      "c255310b9f30b3e6172dd72ba6dc1831",
       "c68e264b8e06e375969028b141962c6a",
-      "ca11aa7f7fd8dbe22362d2fc28a480e2",
       "caba728eb30f768dbba07065e399e16a",
       "e694efce3b51ed6ddb4b21426b7674f0",
       "f4bd2062b42db69894de8994fa89510f"
     ],
     "severity_hist": {
-      "info": 1,
-      "warning": 10
+      "info": 2,
+      "warning": 6
     },
     "codes": [
       "REVIEW_CONN_UNPROTECTED",
       "REVIEW_FUSE_MISSING",
       "REVIEW_RC_CUTOFF",
-      "REVIEW_REVPOL_UNPROTECTED"
+      "REVIEW_REVPOL_UNPROTECTED",
+      "REVIEW_XTAL_LOAD"
     ]
   },
   "power_entry.kicad_sch": {

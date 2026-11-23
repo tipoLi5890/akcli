@@ -1,0 +1,12 @@
+{
+ "components": {
+  "Y1": {"value": "8MHz", "lib_id": "Device:Crystal"},
+  "C1": {"value": "18p"},
+  "C2": {"value": "18p"},
+  "R1": {"value": "330"},
+  "D1": {"lib_id": "Device:LED"},
+  "R11": {"value": "10k"},
+  "R12": {"value": "10k"},
+  "R13": {"value": "10k"}
+ }
+}

@@ -299,7 +299,7 @@ LOOK at the result before `--apply`.
    `akcli check <file> --integrity` runs read-only on any `.kicad_sch`, so an
    imported or hand-edited file can be screened before you author against it.
    Add `--strict-nets`
-   to also refuse when the net diff shows a split/merge touching a **named**
+   to also refuse when the net diff shows a split/merge/move touching a **named**
    net — the machine gate for the silent-merge trap below.
 4. Re-read after applying (`akcli nets` / `akcli component`), or better:
    assert a design-intent file (`akcli check <target> --intent intent.json`)
@@ -311,6 +311,7 @@ LOOK at the result before `--apply`.
 Net changes:
   ! SPLIT THR (4 pins) -> THR(2) + <unnamed@R7.2>(2)   # a before-net's pins now live in 2+ nets
   ! MERGE MID + +3V3 -> MID                            # 2+ before-nets collapsed into one
+  ! MOVE U1.5: THR -> AUX                              # pins left one net for another; both nets otherwise hold
   ~ VTH: +U1.7 (5->6 pins)                             # modified membership (added/removed pins)
   = RENAME MID -> VOUT (3 pins)                        # same pins, new display name — harmless
   + NEW BALL1_N (5)                                    # created net
@@ -320,7 +321,10 @@ Net changes:
 `(none)` = connectivity is provably unchanged. `!` lines are the dangerous
 ones: a **SPLIT** usually means you deleted a label or wire that was the only
 bridge between fragments; a **MERGE** usually means a new wire/label shorted
-two rails. Renames are matched by membership, so a rename can never masquerade
+two rails; a **MOVE** means a minority of a net's pins now sits on another
+existing net (a relabelled or re-wired pin; `~ MOVE` when no named net is
+involved — an even reshuffle prints SPLIT + MERGE instead). Renames are
+matched by membership, so a rename can never masquerade
 as remove+create. Unnamed fragments are anchored by their smallest member pin
 (`<unnamed@R7.2>`). `--strict-nets` turns any `!` line touching a named net
 into a refusal.
@@ -430,7 +434,7 @@ unedited list once, or roll back with `akcli undo`, before editing the list.
   can silently **merge** nets — a passing `--apply` proves the write landed, not
   that the netlist is right. Three rails catch the silent cases: the **Net
   changes** block on every plan/draw (read the `!` lines), `draw --apply
-  --strict-nets` (refuses named-net splits/merges), and design-intent
+  --strict-nets` (refuses named-net splits/merges/moves), and design-intent
   assertions (`akcli nets --intent-snapshot` before the edit,
   `akcli check --intent` after).
 

@@ -79,8 +79,10 @@ datasheet and `akcli check` after placing. Record the LCSC C-number as an
 `LCSC` parameter on the placed part so the BOM maps designator -> orderable part.
 
 `jlc add` output defaults under config `[paths] parts_dir` (fallback
-`./akcli-parts`); pass `--footprint-lib NICK` so the Footprint field's nickname
-matches the project's fp-lib-table (audit later with `akcli library audit`).
+`./akcli-parts`). The Footprint field's nickname is taken from the project's
+fp-lib-table entry for the output `footprint/` directory when exactly one
+exists; otherwise it stays `footprint` and stderr prints the table line to add
+(`--footprint-lib NICK` overrides both; audit later with `akcli library audit`).
 
 Component **values** come from `akcli calc`, not mental arithmetic: compute the
 network (`vdivider-design`, `regulator-design`, `led`, `i2c-pullup`,
@@ -327,6 +329,26 @@ Rules the validator and executor enforce:
   wider `pitch_mil`): a `down` stack auto-orients the labels horizontally
   across the neighbor below and `check --layout` fills with
   `LAYOUT_LABEL_OVER_SYMBOL`.
+- **Bypass caps — `place_decoupling`**: one capacitor plus a rail label on
+  pin 1 and a ground label on pin 2 (label-on-pin, no wires). `power_net` is
+  required; `designator` (the C), `value` (default `100n`), `gnd_net` (default
+  `GND`) and `lib_id` (default `Device:C`) are optional. Position is exactly
+  one of `x_mil`+`y_mil` or `anchor` (+`offset_mil`):
+  `{"op": "place_decoupling", "anchor": "U1.VCC", "offset_mil": [-300, 100],
+  "power_net": "+3V3", "designator": "C1"}` drops the cap beside the pin it
+  decouples, resolved at execution time so the anchor may be placed earlier in
+  the same list. The macro has no `footprint` field — set it afterwards with
+  `set_component_parameters`. Give each cap its own `designator`; two macros on
+  the default `C1` are refused as a duplicate placement.
+- **Pull-ups and pull-downs — `place_pullup`**: one resistor with `rail_net`
+  labeled on pin 1 and `net` (the signal) on pin 2. `net` and `rail_net` are
+  required; `designator` (the R), `value` (default `10k`) and `lib_id`
+  (default `Device:R`) are optional; position forms are the same as
+  `place_decoupling`. `{"op": "place_pullup", "anchor": "U1.PA3",
+  "offset_mil": [300, 0], "net": "SDA", "rail_net": "+3V3", "designator":
+  "R5", "value": "4k7"}`. For a pull-DOWN, pass the ground net as `rail_net`.
+  Label scoping is by name, so the signal pin on the IC must carry the same
+  net name (label-on-pin) for the resistor to join it.
 - **Multi-unit parts**: `place_component` takes an optional `"unit": N` — each
   unit is its own instance sharing the designator (`U1` gate A = unit 1, gate B
   = unit 2 ...). `"REF.PIN"` resolves against the instance whose unit owns the
@@ -411,13 +433,17 @@ Rules the validator and executor enforce:
 
 ```json
 { "protocol_version": 2, "target_format": "kicad", "ops": [
-    { "op": "place_component", "lib_id": "Device:C", "designator": "C10",
-      "x_mil": 3200, "y_mil": 900, "value": "100n",
-      "footprint": "Capacitor_SMD:C_0402_1005Metric" },
-    { "op": "add_wire", "vertices": ["C10.1", "U3.11"] },
-    { "op": "add_wire", "vertices": ["C10.2", "U3.12"] }
+    { "op": "place_decoupling", "designator": "C10", "value": "100n",
+      "anchor": "U3.11", "offset_mil": [-300, 100], "power_net": "+3V3" },
+    { "op": "set_component_parameters", "designator": "C10",
+      "footprint": "Capacitor_SMD:C_0402_1005Metric" }
   ] }
 ```
+
+`U3.11` is the MCU's supply pin; the macro labels the cap's pin 1 `+3V3` and
+pin 2 `GND`, so the cap joins the rails by name (the MCU's own supply and
+ground pins must already carry those nets). Read the Net changes block: the
+cap must show up as members of `+3V3` and `GND`, with no splits, merges or moves.
 
 (Connector fanout follows the same shapes: a short wire stub + global label
 per signal pin, `place_gnd` on the ground pin, `add_no_connect` on unused pins
@@ -482,13 +508,18 @@ netlists are diffed by pin membership:
 Net changes:
   ! SPLIT THR (4 pins) -> THR(2) + <unnamed@R7.2>(2)   # DANGER: a fragment lost its name anchor
   ! MERGE MID + +3V3 -> MID                            # DANGER: a wire/label shorted two nets
+  ! MOVE U1.5: THR -> AUX                              # DANGER: a pin changed nets — is that the intent?
   ~ VTH: +U1.7 (5->6 pins)                             # membership grew — is that the intent?
   = RENAME MID -> VOUT (3 pins)                        # harmless (same pins)
 ```
 
+A `MOVE` means a minority pin group left one net for another existing net
+(`~ MOVE` when no named net is involved); an even reshuffle, pins leaving for a
+new net, or a wholly absorbed net still print SPLIT/MERGE.
+
 `(none)` proves the edit was connectivity-neutral. On surgical edits to an
 existing sheet, apply with `--strict-nets`: any `!` line touching a named net
-refuses the write (exit 6). An intended merge/rename? Re-run without
+refuses the write (exit 6). An intended merge/move/rename? Re-run without
 `--strict-nets` after confirming the lines are exactly the intended ones.
 
 **The diff's scope is the sheet TREE, not the file (0.20).** Editing a child
@@ -528,7 +559,8 @@ transaction.
   duplicate nodes whose original op index was ≠ 0.
 - `set_component_transform` / `set_component_parameters` address parts by
   designator; an unknown designator fails that op with `VERIFY_FAILED` and blocks
-  the whole write.
+  the whole write. `set_component_parameters` applies to every placed unit of a
+  multi-unit part (value, footprint, fields and a rename).
 - Apply is atomic with an optimistic lock: if the target changed on disk between
   read and write, apply aborts (`VERIFY_FAILED`) and the file is untouched. A
   `<name>.kicad_sch.bak` copy always lands next to the target on apply.
@@ -583,7 +615,12 @@ wiring.
 *membership* — which pins share a net. `akcli check <file> --contract contract.toml`
 asserts a different, stricter layer: pin-level topology *policy* — require or forbid a
 specific pin on a specific net, require or forbid two pins ever sharing a net, expected
-component values, NC pins, and approved exceptions carrying an owner and expiry. For a
+component values (exact text, a list, or a numeric range:
+`value = { nominal = "150k", tolerance = "1%" }` / `value = { min = "100n", max = "1u" }` —
+a range needs an engineering-notation Value such as `150k`/`4k7`/`10uF`, trailing qualifiers
+as in `150k 1%` allowed; free text fails as unparseable), NC pins, and approved exceptions (`waived = true` requires `owner` and
+`reason`; `expires` optional). `evidence` entries are strings or
+`{ source, page, url }` tables. For a
 hard invariant like "the regulator feedback node must never touch RAIL_A", a contract is more reliable than manual
 review (it is machine-checked on every run) and it composes with an intent snapshot —
 use intent for "this is what I wired" and a contract for "this must always/never be true".

@@ -396,6 +396,31 @@ def test_connector_on_the_net_is_a_driver():
     assert _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT) == []
 
 
+def test_test_point_on_the_net_is_an_access_point():
+    # A probe pad is not a connector (no ESD / net-tie rules), but it is an
+    # off-board access point: kicad-cli 10.0.4 `sch erc` reports nothing for
+    # an input wired only to `Connector:TestPoint`, and neither does akcli.
+    sch = _sch(
+        [_comp("U1", [_pin("1", name="BOOT", etype=PinType.INPUT)]),
+         _comp("TP3", [_pin("1")], lib="Connector:TestPoint", value="TestPoint")],
+        [_net("BOOT", [("U1", "1"), ("TP3", "1")])],
+    )
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT) == []
+    # a DNP test point gives no access: the input floats
+    sch.components[1].dnp = True
+    fl = _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT)
+    assert [f.refs for f in fl] == [["U1.1"]]
+    # ...and a real pull-up next to the test point still holds the level
+    sch = _sch(
+        [_comp("U1", [_pin("1", name="BOOT", etype=PinType.INPUT)]),
+         _comp("TP3", [_pin("1")], lib="Connector:TestPoint", value="TestPoint"),
+         _comp("R1", [_pin("1"), _pin("2")], lib="Device:R", value="10k")],
+        [_net("BOOT", [("U1", "1"), ("TP3", "1"), ("R1", "2")]),
+         _net("+3V3", [("R1", "1")], source_names=["+3V3"])],
+    )
+    assert _by_code(erc.run(sch, _cfg()), erc.ERC_FLOATING_INPUT) == []
+
+
 def test_input_on_power_rail_is_not_floating():
     # An INPUT tied to a detected rail is driven by the rail, not floating.
     sch = _sch(

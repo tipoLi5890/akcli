@@ -52,6 +52,7 @@ def convert(
     with_3d: bool = False,
     lib_name: str = "akcli",
     footprint_lib: str = "footprint",
+    footprint_nickname: str | None = None,
     model_path: str | None = None,
     force: bool = False,
 ) -> ConvertResult:
@@ -64,6 +65,10 @@ def convert(
     ``footprint_lib`` doubles as the **fp-lib-table nickname** written into the
     symbol's Footprint field (``<footprint_lib>:<name>``) — pass the nickname
     the target project actually registers, or KiCad will not find the package.
+    ``footprint_nickname`` separates the two when the project registers that
+    directory under a different name: the files still go to
+    ``<out>/<footprint_lib>/``, the Footprint field says
+    ``<footprint_nickname>:<name>``.
 
     ``model_path`` controls how the 3D model is referenced from the footprint:
     ``None``/``"relative"`` keeps the converter's bare relative path (portable
@@ -118,6 +123,11 @@ def convert(
             skip_existing=not force,
             models=["STEP"] if with_3d else [],
         )
+        if footprint_nickname and footprint_nickname != footprint_lib:
+            # create_footprint answers "<footprint_lib>:<name>" — the DIRECTORY
+            # name standing in as the nickname. Re-prefix for the symbol.
+            footprint_name = (footprint_nickname
+                              + footprint_name[len(footprint_lib):])
         if symbol_uuids:
             create_symbol(
                 symbol_component_uuid=symbol_uuids,

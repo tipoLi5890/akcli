@@ -1,0 +1,7 @@
+{
+ "nets": [
+  {"name": "3V3", "members": ["C1.1", "R2.1"]},
+  {"name": "EN", "members": ["R2.2"]},
+  {"name": "GND", "members": ["C1.2"]}
+ ]
+}

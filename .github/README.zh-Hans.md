@@ -2,7 +2,7 @@
 
 <img src="../docs/assets/hero.png" alt="akcli — 面向人与 AI 代理的 KiCad 原生设计 CLI" width="820">
 
-<p><strong>AI 原生原理图设计，专为 KiCad 打造 — 零依赖（纯 Python 标准库）的命令行工具。</strong></p>
+<p><strong>让 AI 写的 KiCad 原理图可以放心应用的验证层 — 零依赖（纯 Python 标准库）的命令行工具。</strong></p>
 
 <p>
   <a href="https://github.com/joanbono/awesome-kicad"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome KiCad"></a>
@@ -20,7 +20,8 @@
 
 **akcli** 是一套零依赖的 Python CLI，专注于**在 KiCad 上进行 AI 原生原理图设计**——一条可脚本化的
 设计闭环，由你或**任何 AI 代理**端到端驱动（随附 Claude Code、Codex、OpenCode 的插件／skills，
-但其实只要有 shell 就能用）。依据 JSON op-list 绘制 `.kicad_sch`、运行 ERC／设计评审／BOM／
+但其实只要有 shell 就能用）。写入是能力，验证是它敢写的理由——每次编辑默认只做 dry-run，
+并经过 net diff 与连通性把关。依据 JSON op-list 绘制 `.kicad_sch`、运行 ERC／设计评审／BOM／
 原理图 ↔ PCB 检查、在 ngspice 上仿真、查找真实可订购的 JLCPCB/LCSC 元件。既有的 Altium
 `.SchDoc` / `.SchLib` / `.PcbDoc` / `.PcbLib` 设计可只读导入——作为进入 KiCad 流程的入口，
 所有后续发展都以 KiCad 为路线。
@@ -30,13 +31,12 @@
 零运行时依赖，需要 **Python ≥ 3.11**（用于标准库 `tomllib`）。发行名为 `akcli-kicad`，命令仍是 `akcli`：
 
 ```bash
-# 从 clone 直接运行，无需安装
-git clone https://github.com/tipoLi5890/akcli
-./akcli/bin/akcli --help        # 包装器会自动选择 Python ≥ 3.11
-
-# 或从 PyPI 装到 PATH 上
 pipx install akcli-kicad        # 或：pip install akcli-kicad
 akcli --version
+
+# 或从 clone 直接运行，无需安装
+git clone https://github.com/tipoLi5890/akcli
+./akcli/bin/akcli --help        # 包装器会自动选择 Python ≥ 3.11
 ```
 
 Claude Code 插件（marketplace 名称为 `akcli`）：
@@ -82,12 +82,12 @@ Python 的连通性闸门把关，`akcli undo` 则从轮替备份栈回退。离
 |---|---|
 | `read` · `net` · `component` · `pins` | 把 KiCad 或 Altium 解析成同一套归一化 JSON 模型；查询 net（整条 net，或引脚级的 `net --at`／`--same`／`--why`）、元件与引脚坐标。 |
 | `project` · `new` · `plan` · `draw` · `ops` · `arrange` | 从零脚手架出一个完整 KiCad 项目（`.kicad_pro`/`.kicad_pcb`/lib table，可加 `--example NAME`），或把既有 `.kicad_sch` 收编进项目（`project new`／`project init`），查看其绑定内容（`project info`）、把关其完整性（`project check`），再依据带版本号的 **22 种 op + 10 种宏** JSON op-list 绘制它——根文件、子图页，或**在一次事务中写入多张图页**（`sheets` envelope + 逐 op 的 `sheet` 路由，附带运行备份与 `undo --run`）——由覆盖**整个 sheet tree** 的 net-diff 安全闸门与一键 `undo` 把关；`ops from-intent` 可把设计文档（声明的 nets + 元件）直接编译成 op-list。符号来源依次为 `--symbols`、配置文件路径，最后是项目与全局的 `sym-lib-table`。 |
-| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + 文档完整性 + intent／contract 检查、原理图 ↔ PCB 等价、net 成员关系 diff、MCU 引脚 → net 表。 |
+| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + 文档完整性 + intent／contract 检查、原理图 ↔ PCB 等价（`verify --library` 另会把每个板上封装与其库来源比对）、net 成员关系 diff、MCU 引脚 → net 表。 |
 | `review` | 建议性（advisory）、分级置信度的设计评审，横跨六大检测族（signal／validation／pcb／emc／domain／gerber）；标记 DNP 的元件不满足任何规则。 |
 | `sim` | 转成 SPICE deck，在 KiCad 自带 ngspice 上断言；角点扫描；用 datasheet 点拟合二极管模型。元件值先归一化，无法确定解读的一律拒绝而不猜测。 |
 | `jlc` | 搜索 JLCPCB/LCSC（库存、价格、Basic／Extended），进程内把元件转成 KiCad 库（带电气类型的引脚、真实 `Value`），抓取规格书。 |
 | `calc` | **60** 个附标准引用的离线计算器（E 系列、IPC-2221、阻抗、I²C 上拉、buck／boost……），每条都附引用。 |
-| `library` · `fab` · `release` | 库工作区审计／修复、从引脚表生成元件符号（`new-symbol`——提供引脚表，akcli 计算坐标）并附独立 lint（`lint-symbols`）与把关写入的共点引脚检查、版本化 fab profile 检查，以及写出可追溯 manifest 的 release preflight。 |
+| `library` · `fab` · `release` | 库工作区审计／修复、从引脚表生成元件符号（`new-symbol`——提供引脚表，akcli 计算坐标）并附独立 lint（`lint-symbols`）与把关写入的共点引脚检查、版本化 fab profile 检查（内置 profile 可用 `fab profiles` 按 id 选用；板子真实的外形、via、阻焊覆盖与项目设计规则都会被读取）、已提交的库基线（`library audit --write-baseline`），以及写出可追溯 manifest（含工具、gerber 与 profile 证据）的 release preflight（含 KiCad DRC）。 |
 | `gate` | 迭代级的四项检查组合，供每轮 GUI 编辑后重跑（完整 `check` 集、intent 断言、原理图 ↔ PCB `verify`、BOM lock 漂移——默认离线）；已配置的项目零参数即可执行，发布级闸门仍是 `release preflight`。 |
 | `export` · `render` · `doc` · `view` | netlist 导出（Protel／KiCad／CSV——KiCad 格式带有重新导入所需的 UUID sheetpath 身份）、纯标准库 SVG 渲染、Markdown pinout book，以及 localhost 的 `/calc` + `/live` 仪表板。 |
 | `capabilities` · `schema` | 自描述的接口 manifest——完整、按区块（`--section`）或按命令（`--command draw`）——以及每份内置 JSON Schema 的逐字节输出，供客户端校验使用。 |
@@ -122,7 +122,7 @@ akcli jlc search "0.1uF 0402 X7R"                                           # JL
 - **字节级完全一致的重复应用。** 确定性 UUIDv5 + 就地替换，让每次编辑都幂等——重跑同一份 op-list
   会产生完全相同的字节。
 - **连通性是唯一的硬性写入闸门。** 每次 `plan`／`draw` 都打印写入前后的 net diff（拆分、合并、
-  改名——按引脚成员关系匹配，绝不按名称匹配）；`--strict-nets` 会拒绝任何拆分或合并具名 net 的写入。
+  移动、改名——按引脚成员关系匹配，绝不按名称匹配）；`--strict-nets` 会拒绝任何拆分、合并或移动具名 net 的写入。
 - **值得信赖的 net 推断。** 重建的 net 层可处理全局同名合并、连接点、T 型连接点和 No-ERC 标记——
   修复了经典的「同名 net 被拆成单引脚 net」缺陷。
 
@@ -136,9 +136,10 @@ Python 之外的东西——一律在运行时探测，核心流程永远不需�
 |---|---|---|
 | 建议性 ERC 第二意见、`view live` 的 SVG | `kicad-cli`（本机可执行文件） | 直接跳过——不会导致失败，结果本来就只是建议性的。 |
 | `sim` 执行（`--deck-only` 不需要） | libngspice（KiCad 自带） | `sim` 以 `NGSPICE_MISSING` 退出；其余功能不受影响。 |
+| 标准符号库昵称（`Device:R`、`power:*`） | `kicad-cli` 安装位置（推导 `${KICAD*_SYMBOL_DIR}`） | 符号只能从明确指定的 `--symbols`／配置路径解析。 |
 | `jlc` 元件搜索／规格书抓取 | 网络 | **唯一**联网的命令家族；其余全部离线。 |
 
-`akcli doctor` 会逐项探测上述三者，并打印各操作系统的修复建议。
+`akcli doctor` 会逐项探测上述四者，并打印各操作系统的修复建议。
 
 ## 文档
 
@@ -150,11 +151,21 @@ Python 之外的东西——一律在运行时探测，核心流程永远不需�
 | [design-integrity.md](../docs/design-integrity.md) | 契约、fab profile、release preflight |
 | [review-rules.md](../docs/review-rules.md) | 设计评审规则目录 |
 | [sim.md](../docs/sim.md) | 仿真参考 |
+| [agent-state.md](../docs/agent-state.md) | 工作区状态文件与多代理协作契约 |
+| [codex-plugin.md](../docs/codex-plugin.md) | Codex 插件结构与内置技能 |
+| [jlc.md](../docs/jlc.md) | `akcli jlc`：元件搜索、BOM 可采购性、规格书抓取、JLCPCB 制造交付 |
+| [kicad-format-gotchas.md](../docs/kicad-format-gotchas.md) | 安全编辑所需的 KiCad 文件格式规则 |
+| [pin-identity.md](../docs/pin-identity.md) | v1.0 前的引脚标识模型审计 |
+| [migration-0.21.md](../docs/migration-0.21.md) | 迁移到 0.21 契约（`protocol_version` 2、schema 2.0） |
+| [releasing.md](../docs/releasing.md) | 发版流程手册 |
+| [recipes/](../docs/recipes/README.md) | CI workflow 模板（为原理图 PR 把关） |
+| [stability.md](../docs/stability.md) | 公开契约接口、非契约范围、版本规则 |
 | [ROADMAP.md](../ROADMAP.md) | 通往 v1.0 的路线图与验收条件 |
 
 ## 路线图
 
-**当前已提供（v0.22.0）：** 完整的 KiCad 项目脚手架——`project new`／`project init` 会在根图页旁
+**当前已提供（v0.23.0）：** 发版把关新增 KiCad DRC、已提交的 library 基线、PCB ↔ library 检查与覆盖整个
+sheet tree 的完整性检查，`fab check` 也改读板子真实的外形、via、阻焊覆盖与项目设计规则；此外还有完整的 KiCad 项目脚手架——`project new`／`project init` 会在根图页旁
 写出 `.kicad_pro`、空白的 `.kicad_pcb` 板框容器、项目 lib table 与 `.gitignore`（`--example NAME` 还会
 附上一份现成 op-list），`project info`／`project check` 则负责读取与把关这个项目绑定了什么；
 KiCad 写入／绘制（22 种 op + 10 种宏，含层次 `add_sheet`，可用 `"create": true` 在同一次事务中
@@ -171,8 +182,8 @@ JLCPCB／LCSC 元件搜索与规格书抓取、60 个附标准引用的计算器
 这条解析路径在本机是否可用。
 
 **前瞻（→ v1.0）：** 契约冻结审计（contract freeze audit）。首次发布到 PyPI（`pip install
-akcli-kicad`）已于 0.15.0 发布。*按决策暂缓：* 为原理图 PR 把关的 GitHub Action、`view` 波形面板，以及原生 MCP
-服务器（目前代理直接驱动 CLI）。完整计划与验收条件见 [ROADMAP.md](../ROADMAP.md)。
+akcli-kicad`）已于 0.15.0 发布。为原理图 PR 把关的 workflow 模板已收录于 [docs/recipes/](../docs/recipes/README.md)。*按决策暂缓：* 打包发布的
+Marketplace Action、`view` 波形面板，以及原生 MCP 服务器（目前代理直接驱动 CLI）。完整计划与验收条件见 [ROADMAP.md](../ROADMAP.md)。
 
 ## 致谢
 

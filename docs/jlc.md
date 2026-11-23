@@ -255,10 +255,27 @@ Output layout under `--out` (default `<[paths].parts_dir or ./akcli-parts>/<C-nu
 the footprint id from the `.kicad_mod` stem) to apply with
 `akcli draw <target> --ops place.json --symbols <symbol lib> --apply`.
 
-**`--footprint-lib NICKNAME`** (default `footprint`) sets **both** the footprint output directory
-and the fp-lib-table nickname written into the symbol's Footprint field (`<nickname>:<name>`). The
-default `footprint` is the historic cause of KiCad's "footprint not found" — pass the nickname your
-project's `fp-lib-table` actually registers, or fix an existing library with
+**`--footprint-lib NICKNAME`** sets **both** the footprint output directory and the fp-lib-table
+nickname written into the symbol's Footprint field (`<nickname>:<name>`); when given it always wins.
+
+Without it the footprints go to `footprint/`, and the nickname is looked up in the nearest project
+`fp-lib-table` — the first directory at or above the output directory that holds an `fp-lib-table`
+or a `.kicad_pro`:
+
+| Table entries whose URI resolves to the `footprint/` directory | Nickname written | `footprint_lib_source` |
+| --- | --- | --- |
+| exactly one | that entry's | `fp-lib-table` |
+| none, or no table | `footprint` | `default` |
+| several | `footprint` | `default` |
+
+The match is the directory itself (`${KIPRJMOD}`, `..` and relative URIs are resolved first); an
+entry for a parent directory does not count, because a footprint library is one flat directory. In
+the `default` rows stderr says what to do: the exact line to add to the table, e.g.
+`(lib (name "footprint")(type "KiCad")(uri "${KIPRJMOD}/akcli-parts/C2040/footprint")(options "")(descr ""))`,
+or the candidate nicknames when several entries point at the directory. The table is never edited
+by `jlc add`. `--json` carries the result as `footprint_lib` and `footprint_lib_source`
+(`flag` | `fp-lib-table` | `default`), and `--place` uses the same nickname. A re-add rewrites an
+existing symbol only under `--force`; an existing library is fixed with
 `akcli library repair <project> --rename-footprint-lib footprint=<nickname> --apply`.
 **`--3d-path MODE`** picks how the footprint references the 3D model: `relative` (default; portable,
 resolves only next to the library), `absolute` (always resolves on this machine, not portable), or a

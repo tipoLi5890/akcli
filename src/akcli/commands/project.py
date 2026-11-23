@@ -43,7 +43,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..errors import EXIT, fail
+from ..errors import EXIT, AkcliError, fail
 from ._shared import (
     _add_exit_policy_flags,
     _dumps,
@@ -267,8 +267,6 @@ def check_findings(pro_path: Path, *, with_lib_audit: bool = True) -> list:
       PCB content, and ``project new --no-pcb`` is a supported choice.
     * ``PROJECT_STATE_UNIGNORED`` (NOTE) — KiCad/akcli churn is not gitignored.
     """
-    from .. import project as project_mod
-    from ..readers import kicad as kreader
     from ..readers import kicad_pro as kpro
     from ..report import Finding, Severity
 
@@ -312,20 +310,20 @@ def check_findings(pro_path: Path, *, with_lib_audit: bool = True) -> list:
                 "this file no longer is (regenerated root schematic?)"))
 
     # --- sheet tree: every referenced child must exist ----------------------
+    # The ONE tree walk (`check --integrity` runs the same one), narrowed to
+    # the finding this command owns: the document-level findings it also
+    # returns belong to `check`, and `release preflight` runs both gates —
+    # one finding reported twice reads as two problems.
+    missing: list = []
     if root_sch.is_file():
-        for sheet in project_mod.tree_files(root_sch):
-            try:
-                _uuid, refs = kreader.sheet_refs(sheet)
-            except Exception:
-                continue          # unreadable neighbour: `read`/`check` reports it
-            for _suuid, sname, sfile in refs:
-                if not sfile:
-                    continue
-                if not (sheet.parent / sfile).exists():
-                    out.append(Finding(
-                        "SHEET_FILE_MISSING", Severity.ERROR,
-                        f"{sheet.name}: sheet {sname!r} references {sfile}, "
-                        "which does not exist"))
+        from ..checks import integrity
+
+        try:
+            missing = [f for f in integrity.run_tree(root_sch, label_root=True)
+                       if f.code == "SHEET_FILE_MISSING"]
+        except (AkcliError, OSError):
+            pass              # unreadable root: `read`/`check` reports it
+        out.extend(missing)
 
     # --- board container ----------------------------------------------------
     if not (directory / f"{pro_path.stem}.kicad_pcb").is_file():
@@ -340,8 +338,17 @@ def check_findings(pro_path: Path, *, with_lib_audit: bool = True) -> list:
         from .. import libtable
 
         ws = libtable.discover(pro_path)
-        out.extend(libtable.audit(
-            ws, [root_sch] if root_sch.is_file() else None))
+        audit = libtable.audit(ws, [root_sch] if root_sch.is_file() else None)
+        # The audit loads the tree through the reader, which stops at a
+        # missing child and reports "<child> (sheet '<name>' referenced from
+        # <parent>)" as SCH_UNREADABLE: the SHEET_FILE_MISSING above, worded
+        # as its symptom. One finding per cause — drop that echo, and only
+        # that (a schematic unreadable for any OTHER reason still reports).
+        echoes = {f"{Path(str(f.refs[1])).name} (sheet "
+                  for f in missing if len(f.refs) > 1}
+        out.extend(f for f in audit
+                   if not (f.code == "SCH_UNREADABLE"
+                           and any(e in f.message for e in echoes)))
 
     # --- derived-state hygiene ----------------------------------------------
     unignored = [tok for tok in _STATE_PATTERNS

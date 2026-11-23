@@ -436,9 +436,10 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
     Writes a valid empty sheet so `draw` has something to append to (a blank
     sheet no longer has to be hand-written). Refuses an existing file without
-    `--force`. Standard status line; `--json` envelope. The document itself is
-    rendered by the writer (:mod:`..writers.blank`), which shares the one
-    s-expression quoting authority.
+    `--force`, and with it still refuses ``TARGET_LOCKED`` while KiCad holds
+    that file open (`--allow-open`). Standard status line; `--json` envelope.
+    The document itself is rendered by the writer (:mod:`..writers.blank`),
+    which shares the one s-expression quoting authority.
     """
     from ..writers.blank import KICAD_PAPERS, blank_sch
 
@@ -450,9 +451,17 @@ def _cmd_new(args: argparse.Namespace) -> int:
         raise _ExitWith(EXIT["USAGE"],
                         f"ERROR: unknown paper {paper!r} "
                         f"(one of: {', '.join(KICAD_PAPERS)})")
-    if target.exists() and not getattr(args, "force", False):
-        raise _ExitWith(EXIT["USAGE"],
-                        f"ERROR: {target} exists (use --force to overwrite)")
+    if target.exists():
+        if not getattr(args, "force", False):
+            raise _ExitWith(EXIT["USAGE"],
+                            f"ERROR: {target} exists (use --force to overwrite)")
+        # --force replaces a sheet KiCad may be holding open: the same
+        # invariant as `draw --apply` (a GUI save would put the old sheet
+        # back from memory). Only an EXISTING file can be held open.
+        from .. import safety
+        safety.refuse_if_gui_locked(
+            target, allow_open=bool(getattr(args, "allow_open", False)),
+            what="the --force overwrite")
     text = blank_sch(paper, getattr(args, "title", None))
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8", newline="\n")
@@ -949,6 +958,9 @@ def register(sub, common) -> None:
     p.add_argument("--title", metavar="T", help="title_block title")
     p.add_argument("--force", action="store_true",
                    help="overwrite an existing file")
+    p.add_argument("--allow-open", dest="allow_open", action="store_true",
+                   help="with --force: overwrite even when a KiCad GUI lock "
+                        "file is present (File>Revert in KiCad afterwards)")
     p.set_defaults(handler=_cmd_new)
 
     p = sub.add_parser("undo", parents=[common],

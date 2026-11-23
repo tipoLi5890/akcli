@@ -28,6 +28,7 @@ _SCHEMA_CONSTS = {
     "netlist.schema.json": "netlist",
     "doc.schema.json": "doc",
     "draw-result.schema.json": "draw-result",
+    "library-baseline.schema.json": "library-baseline",
 }
 
 

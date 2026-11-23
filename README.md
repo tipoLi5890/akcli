@@ -2,7 +2,7 @@
 
 <img src="docs/assets/hero.png" alt="akcli — KiCad-native design CLI for humans and AI agents" width="820">
 
-<p><strong>AI-native schematic design, purpose-built for KiCad — a zero-dependency (pure-stdlib Python) CLI.</strong></p>
+<p><strong>The verification layer that makes AI-written KiCad schematics safe to apply — a zero-dependency (pure-stdlib Python) CLI.</strong></p>
 
 <p>
   <a href="https://github.com/joanbono/awesome-kicad"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome KiCad"></a>
@@ -20,7 +20,8 @@
 
 **akcli** is a zero-dependency Python CLI for **AI-native schematic design on KiCad** — a scriptable
 design loop that you or **any AI agent** can drive end to end (bundled plugins/skills ship for Claude
-Code, Codex, and OpenCode, but a shell is all it takes). Author a `.kicad_sch` from a JSON op-list,
+Code, Codex, and OpenCode, but a shell is all it takes). Writing is the capability; verification is what makes it safe to use —
+every edit is dry-run by default, net-diffed and connectivity-gated. Author a `.kicad_sch` from a JSON op-list,
 run ERC / design-review / BOM / schematic ↔ PCB checks, simulate on ngspice, and source real
 JLCPCB/LCSC parts. Existing Altium `.SchDoc` / `.SchLib` / `.PcbDoc` / `.PcbLib` designs import
 read-only — an on-ramp into the KiCad flow, which is where all development happens.
@@ -84,12 +85,12 @@ One normalized model behind every command, so each check, diff, and report works
 |---|---|
 | `read` · `net` · `component` · `pins` | Parse KiCad or Altium into one normalized JSON model; query nets (whole-net or pin-level: `net --at` / `--same` / `--why`), components, and pin coordinates. |
 | `project` · `new` · `plan` · `draw` · `ops` · `arrange` | Scaffold a complete KiCad project (`.kicad_pro`/`.kicad_pcb`/lib tables, optionally `--example NAME`) from scratch, or adopt an existing `.kicad_sch` into one (`project new`/`project init`), inspect what it binds (`project info`) and gate its integrity (`project check`), then author it — a root file, a child sheet, or **several sheets in one atomic transaction** (the `sheets` envelope + per-op `sheet` routing, with run backups and `undo --run`) — from a versioned **22-op + 10-macro** JSON op-list, behind a net-diff safety gate evaluated over the **whole sheet tree** and one-command `undo`; `ops from-intent` compiles a design document (declared nets + components) straight into an op-list. Symbols resolve from `--symbols`, the config paths, then the project and global `sym-lib-table`. |
-| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + document-integrity + intent / contract checks, schematic ↔ PCB equivalence, net-membership diff, MCU pin → net map. |
+| `check` · `verify` · `diff` · `pinmap` | ERC-lite + power + BOM + document-integrity + intent / contract checks, schematic ↔ PCB equivalence (`verify --library` also compares each board footprint with its library source), net-membership diff, MCU pin → net map. |
 | `review` | Advisory, confidence-graded design review across six detector families (signal / validation / pcb / emc / domain / gerber); DNP parts satisfy no rule. |
 | `sim` | Render to a SPICE deck and assert on KiCad's bundled ngspice; sweep corners; fit diode models from datasheet points. Component values are normalized, or refused rather than guessed. |
 | `jlc` | Search JLCPCB/LCSC (stock, price, Basic/Extended), convert a part into a KiCad library in-process (typed pins, real `Value`), fetch datasheets. |
 | `calc` | **60** standards-cited offline calculators (E-series, IPC-2221, impedance, I²C pull-ups, buck/boost…), each citing its reference. |
-| `library` · `fab` · `release` | Library-workspace audit/repair, symbol authoring from a pin table (`new-symbol` — you give the pin table, akcli computes the coordinates) with a standalone lint (`lint-symbols`) and a coincident-pin check that gates the write, versioned fab-profile checks, and a release preflight that writes a traceable manifest. |
+| `library` · `fab` · `release` | Library-workspace audit/repair, symbol authoring from a pin table (`new-symbol` — you give the pin table, akcli computes the coordinates) with a standalone lint (`lint-symbols`) and a coincident-pin check that gates the write, versioned fab-profile checks (bundled profiles selectable by id via `fab profiles`; the real outline, vias, tenting and project design rules are read from the board), a committed library baseline (`library audit --write-baseline`), and a release preflight (including KiCad DRC) that writes a traceable manifest with tool, gerber and profile evidence. |
 | `gate` | Iteration-weight bundle of the four checks re-run after every GUI edit round (the full `check` set, intent assertions, sch ↔ PCB `verify`, BOM-lock drift — offline by default) — zero-argument in a configured project; `release preflight` stays the release-weight gate. |
 | `export` · `render` · `doc` · `view` | Netlist export (Protel / KiCad / CSV — the KiCad form carries the UUID sheetpath identity a re-import needs), pure-stdlib SVG render, a Markdown pinout book, and a localhost `/calc` + `/live` dashboard. |
 | `capabilities` · `schema` | The self-describing surface manifest — whole, per-section (`--section`), or per-command (`--command draw`) — and every packaged JSON Schema printed byte-for-byte for client-side validation. |
@@ -127,8 +128,8 @@ machine-readable `remediation` hint.
 - **Byte-identical re-apply.** Deterministic UUIDv5 + replace-in-place makes every edit idempotent —
   re-running an op-list produces the same bytes.
 - **Connectivity is the only hard write gate.** Every `plan`/`draw` prints a before/after net diff
-  (splits, merges, renames — matched by pin membership, never by name); `--strict-nets` refuses a
-  write that splits or merges a named net.
+  (splits, merges, moves, renames — matched by pin membership, never by name); `--strict-nets` refuses a
+  write that splits, merges or moves a named net.
 - **Net inference you can trust.** A rebuilt net layer handles global same-name merges, junctions,
   T-junctions, and No-ERC markers — fixing the classic "same-named nets split into single-pin nets" bug.
 
@@ -158,11 +159,22 @@ by the core loop:
 | [design-integrity.md](docs/design-integrity.md) | Contracts, fab profiles, release preflight |
 | [review-rules.md](docs/review-rules.md) | Design-review rule catalogue |
 | [sim.md](docs/sim.md) | Simulation reference |
+| [agent-state.md](docs/agent-state.md) | Workspace state files and the multi-agent contract |
+| [codex-plugin.md](docs/codex-plugin.md) | Codex plugin layout and bundled skills |
+| [jlc.md](docs/jlc.md) | `akcli jlc`: part search, BOM purchasability, datasheet fetch, JLCPCB manufacturing handoff |
+| [kicad-format-gotchas.md](docs/kicad-format-gotchas.md) | KiCad file-format rules for safe editing |
+| [pin-identity.md](docs/pin-identity.md) | Pin identity model audit ahead of v1.0 |
+| [migration-0.21.md](docs/migration-0.21.md) | Migrating to the 0.21 contract (`protocol_version` 2, schema 2.0) |
+| [releasing.md](docs/releasing.md) | Release runbook |
+| [recipes/](docs/recipes/README.md) | CI workflow recipes (gating schematic pull requests) |
+| [stability.md](docs/stability.md) | Public contract surfaces, what is not contract, versioning rules |
 | [ROADMAP.md](ROADMAP.md) | Roadmap to v1.0 with exit criteria |
 
 ## Roadmap
 
-**Shipped (v0.22.0):** complete KiCad project scaffolding — `project new` / `project init` write the
+**Shipped (v0.23.0):** release gates for KiCad DRC, a committed library baseline, a PCB ↔ library
+check and tree-scoped integrity, with `fab check` reading the board's real outline, vias, tenting and
+project design rules; before that, complete KiCad project scaffolding — `project new` / `project init` write the
 `.kicad_pro`, a blank `.kicad_pcb` board container, the project lib tables and a `.gitignore` around a
 root sheet (`--example NAME` drops in a worked op-list), while `project info` / `project check` read
 and gate what the project binds — KiCad write/draw from a 22-op + 10-macro vocabulary (hierarchical
@@ -181,8 +193,9 @@ Altium/KiCad readers. Standard symbol nicknames resolve on a stock KiCad install
 whether that resolution works here.
 
 **Ahead (→ v1.0):** the contract-freeze audit. The first PyPI release (`pip install akcli-kicad`) shipped in 0.15.0.
-*Deferred by decision:* a GitHub Action gating schematic PRs, the `view` waveform panel, and a native
-MCP server (the plain CLI serves agents today). Full plan with exit criteria in
+A workflow recipe that gates schematic PRs ships in [docs/recipes/](docs/recipes/README.md). *Deferred
+by decision:* a packaged Marketplace Action, the `view` waveform panel, and a native MCP server (the
+plain CLI serves agents today). Full plan with exit criteria in
 [ROADMAP.md](ROADMAP.md).
 
 ## Acknowledgments

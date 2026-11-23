@@ -117,7 +117,10 @@ _NOT_A_CODE = {
 def _doc_files() -> list[Path]:
     files = [_ROOT / "README.md", _ROOT / "INSTALL.md", _ROOT / "ROADMAP.md"]
     files += sorted((_ROOT / ".github").glob("README.*.md"))
-    files += sorted((_ROOT / "docs").glob("*.md"))
+    # recursive, like test_docs_conformance._doc_files(): docs/recipes/ is
+    # documentation too; docs/assets/ (README banner sources) is not.
+    files += sorted(p for p in (_ROOT / "docs").rglob("*.md")
+                    if "assets" not in p.relative_to(_ROOT / "docs").parts[:-1])
     files += sorted((_ROOT / "skills").glob("*/SKILL.md"))
     files += sorted((_ROOT / "commands").glob("*.md"))
     return [f for f in files if f.is_file()]

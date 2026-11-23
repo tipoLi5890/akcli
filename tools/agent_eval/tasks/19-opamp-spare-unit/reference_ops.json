@@ -1,0 +1,16 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "place_component", "lib_id": "EvalParts:OPAMP_DUAL", "designator": "U1", "unit": 1, "x_mil": 3000, "y_mil": 2000, "value": "OPAMP_DUAL"},
+  {"op": "place_component", "lib_id": "EvalParts:OPAMP_DUAL", "designator": "U1", "unit": 3, "x_mil": 3000, "y_mil": 3600, "value": "OPAMP_DUAL"},
+  {"op": "terminate_unused_unit", "designator": "U1", "lib_id": "EvalParts:OPAMP_DUAL", "unit": 2, "at": [4800, 2000], "in_plus": "5", "in_minus": "6", "out": "7"},
+  {"op": "add_net_label", "at": "U1.3", "name": "VIN"},
+  {"op": "add_wire", "vertices": ["U1.1", [3500, 2000], [3500, 2500], [2500, 2500], [2500, 2100], "U1.2"]},
+  {"op": "add_net_label", "at": [3000, 2500], "name": "VOUT"},
+  {"op": "place_vcc", "at": "U1.8"},
+  {"op": "place_gnd", "at": "U1.4"},
+  {"op": "place_decoupling", "anchor": "U1.8", "offset_mil": [700, 300], "power_net": "VCC", "designator": "C1", "value": "100n"}
+ ]
+}

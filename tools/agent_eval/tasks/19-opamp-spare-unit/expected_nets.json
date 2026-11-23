@@ -1,0 +1,8 @@
+{
+ "nets": [
+  {"name": "GND", "members": ["C1.2", "U1.4", "U1.5"]},
+  {"name": "VCC", "members": ["C1.1", "U1.6", "U1.8"]},
+  {"name": "VIN", "members": ["U1.3"]},
+  {"name": "VOUT", "members": ["U1.1", "U1.2"]}
+ ]
+}

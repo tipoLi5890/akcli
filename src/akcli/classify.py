@@ -55,10 +55,12 @@ __all__ = [
     "TVS_KEYWORDS",
     "CONNECTOR_PREFIXES",
     "CONNECTOR_KEYWORDS",
+    "TESTPOINT_KEYWORDS",
     "CRYSTAL_PREFIXES",
     "CRYSTAL_KEYWORDS",
     "PASSIVE_TIE_PREFIXES",
     "is_tvs",
+    "is_testpoint",
     "is_crystal",
     "is_connector",
 ]
@@ -293,6 +295,11 @@ CONNECTOR_PREFIXES: frozenset[str] = frozenset({"J", "P", "CN", "USB", "XP"})
 CONNECTOR_KEYWORDS: tuple[str, ...] = ("conn", "usb", "header", "receptacle",
                                        "socket", "jack")
 
+# A test point is a probe pad, not a mating interface: ``Connector:TestPoint``
+# carries the connector library name but must not draw connector rules (ESD
+# coverage, net-tie treatment).
+TESTPOINT_KEYWORDS: tuple[str, ...] = ("testpoint", "test_point", "test point")
+
 # Crystal / resonator: prefix ``Y`` (IEC 60617) or ``X`` (equally common in
 # vendor and JLC libraries).
 CRYSTAL_PREFIXES: frozenset[str] = frozenset({"Y", "X"})
@@ -338,6 +345,11 @@ def is_crystal(designator: str | None = None, lib_id: str | None = None,
     return refdes_prefix(designator) in CRYSTAL_PREFIXES
 
 
+def is_testpoint(lib_id: str | None = None, footprint: str | None = None) -> bool:
+    """True for a test point / probe pad (library or footprint evidence)."""
+    return any(k in _hay(lib_id, footprint) for k in TESTPOINT_KEYWORDS)
+
+
 def is_connector(designator: str | None = None, lib_id: str | None = None,
                  footprint: str | None = None, value: str | None = None) -> bool:
     """True for a connector / header / receptacle.
@@ -347,11 +359,13 @@ def is_connector(designator: str | None = None, lib_id: str | None = None,
     never a connector (that mis-classification put ``XTAL1``/``XTAL2`` on the
     "unprotected connector net" report), and neither is a TVS — a
     ``USBLC6``'s library name carries ``usb`` but the part is a clamp, not a
-    receptacle.
+    receptacle — nor a test point (``Connector:TestPoint``).
     """
     if any(k in _hay(lib_id, value) for k in CRYSTAL_KEYWORDS):
         return False
     if is_tvs(designator, lib_id, value, footprint):
+        return False
+    if is_testpoint(lib_id, footprint):
         return False
     if any(k in _hay(lib_id, footprint) for k in CONNECTOR_KEYWORDS):
         return True

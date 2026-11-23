@@ -1,9 +1,10 @@
 """Documentation-conformance gate — the anti-drift CI net.
 
-Two static gates over the human-facing docs (``README.md``, ``INSTALL.md``,
-``ROADMAP.md``, the two localized READMEs, ``docs/*.md``, ``skills/*/SKILL.md``
-and the plugin slash commands ``commands/*.md``); neither runs a handler,
-touches the network, or starts an engine:
+Static gates over the human-facing docs (``README.md``, ``INSTALL.md``,
+``ROADMAP.md``, the localized READMEs, ``docs/**/*.md`` — recursive, so
+``docs/recipes/`` is covered; ``docs/assets/`` is not documentation and stays
+out — ``skills/*/SKILL.md`` and the plugin slash commands ``commands/*.md``);
+none runs a handler, touches the network, or starts an engine:
 
 * **Fence gate.** Every fenced ``akcli …`` command line is shlex-split (angle
   ``<placeholders>`` and ``$VARS`` first swapped for dummies) and checked
@@ -14,7 +15,17 @@ touches the network, or starts an engine:
 * **Count gate.** Wherever the docs claim "N ops", "N macros" or "N
   calculators" (and the zh ``N 種 op`` / ``N 個離線計算器`` equivalents), N must
   equal the live registry (``ops.OP_NAMES`` / ``ops.MACRO_OPS`` / the ``calc``
-  ``CALCS`` table).
+  ``CALCS`` table). The same holds for "N skills" / "N commands" (file
+  counts), "N schemas" (files in ``schemas/`` — every one of them is a name
+  ``akcli schema`` serves, so ``ops.capabilities.json`` counts), "N rules"
+  (the review rule registry) and "N … eval/design tasks" (task directories
+  under ``tools/agent_eval/tasks/``). Only DIGIT claims are gated: a word-form
+  count ("fourteen schemas") is invisible, so write counts in digits.
+* **Recipe gate.** A workflow under ``docs/recipes/`` runs ``akcli`` from YAML
+  ``run:`` lines the fence gate cannot see (``run: akcli …`` does not start
+  with ``akcli``). Each recipe therefore repeats its commands as bare lines in
+  a fenced ``bash`` block — which the fence gate validates — and every
+  ``akcli`` invocation in the recipe's YAML must appear in that block.
 
 If a gate fires, the matcher is the first suspect — the docs were audited clean
 — so widen/narrow the regex before touching a doc; only edit a doc line when it
@@ -24,6 +35,7 @@ is genuine drift.
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import shlex
 from pathlib import Path
@@ -31,31 +43,71 @@ from pathlib import Path
 import pytest
 
 # --------------------------------------------------------------------------- #
-# file set (shared by both gates)
+# file set (shared by the gates)
 # --------------------------------------------------------------------------- #
 _ROOT = Path(__file__).resolve().parents[1]
+_DOCS = _ROOT / "docs"
+# Directories under docs/ that hold no documentation (the README banner source
+# and image live in docs/assets/): never scanned, even if a .md lands there.
+_DOCS_SKIP_DIRS = frozenset({"assets"})
+
+
+def _docs_tree() -> list[Path]:
+    """Every ``docs/**/*.md`` outside the non-documentation directories."""
+    return sorted(
+        p for p in _DOCS.rglob("*.md")
+        if not _DOCS_SKIP_DIRS.intersection(p.relative_to(_DOCS).parts[:-1])
+    )
 
 
 def _doc_files() -> list[Path]:
     files = [_ROOT / "README.md", _ROOT / "INSTALL.md", _ROOT / "ROADMAP.md"]
     files += sorted((_ROOT / ".github").glob("README.*.md"))
-    files += sorted((_ROOT / "docs").glob("*.md"))
+    files += _docs_tree()
     files += sorted((_ROOT / "skills").glob("*/SKILL.md"))
     files += sorted((_ROOT / "commands").glob("*.md"))
     return [f for f in files if f.is_file()]
 
 
+def test_doc_file_set_is_recursive_under_docs() -> None:
+    """The file set reaches nested docs (``docs/recipes/``) and the docs index,
+    and never pulls in ``docs/assets/``."""
+    rels = {f.relative_to(_ROOT).as_posix() for f in _doc_files()}
+    assert "docs/README.md" in rels
+    assert "docs/cli-reference.md" in rels
+    nested = {r for r in rels if r.startswith("docs/") and r.count("/") > 1}
+    assert any(r.startswith("docs/recipes/") for r in nested), (
+        "docs/recipes/*.md fell out of the docs file set")
+    assert not any("/assets/" in r for r in rels)
+    on_disk = {p.relative_to(_ROOT).as_posix() for p in _DOCS.rglob("*.md")
+               if "assets" not in p.relative_to(_DOCS).parts}
+    assert on_disk <= rels, f"docs pages outside the gates: {sorted(on_disk - rels)}"
+
+
+def _fenced_blocks(path: Path) -> list[tuple[str, list[tuple[int, str]]]]:
+    """``(language, [(lineno, text), ...])`` for every ``````` fenced block.
+
+    ``language`` is the fence's info string, lower-cased (``""`` when bare).
+    """
+    blocks: list[tuple[str, list[tuple[int, str]]]] = []
+    current: list[tuple[int, str]] | None = None
+    for i, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = raw.lstrip()
+        if stripped.startswith("```"):
+            if current is None:
+                current = []
+                blocks.append((stripped[3:].strip().lower(), current))
+            else:
+                current = None
+            continue
+        if current is not None:
+            current.append((i, raw))
+    return blocks
+
+
 def _fenced_lines(path: Path) -> list[tuple[int, str]]:
     """``(lineno, text)`` for every line inside a ``````` fence."""
-    out: list[tuple[int, str]] = []
-    in_fence = False
-    for i, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if raw.lstrip().startswith("```"):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            out.append((i, raw))
-    return out
+    return [line for _lang, lines in _fenced_blocks(path) for line in lines]
 
 
 # --------------------------------------------------------------------------- #
@@ -166,9 +218,14 @@ def test_fenced_commands_are_valid(rel: str, lineno: int, raw: str) -> None:
 # --------------------------------------------------------------------------- #
 # count gate
 # --------------------------------------------------------------------------- #
+_EVAL_DIR = _ROOT / "tools" / "agent_eval"
+
+
+@functools.cache
 def _registry_counts() -> dict[str, int]:
     from akcli import ops
     from akcli.calc import CALCS
+    from akcli.review import rules_index
 
     return {
         "ops": len(ops.OP_NAMES),
@@ -179,6 +236,20 @@ def _registry_counts() -> dict[str, int]:
         # must match reality" contract as the op/macro/calc registries above.
         "skills": len(list((_ROOT / "skills").glob("*/SKILL.md"))),
         "commands": len(list((_ROOT / "commands").glob("*.md"))),
+        # the published JSON contracts. Every file in schemas/ is a name
+        # `akcli schema` serves (tests/test_schema_cmd.py walks the same glob),
+        # so the op-capability matrix ops.capabilities.json COUNTS even though
+        # it is not itself a JSON Schema — "N schemas" means "what `akcli
+        # schema` lists".
+        "schemas": len(list((_ROOT / "schemas").glob("*.json"))),
+        # registered review rules — what `review explain` can print.
+        "rules": len(rules_index()),
+        # agent-eval tasks, counted the way the harness discovers them
+        # (tools/agent_eval/run_eval.py, tests/test_agent_eval.py). Read from
+        # disk on purpose: the corpus grows, and a hard-coded number here
+        # would be a second place to forget.
+        "tasks": sum(1 for d in (_EVAL_DIR / "tasks").iterdir()
+                     if (d / "task.md").is_file()),
     }
 
 
@@ -209,32 +280,133 @@ _COUNT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("macros", re.compile(r"(\d+)\s*(?:個\s*の\s*)?マクロ")),
     ("calculators", re.compile(r"(\d+)\s*個の[ぁ-んァ-ヴ一-鿿]{0,12}計算機")),
     ("commands", re.compile(r"(?<![\w.])(\d+)\s*つの.{0,40}?コマンド")),
+    # ---- schemas / review rules / agent-eval tasks ------------------------- #
+    # Tighter than the classes above: "rules" and "tasks" are everyday words,
+    # so a claim must look like a claim.
+    #   * a leading "-" is refused too -> "IPC-2221 rules" is a standard's name
+    #   * schemas: "14 schemas", "14 JSON schemas", "14 published schemas"
+    #   * rules:   "44 rules" / "44 review rules". A qualified count such as
+    #              "8 pre-compliance rules" is one FAMILY's count, not the
+    #              registry total, and is deliberately not a claim.
+    #   * tasks:   only with an eval qualifier ("10 ground-truthed design
+    #              tasks", "10 eval tasks"); a bare "3 tasks" is prose.
+    ("schemas", re.compile(
+        r"(?<![\w.-])(\d+)\s+(?:(?:published|packaged|JSON)\s+){0,2}"
+        r"[Ss]chemas(?![\w-])")),
+    ("rules", re.compile(r"(?<![\w.-])(\d+)\s+(?:review\s+)?rules(?![\w-])")),
+    ("tasks", re.compile(
+        r"(?<![\w.-])(\d+)\s+(?:ground-truthed\s+)?"
+        r"(?:design|eval|agent-eval)\s+tasks(?![\w-])")),
+    # zh / ja forms of the same three. The CJK qualifier is REQUIRED (審查規則,
+    # レビュールール, 評測任務) so an unrelated "3 條規則" never reads as a claim;
+    # (?<![\d.]) keeps a version number ("0.14 の…") from donating its tail —
+    # \w cannot be used here because it also matches the CJK text before a count.
+    ("schemas", re.compile(r"(?<![\d.])(\d+)\s*[個个份]\s*(?:JSON\s*)?[Ss]chemas?(?![\w-])")),
+    ("rules", re.compile(
+        r"(?<![\d.])(\d+)\s*[條条項项]\s*(?:設計|设计)?(?:審查|审查|評審|评审)(?:規則|规则)")),
+    ("tasks", re.compile(
+        r"(?<![\d.])(\d+)\s*[個个項项]\s*(?:評測|评测|評估|评估)(?:任務|任务)")),
+    ("schemas", re.compile(r"(?<![\d.])(\d+)\s*(?:個|つ)\s*の\s*(?:JSON\s*)?スキーマ")),
+    ("rules", re.compile(r"(?<![\d.])(\d+)\s*(?:個|つ)\s*の\s*(?:設計)?レビュー\s*ルール")),
+    ("tasks", re.compile(r"(?<![\d.])(\d+)\s*(?:個|つ)\s*の\s*評価\s*タスク")),
+]
+
+# Count sources OUTSIDE the docs file set, each with its own patterns only (the
+# general patterns above are not applied to them, and they are not fence-gated).
+# The agent-eval README states the size of its own corpus; a bare "N tasks" is
+# unambiguous there and nowhere else.
+_EXTRA_COUNT_SOURCES: list[tuple[Path, list[tuple[str, re.Pattern[str]]]]] = [
+    (_EVAL_DIR / "README.md",
+     [("tasks", re.compile(
+         r"(?<![\w.-])(\d+)\s+(?:ground-truthed\s+)?"
+         r"(?:(?:design|eval|agent-eval)\s+)?tasks(?![\w-])"))]),
 ]
 
 
-def _count_cases() -> list[tuple[str, int, str, int]]:
-    """``(rel, lineno, kind, claimed)`` for every count claim in the file set.
+def _line_claims(
+    line: str, patterns: list[tuple[str, re.Pattern[str]]]
+) -> list[tuple[str, int]]:
+    """``(kind, claimed)`` for every count claim on one line.
 
     Emphasis markers are stripped first: the patterns want the noun to follow
     the digits across whitespace, so a bolded ``**60** calculators`` (which is
     how every README writes its `calc` table row) was invisible to the gate.
+    Two patterns of one kind matching the same digits yield one claim.
     """
+    plain = line.replace("**", "").replace("__", "")
+    seen: dict[tuple[str, int], int] = {}
+    for kind, pat in patterns:
+        for m in pat.finditer(plain):
+            seen.setdefault((kind, m.start(1)), int(m.group(1)))
+    return [(kind, claimed) for (kind, _pos), claimed in seen.items()]
+
+
+def _count_cases() -> list[tuple[str, int, str, int]]:
+    """``(rel, lineno, kind, claimed)`` for every count claim in the file set."""
+    sources = [(path, _COUNT_PATTERNS) for path in _doc_files()]
+    sources += [(p, pats) for p, pats in _EXTRA_COUNT_SOURCES if p.is_file()]
     cases: list[tuple[str, int, str, int]] = []
-    for path in _doc_files():
+    for path, patterns in sources:
         rel = path.relative_to(_ROOT).as_posix()
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), 1
         ):
-            plain = line.replace("**", "").replace("__", "")
-            for kind, pat in _COUNT_PATTERNS:
-                for m in pat.finditer(plain):
-                    cases.append((rel, lineno, kind, int(m.group(1))))
+            for kind, claimed in _line_claims(line, patterns):
+                cases.append((rel, lineno, kind, claimed))
     return cases
 
 
 def test_count_gate_found_claims() -> None:
     """Guard the guard: if this drops to zero the matchers silently rotted."""
-    assert len(_count_cases()) >= 15
+    cases = _count_cases()
+    assert len(cases) >= 15
+    # ...per kind too: a matcher that stops seeing ITS noun is as blind as an
+    # empty gate. If a kind's last claim was removed from the docs on purpose,
+    # drop that kind here; otherwise fix the matcher (or write the count in
+    # digits — a word-form "ten tasks" is invisible).
+    missing = set(_registry_counts()) - {kind for _r, _l, kind, _c in cases}
+    assert not missing, f"no count claim found for: {sorted(missing)}"
+
+
+# Matcher self-test: the three "everyday word" kinds must catch a real claim
+# and leave look-alike prose alone. Synthetic lines, so the test does not depend
+# on what the docs happen to say today.
+@pytest.mark.parametrize("line,expected", [
+    ("prints any of the 14 schemas in `schemas/`", [("schemas", 14)]),
+    ("**14** published JSON schemas ship in the wheel", [("schemas", 14)]),
+    ("### 3.12 Schemas (`schemas/`)", []),                 # section number
+    ("validated against schema 2.0 schemas", []),          # version, not a count
+    ("gerber; **44 rules**) emit findings", [("rules", 44)]),
+    ("the 44 review rules", [("rules", 44)]),
+    ("emc: 8 pre-compliance rules; gerber", []),           # one family's count
+    ("sized by the IPC-2221 rules", []),                   # a standard's name
+    ("since v0.14 rules carry a version", []),             # release number
+    ("10 ground-truthed design tasks, scored", [("tasks", 10)]),
+    ("the corpus has 12 eval tasks", [("tasks", 12)]),
+    ("split the work into 3 tasks", []),                   # bare: prose
+    ("共 44 條審查規則", [("rules", 44)]),
+    ("内置 44 条设计评审规则", [("rules", 44)]),
+    ("這 3 條規則", []),                                     # unqualified zh
+    ("44 個のレビュールール", [("rules", 44)]),
+    ("14 個 JSON Schema", [("schemas", 14)]),
+    ("14 個の JSON スキーマ", [("schemas", 14)]),
+    ("10 個評測任務", [("tasks", 10)]),
+    ("10 個の評価タスク", [("tasks", 10)]),
+])
+def test_new_count_matchers_are_tight(
+    line: str, expected: list[tuple[str, int]]
+) -> None:
+    new_kinds = {"schemas", "rules", "tasks"}
+    got = [(k, n) for k, n in _line_claims(line, _COUNT_PATTERNS) if k in new_kinds]
+    assert got == expected, f"{line!r}: matched {got}, wanted {expected}"
+
+
+def test_eval_readme_bare_task_count_is_gated() -> None:
+    """In the eval README a bare ``N tasks`` IS the corpus-size claim."""
+    patterns = dict(_EXTRA_COUNT_SOURCES)[_EVAL_DIR / "README.md"]
+    assert _line_claims("- 10 tasks: six small analog blocks", patterns) == [("tasks", 10)]
+    assert _line_claims("- 10 ground-truthed design tasks", patterns) == [("tasks", 10)]
+    assert _line_claims("- Eight tasks: six small analog blocks", patterns) == []
 
 
 @pytest.mark.parametrize(
@@ -250,6 +422,131 @@ def test_documented_counts_match_registry(
         f"{rel}:{lineno}: doc claims {claimed} {kind}, "
         f"registry has {expected}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# recipe gate: a docs/recipes/ workflow cannot run an akcli command the fence
+# gate never validated.
+#
+# The fence gate only sees a fenced line that STARTS with ``akcli`` — a YAML
+# ``run: akcli check …`` line is invisible to it. So a recipe lists its
+# commands again as bare lines in a fenced ``bash`` block (validated flag by
+# flag against the live parser), and this gate pins the YAML to that block:
+# every ``akcli`` invocation in a recipe's ``yaml`` fences must appear,
+# character for character, among its ``bash``-fenced lines.
+# --------------------------------------------------------------------------- #
+_YAML_LANGS = frozenset({"yaml", "yml"})
+_SHELL_LANGS = frozenset({"bash", "sh", "shell"})
+# ``run: akcli …`` / ``- run: akcli …`` (single-line step).
+_RUN_INLINE = re.compile(r"^(?:-\s+)?run:\s*(akcli\s.*)$")
+# ``akcli`` used as a command word (not ``akcli-kicad``, ``akcli.sarif``, a
+# job id ``akcli:`` …).
+_AKCLI_WORD = re.compile(r"(?<![\w.-])akcli\s")
+
+
+def _recipe_commands(path: Path) -> tuple[dict[str, int], set[str], list[int]]:
+    """``(yaml_cmds, bash_cmds, stray)`` for one recipe page.
+
+    ``yaml_cmds`` maps each ``akcli`` invocation found in a ``yaml`` fence (a
+    ``run:`` one-liner or a line of a ``run: |`` block) to its line number;
+    ``bash_cmds`` is every fence-gated ``akcli`` line of the shell fences
+    (``# doc-noqa`` lines are NOT validated, so they do not count); ``stray``
+    lists YAML lines that mention the ``akcli`` command in a position this
+    extractor cannot isolate (``run: cd hw && akcli …``) — a recipe must keep
+    each invocation at the start of its line so it can be checked.
+    """
+    yaml_cmds: dict[str, int] = {}
+    bash_cmds: set[str] = set()
+    stray: list[int] = []
+    for lang, lines in _fenced_blocks(path):
+        for lineno, raw in lines:
+            text = raw.strip()
+            if lang in _YAML_LANGS:
+                inline = _RUN_INLINE.match(text)
+                if inline:
+                    text = inline.group(1).strip()
+                if text.startswith("akcli "):
+                    yaml_cmds.setdefault(text, lineno)
+                elif _AKCLI_WORD.search(text) and not text.startswith("#"):
+                    stray.append(lineno)
+            elif lang in _SHELL_LANGS:
+                if text.startswith("akcli ") and "doc-noqa" not in raw:
+                    bash_cmds.add(text)
+    return yaml_cmds, bash_cmds, stray
+
+
+def _recipe_pages() -> list[Path]:
+    return sorted((_DOCS / "recipes").glob("*.md"))
+
+
+def _recipe_problems(path: Path) -> list[str]:
+    yaml_cmds, bash_cmds, stray = _recipe_commands(path)
+    rel = path.relative_to(_ROOT).as_posix() if path.is_relative_to(_ROOT) else path.name
+    problems = [
+        f"{rel}:{lineno}: `akcli` is not at the start of the run line — "
+        "put each invocation on its own line so it can be validated"
+        for lineno in stray
+    ]
+    problems += [
+        f"{rel}:{lineno}: workflow runs `{cmd}` but the recipe's fenced bash "
+        "block does not list that exact line (so no gate validated its flags)"
+        for cmd, lineno in sorted(yaml_cmds.items(), key=lambda kv: kv[1])
+        if cmd not in bash_cmds
+    ]
+    return problems
+
+
+def test_recipe_workflow_commands_are_fence_validated() -> None:
+    fence_gated = {(rel, raw.strip()) for rel, _lineno, raw in _fence_cases()}
+    checked = 0
+    for path in _recipe_pages():
+        problems = _recipe_problems(path)
+        assert not problems, "\n".join(problems)
+        yaml_cmds, _bash, _stray = _recipe_commands(path)
+        rel = path.relative_to(_ROOT).as_posix()
+        # ...and the block really is in the fence gate's case list (the page
+        # is inside _doc_files(), the line is not opted out).
+        unvalidated = [c for c in yaml_cmds if (rel, c) not in fence_gated]
+        assert not unvalidated, f"{rel}: not reached by the fence gate: {unvalidated}"
+        checked += len(yaml_cmds)
+    assert checked, (
+        "no docs/recipes/ workflow runs an akcli command — the recipe moved or "
+        "the extractor rotted")
+
+
+def test_recipe_gate_detects_drift(tmp_path: Path) -> None:
+    """Guard the guard: a YAML command missing from the bash block, and an
+    ``akcli`` buried mid-line, must both be reported."""
+    page = tmp_path / "recipe.md"
+    page.write_text(
+        "```yaml\n"
+        "steps:\n"
+        "  - run: akcli check \"$SCH\" --format sarif > out.sarif\n"
+        "  - run: pip install akcli-kicad\n"
+        "  - name: drift\n"
+        "    run: |\n"
+        "      akcli review diff a.json b.json --fail-on-new\n"
+        "      akcli gate \"$SCH\"\n"
+        "  - run: cd hw && akcli check board.kicad_sch\n"
+        "```\n\n"
+        "```bash\n"
+        "akcli check \"$SCH\" --format sarif > out.sarif\n"
+        "akcli review diff a.json b.json --fail-on-new\n"
+        "akcli gate \"$SCH\"  # doc-noqa\n"
+        "```\n",
+        encoding="utf-8", newline="\n")
+    yaml_cmds, bash_cmds, stray = _recipe_commands(page)
+    assert set(yaml_cmds) == {
+        'akcli check "$SCH" --format sarif > out.sarif',
+        "akcli review diff a.json b.json --fail-on-new",
+        'akcli gate "$SCH"',
+    }
+    assert 'akcli gate "$SCH"' not in bash_cmds      # opted out = unvalidated
+    assert stray == [9]                              # the `cd hw && akcli` line
+    problems = _recipe_problems(page)
+    assert len(problems) == 2
+    assert any("not at the start" in p for p in problems)
+    assert any('akcli gate "$SCH"' in p for p in problems)
 
 
 # --------------------------------------------------------------------------- #

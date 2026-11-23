@@ -1,0 +1,8 @@
+{
+ "nets": [
+  {"name": "GND", "members": ["C1.2"]},
+  {"name": "SCL", "members": ["R2.2"]},
+  {"name": "SDA", "members": ["R1.2"]},
+  {"name": "VDD_IO", "members": ["C1.1", "R1.1", "R2.1"]}
+ ]
+}

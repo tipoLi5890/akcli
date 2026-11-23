@@ -42,6 +42,7 @@
     },
     "net_diff": {
       "type": ["object", "null"],
+      "description": "The before/after net-membership delta: 'lines' holds one human-readable string per change, most severe first — '! SPLIT' / '! MERGE', then 'MOVE <pins>: <from> -> <to>' for a minority pin group that left one net for another ('!' when a named net is involved, else '~'), then '~' modified / '= RENAME' / '+ NEW' / '- GONE'; 'risk' is true when a split, merge or move touches a named net (the --strict-nets gate).",
       "required": ["equivalent", "risk", "lines"],
       "properties": {
         "equivalent": {"type": "boolean"},

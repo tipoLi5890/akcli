@@ -5,7 +5,8 @@ Covers the newly wired surface end-to-end through ``cli.main``:
 * ``akcli nets`` (text + ``--json``) and the ``--intent-snapshot`` ->
   ``check --intent`` round-trip (clean pass, then a mutated intent that fails);
 * the plan/draw before/after net connectivity diff — a ``! SPLIT`` warning in
-  dry-run ``plan`` output when an op-list deletes a net-defining label,
+  dry-run ``plan`` output when an op-list deletes a net-defining label, a
+  single ``! MOVE`` line when it relabels one pin onto another net,
   ``--no-net-diff`` opt-out, and the ``draw --apply --strict-nets`` refusal
   (exit ``OPLIST``, file untouched);
 * the explicit dry-run / APPLIED / REFUSED status line on plan/draw;
@@ -180,6 +181,71 @@ def test_plan_json_net_diff_envelope(tmp_path, capsys):
     nd = payload["net_diff"]
     assert nd["risk"] is True and nd["equivalent"] is False
     assert any("SPLIT THR" in ln for ln in nd["lines"])
+
+
+def _move_board(tmp_path: Path, capsys) -> tuple[Path, Path]:
+    """THR = {R7.1, R8.1, R9.1} and AUX = {R10.1, R11.1}, all by label-on-pin.
+
+    Returns ``(target, ops2)`` where ``ops2`` swaps R9.1's label from THR to
+    AUX — one pin changing nets while both nets otherwise hold.
+    """
+    tgt = _copy_v8(tmp_path)
+    refs = ("R7", "R8", "R9", "R10", "R11")
+    ops1 = _ops_file(tmp_path, [
+        *({"op": "place_component", "lib_id": "Device:R", "designator": ref,
+           "x_mil": 7000 + 1000 * i, "y_mil": 2000}
+          for i, ref in enumerate(refs)),
+        *({"op": "add_net_label", "name": "THR" if i < 3 else "AUX",
+           "at": f"{ref}.1"} for i, ref in enumerate(refs)),
+    ], name="ops1.json")
+    assert main(["draw", str(tgt), "--ops", str(ops1),
+                 "--apply", "--json"]) == EXIT["OK"]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["applied"] is True
+    (r9_label_uuid,) = payload["ops"][7]["created_uuids"]   # THR at R9.1
+    ops2 = _ops_file(tmp_path, [
+        {"op": "delete_object", "uuid": r9_label_uuid},
+        {"op": "add_net_label", "name": "AUX", "at": "R9.1"},
+    ], name="ops2.json")
+    return tgt, ops2
+
+
+def test_plan_reports_pin_move_as_one_line(tmp_path, capsys):
+    """A relabelled pin is a MOVE — not a SPLIT of THR plus a MERGE into AUX."""
+    tgt, ops2 = _move_board(tmp_path, capsys)
+    before = tgt.read_bytes()
+    assert main(["plan", str(tgt), "--ops", str(ops2)]) == EXIT["OK"]
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    block = lines.index("Net changes:")
+    assert lines[block + 1] == "  ! MOVE R9.1: THR -> AUX"
+    assert lines[block + 2].startswith("status:")   # the block's ONLY line
+    assert "SPLIT" not in out and "MERGE" not in out
+    assert tgt.read_bytes() == before               # plan never writes
+
+    assert main(["plan", str(tgt), "--ops", str(ops2), "--json"]) == EXIT["OK"]
+    assert json.loads(capsys.readouterr().out)["net_diff"] == {
+        "equivalent": False, "risk": True,
+        "lines": ["! MOVE R9.1: THR -> AUX"],
+    }
+
+
+def test_strict_nets_still_refuses_pin_move(tmp_path, capsys):
+    """The MOVE label is not a looser gate: a named net is still touched."""
+    tgt, ops2 = _move_board(tmp_path, capsys)
+    before = tgt.read_bytes()
+    rc = main(["draw", str(tgt), "--ops", str(ops2), "--apply", "--strict-nets"])
+    err = capsys.readouterr().err
+    assert rc == EXIT["OPLIST"]
+    assert tgt.read_bytes() == before               # nothing written
+    assert "strict-nets" in err and "REFUSED" in err
+    assert "! MOVE R9.1: THR -> AUX" in err         # the evidence is shown
+
+    # advisory without --strict-nets: the same edit applies
+    assert main(["draw", str(tgt), "--ops", str(ops2), "--apply"]) == EXIT["OK"]
+    out = capsys.readouterr().out
+    assert "! MOVE R9.1: THR -> AUX" in out and "status: APPLIED" in out
+    assert tgt.read_bytes() != before
 
 
 def test_equivalent_edit_prints_none(tmp_path, capsys):
@@ -500,9 +566,9 @@ def test_write_refused_while_a_sheet_child_is_missing(tmp_path, capsys):
     Audit regression: ``add_sheet`` used to accept a child file that does not
     exist — exit 0, gate clean — and every later ``nets``/``check``/``render``
     on the design then failed. The integrity gate now names the real problem
-    (``check`` on such a root cannot even load it — the reader raises
-    FILE_NOT_FOUND naming the sheet — so the write gate is where the code
-    surfaces)."""
+    — here in the write gate, and read-only in ``check --integrity``, which
+    reports the same code for a root it cannot otherwise load
+    (``tests/test_check_integrity.py``)."""
     root = _hier_root(tmp_path, with_child=False)
     ops = _ops_file(tmp_path, [{"op": "add_wire", "vertices": ["R1.1", "R1.2"]}])
     before = root.read_bytes()

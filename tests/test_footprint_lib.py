@@ -41,10 +41,21 @@ def _pascal(s: str) -> bytes:
     return bytes([len(b)]) + b
 
 
+def _props(text: str) -> bytes:
+    """A length-prefixed, NUL-terminated ``|KEY=VALUE|...`` property string."""
+    raw = text.encode("latin-1") + b"\x00"
+    return struct.pack("<I", len(raw)) + raw
+
+
 def _pad_record(number: str, *, x=0, y=0, sx=12000, sy=8000, hole=0,
-                shape=2, rotation=0.0, plated=1, layer=1) -> bytes:
-    """One type-0x02 pad record (offsets mirror altium_pcb_bin.parse_pads)."""
-    geo = bytearray(61)
+                shape=2, rotation=0.0, plated=1, layer=1, kicad=False) -> bytes:
+    """One type-0x02 pad record (offsets mirror altium_pcb_bin.parse_pads).
+
+    ``kicad=True`` writes the pad the way real libraries do — a 120-byte
+    geometry block (mid/bottom size and shape filled in) followed by the
+    per-layer block — which is the least KiCad's own importer accepts.
+    """
+    geo = bytearray(120 if kicad else 61)
     geo[0] = layer
     struct.pack_into("<H", geo, 3, 0xFFFF)          # no net
     struct.pack_into("<H", geo, 7, 0xFFFF)          # no component
@@ -56,22 +67,93 @@ def _pad_record(number: str, *, x=0, y=0, sx=12000, sy=8000, hole=0,
     geo[49] = shape
     struct.pack_into("<d", geo, 52, rotation)
     geo[60] = plated
+    tail = b""
+    if kicad:
+        struct.pack_into("<iiii", geo, 29, sx, sy, sx, sy)   # mid + bottom size
+        geo[50] = geo[51] = shape
+        tail = _block(b"")                                   # per-layer block
     return (bytes([0x02]) + _block(_pascal(number))
-            + _block(b"") * 3 + _block(bytes(geo)))
+            + _block(b"") * 3 + _block(bytes(geo)) + tail)
 
 
-def _track_record() -> bytes:
-    return bytes([0x04]) + _block(b"\x00" * 40)
+def _primitive_head(size: int, layer: int, keepout: bool) -> bytearray:
+    """The 13 bytes every track/arc payload starts with, as real files write
+    them: layer, flags, keepout marker, then net/polygon/component = none."""
+    p = bytearray(size)
+    p[0] = layer
+    p[1] = 0x0C
+    p[2] = 2 if keepout else 0
+    struct.pack_into("<HHH", p, 3, 0xFFFF, 0xFFFF, 0xFFFF)
+    p[9:13] = b"\xff\xff\xff\xff"
+    return p
+
+
+def _long_layer(layer: int) -> int:
+    """The 32-bit layer id newer files append: 0x0102_0000 + N for a
+    mechanical layer (u8 ids 57..72 = Mechanical1..16), left unset otherwise."""
+    return 0x01020000 + (layer - 56) if 57 <= layer <= 72 else 0
+
+
+def _track_record(layer=33, x1=0, y1=0, x2=10000, y2=0, width=1000, *,
+                  keepout=False, long_layer=None, size=49) -> bytes:
+    """One type-0x04 track record in the real payload layout (45 or 49 bytes
+    in the wild): start/end s32@13..28, width s32@29, long layer id u32@41."""
+    p = _primitive_head(size, layer, keepout)
+    struct.pack_into("<iiii", p, 13, x1, y1, x2, y2)
+    struct.pack_into("<i", p, 29, width)
+    if size >= 45:
+        struct.pack_into("<I", p, 41,
+                         _long_layer(layer) if long_layer is None else long_layer)
+    return bytes([0x04]) + _block(bytes(p))
+
+
+def _arc_record(layer=33, cx=0, cy=0, radius=10000, start=0.0, end=360.0,
+                width=1000, *, keepout=False, long_layer=None, size=60) -> bytes:
+    """One type-0x01 arc record in the real payload layout (60 bytes in the
+    wild): centre s32@13/17, radius s32@21, start/end angle f64@25/33
+    (degrees, counter-clockwise), width s32@41, long layer id u32@52."""
+    p = _primitive_head(size, layer, keepout)
+    struct.pack_into("<iii", p, 13, cx, cy, radius)
+    struct.pack_into("<dd", p, 25, start, end)
+    struct.pack_into("<i", p, 41, width)
+    if size >= 56:
+        struct.pack_into("<I", p, 52,
+                         _long_layer(layer) if long_layer is None else long_layer)
+    return bytes([0x01]) + _block(bytes(p))
+
+
+def _text_record() -> bytes:
+    """A type-0x05 text record: a geometry block plus its string block."""
+    return bytes([0x05]) + _block(b"\x00" * 40) + _block(_pascal("TXT"))
 
 
 def _footprint_stream(name: str, records: bytes) -> bytes:
     return _block(_pascal(name)) + records
 
 
-def _write_pcblib(path: Path, storages: dict[str, bytes]) -> Path:
+def _write_pcblib(path: Path, storages: dict[str, bytes], *,
+                  kicad: bool = False) -> Path:
+    """Pack footprint streams into a ``.PcbLib`` container.
+
+    ``kicad=True`` adds what KiCad's own importer needs before it will convert
+    the library (`kicad-cli fp upgrade`): a ``Library/Data`` index of the
+    footprint names and a ``Parameters`` stream per footprint.
+    """
     streams = {"Library/Data": b"\x00" * 32}
-    for name, data in storages.items():
-        streams[f"{name}/Data"] = data
+    names = []
+    for storage, data in storages.items():
+        streams[f"{storage}/Data"] = data
+        name = data[5:5 + data[4]].decode("latin-1")
+        names.append(name)
+        if kicad:
+            streams[f"{storage}/Parameters"] = _props(
+                f"|PATTERN={name}|HEIGHT=0mil|DESCRIPTION=|ITEMGUID="
+                "|REVISIONGUID=")
+    if kicad:
+        index = _props("|KIND=Protel_Advanced_PCB_Library|VERSION=3.00")
+        index += struct.pack("<I", len(names))
+        streams["Library/Data"] = index + b"".join(
+            _block(_pascal(name)) for name in names)
     blob, _meta = cfbf_builder.build_cfbf(streams)
     path.write_bytes(blob)
     return path
@@ -121,10 +203,131 @@ def test_kicad_mod_extension_detected(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# content vs extension (the .PcbLib-saved-as-.SchDoc trap, second half)
+# --------------------------------------------------------------------------- #
+_SCHLIB_HEADER = (b"|HEADER=Protel for Windows - Schematic Library Editor "
+                  b"Binary File Version 5.0|")
+
+
+def test_pcblib_bytes_with_schdoc_extension_read_as_pcblib(tmp_path, capsys):
+    """A DECISIVE container layout beats a lying extension — with a warning,
+    never silently, and never through the wrong decoder."""
+    p = _write_pcblib(tmp_path / "renamed.SchDoc",
+                      {"FP1": _footprint_stream("FP1", _pad_record("1"))})
+    assert _detect_format_ex(p) == ("altium_pcblib", "content-over-extension")
+    assert "extension says altium_sch" in capsys.readouterr().err
+
+    assert main(["read", str(p), "--json"]) == 0
+    io = capsys.readouterr()
+    doc = json.loads(io.out)
+    assert doc["metadata"]["detected_format"] == "altium_pcblib"
+    assert doc["metadata"]["detection_method"] == "content-over-extension"
+    assert [f["name"] for f in doc["footprints"]] == ["FP1"]
+    assert "renamed.SchDoc" in io.err and "altium_pcblib" in io.err
+
+
+def test_matching_content_keeps_the_extension_method(tmp_path, capsys):
+    assert _detect_format_ex(FIX / "t_junction.SchDoc") == (
+        "altium_sch", "extension")
+    p = _write_pcblib(tmp_path / "part.PcbLib",
+                      {"FP1": _footprint_stream("FP1", _pad_record("1"))})
+    assert _detect_format_ex(p) == ("altium_pcblib", "extension")
+    assert capsys.readouterr().err == ""          # agreement is silent
+
+
+def test_corrupt_ole_with_schdoc_extension_keeps_the_structured_error(
+        tmp_path, capsys):
+    """An unreadable container is not DECISIVE evidence of anything, so the
+    extension still routes it to the reader that reports ALTIUM_* (exit 3)."""
+    blob, _ = cfbf_builder.build_cfbf({"FileHeader": b"\x00" * 64})
+    p = tmp_path / "truncated.SchDoc"
+    p.write_bytes(blob[:600])                    # header sector + a stump
+    assert _detect_format_ex(p) == ("altium_sch", "extension")
+    assert main(["read", str(p), "--json"]) == 3
+    err = json.loads(capsys.readouterr().out)["error"]
+    assert err["code"].startswith("ALTIUM_")
+
+    # same for a hostile-corpus container, and for any Altium extension
+    for name in ("fat_cycle.SchDoc", "cycle.PcbLib"):
+        q = tmp_path / name
+        q.write_bytes(cfbf_builder.malformed_fat_cycle())
+        assert _detect_format_ex(q)[1] == "extension"
+        assert main(["read", str(q), "--json"]) == 3
+        err = json.loads(capsys.readouterr().out)["error"]
+        assert err["code"].startswith("ALTIUM_")
+
+
+def test_unclassifiable_file_header_is_unknown_not_schematic(tmp_path):
+    """A FileHeader stream nobody can classify used to be waved through as a
+    schematic; bare, it is now `unknown` (exit 5) like any other mystery
+    container — while a real extension still decides."""
+    blob, _ = cfbf_builder.build_cfbf({"FileHeader": b"\x07\x00\x00\x00mystery"})
+    bare = tmp_path / "mystery"
+    bare.write_bytes(blob)
+    assert _detect_format_ex(bare) == ("unknown", "content")
+    assert main(["read", str(bare)]) == 5
+    named = tmp_path / "mystery.SchDoc"
+    named.write_bytes(blob)
+    assert _detect_format_ex(named) == ("altium_sch", "extension")
+
+
+def test_schlib_symbol_named_like_a_pcb_storage_stays_a_schlib(tmp_path, capsys):
+    """A SchLib keeps one storage per symbol, named by the user. A symbol
+    called `Library` (or `Board6`) is not a PcbLib/PcbDoc: the schematic
+    FileHeader is the stronger evidence, so the extension is NOT overruled."""
+    for sym in ("Library", "Board6"):
+        blob, _ = cfbf_builder.build_cfbf(
+            {"FileHeader": _SCHLIB_HEADER, f"{sym}/Data": b"\x00" * 16})
+        named = tmp_path / f"{sym}.SchLib"
+        named.write_bytes(blob)
+        assert _detect_format_ex(named) == ("altium_schlib", "extension")
+        bare = tmp_path / f"{sym}_bare"
+        bare.write_bytes(blob)
+        assert _detect_format_ex(bare) == ("altium_schlib", "content")
+    assert capsys.readouterr().err == ""
+
+
+def test_missing_altium_file_is_still_not_found(tmp_path, capsys):
+    p = tmp_path / "nope.SchDoc"
+    assert _detect_format_ex(p) == ("altium_sch", "extension")
+    assert main(["read", str(p)]) == 4
+
+
+def test_detect_format_leaks_no_file_handle(tmp_path):
+    """The content sniff used to `path.open("rb").read(64)` and leave the
+    handle to the garbage collector (a ResourceWarning per extensionless
+    read; on Windows an open handle also blocks a later rename/delete)."""
+    import gc
+    import warnings
+
+    bare = tmp_path / "sheet_without_extension"
+    bare.write_text('(kicad_sch (version 20231120) (generator "t"))',
+                    encoding="utf-8")
+    ole = _write_pcblib(tmp_path / "noext",
+                        {"FP1": _footprint_stream("FP1", _pad_record("1"))})
+    gc.collect()                 # garbage older than this test is not ours
+    with warnings.catch_warnings(record=True) as caught:
+        # "always", not "error": an unclosed file is reported from __del__,
+        # where an error filter can only surface as an unraisable exception.
+        warnings.simplefilter("always")
+        assert _detect_format_ex(bare) == ("kicad_sch", "content")
+        assert _detect_format_ex(ole) == ("altium_pcblib", "content")
+        assert _detect_format_ex(FIX / "t_junction.SchDoc")[0] == "altium_sch"
+        gc.collect()
+    # judged by file name, so a leak some other test left for this collection
+    # to find cannot fail (or excuse) this one
+    ours = (bare.name, ole.name, "t_junction.SchDoc")
+    leaks = [str(w.message) for w in caught
+             if issubclass(w.category, ResourceWarning)
+             and any(name in str(w.message) for name in ours)]
+    assert leaks == [], leaks
+
+
+# --------------------------------------------------------------------------- #
 # .PcbLib reader
 # --------------------------------------------------------------------------- #
 def test_read_pcblib_pads_and_unsupported_primitives(tmp_path):
-    records = _pad_record("1", x=10000, y=-20000) + _pad_record("2") + _track_record()
+    records = _pad_record("1", x=10000, y=-20000) + _pad_record("2") + _text_record()
     p = _write_pcblib(tmp_path / "two.PcbLib",
                       {"FPX": _footprint_stream("FPX", records)})
     lib = footprint_lib.read_pcblib(p)
@@ -135,7 +338,7 @@ def test_read_pcblib_pads_and_unsupported_primitives(tmp_path):
     assert fp.pads[0].x_mm == pytest.approx(0.0254)
     assert fp.pads[0].y_mm == pytest.approx(0.0508)
     assert fp.pads[0].size_x_mm == pytest.approx(1.2 * 0.0254)
-    assert any("UNSUPPORTED_PRIMITIVE" in w and "track" in w for w in fp.warnings)
+    assert any("UNSUPPORTED_PRIMITIVE" in w and "text" in w for w in fp.warnings)
 
 
 def test_read_pcblib_npth_and_thru_hole(tmp_path):
@@ -164,7 +367,7 @@ def test_cli_read_pcblib_json(tmp_path, capsys):
                       {"FP1": _footprint_stream("FP1", _pad_record("1"))})
     assert main(["read", str(p), "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
-    assert doc["schema_version"] == "2.0"
+    assert doc["schema_version"] == "2.1"
     assert doc["metadata"]["detected_format"] == "altium_pcblib"
     assert doc["metadata"]["object_counts"] == {"symbols": 0, "footprints": 1}
     assert doc["footprints"][0]["pads"][0]["number"] == "1"

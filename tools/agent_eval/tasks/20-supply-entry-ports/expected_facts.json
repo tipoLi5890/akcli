@@ -1,0 +1,10 @@
+{
+ "components": {
+  "F1": {"value": "1A"},
+  "C1": {"value": "47u"},
+  "C2": {"value": "100n"}
+ },
+ "no_connects": ["J1.2", "J1.3"],
+ "power_ports": ["+3V3", "GND"],
+ "pwr_flags": ["VIN"]
+}

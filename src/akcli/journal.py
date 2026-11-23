@@ -135,25 +135,26 @@ def read_entries(where: Path, target: str | None = None,
     Corrupt lines are skipped, never fatal.
     """
     path = journal_path(where)
-    if not path.exists():
-        return []
     entries: list[dict] = []
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    # The rotated generation first: right after a rotation the live file is
+    # empty or missing, and the history must not vanish with it.
+    for part in (path.with_suffix(".jsonl.1"), path):
         try:
-            doc = json.loads(line)
-        except json.JSONDecodeError:
+            text = part.read_text(encoding="utf-8")
+        except OSError:
             continue
-        if isinstance(doc, dict):
-            if target is not None and doc.get("target") != target:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
                 continue
-            entries.append(doc)
+            try:
+                doc = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(doc, dict):
+                if target is not None and doc.get("target") != target:
+                    continue
+                entries.append(doc)
     if limit is not None and limit >= 0:
         entries = entries[-limit:]
     return entries

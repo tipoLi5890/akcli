@@ -25,6 +25,7 @@ somehow a list still yields usable ``sheets``.
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +57,14 @@ class KicadPro:
     net_classes: list[str] = field(default_factory=list)
     pinned_symbol_libs: list[str] = field(default_factory=list)
     pinned_footprint_libs: list[str] = field(default_factory=list)
+    #: The board's own DRC constraints, ``board.design_settings.rules``: KiCad
+    #: rule name -> value (``min_clearance``, ``min_track_width``,
+    #: ``min_via_diameter``, ``min_through_hole_diameter``,
+    #: ``min_via_annular_width``, ``min_hole_to_hole`` … all millimetres).
+    #: Numeric entries only, sorted by name; empty when the project states
+    #: none (a freshly created project carries ``"rules": {}`` and KiCad
+    #: falls back to its built-in defaults, which this reader does not guess).
+    design_rules: dict[str, float] = field(default_factory=dict)
 
 
 def _fail(path: Path, reason: str) -> KicadPro:
@@ -96,6 +105,29 @@ def _net_classes(value: object) -> list[str]:
         for entry in classes:
             if isinstance(entry, dict) and isinstance(entry.get("name"), str):
                 out.append(entry["name"])
+    return out
+
+
+def _design_rules(value: object) -> dict[str, float]:
+    """Numeric entries of ``board.design_settings.rules``, sorted by name.
+
+    The rules object mixes millimetre minimums with booleans
+    (``allow_microvias``) and counts (``min_resolved_spokes``); only finite
+    numbers are kept — a bool is an int subclass and is not a measurement —
+    and every level is type-guarded, so a project missing ``board``, or
+    carrying it as a list, simply states no rules.
+    """
+    board = value.get("board") if isinstance(value, dict) else None
+    settings = board.get("design_settings") if isinstance(board, dict) else None
+    rules = settings.get("rules") if isinstance(settings, dict) else None
+    if not isinstance(rules, dict):
+        return {}
+    out: dict[str, float] = {}
+    for key in sorted(k for k in rules if isinstance(k, str)):
+        raw = rules[key]
+        if (isinstance(raw, (int, float)) and not isinstance(raw, bool)
+                and math.isfinite(raw)):
+            out[key] = float(raw)
     return out
 
 
@@ -162,6 +194,7 @@ def read(path: os.PathLike | str) -> KicadPro:
         net_classes=_net_classes(doc.get("net_settings")),
         pinned_symbol_libs=_str_list(libraries.get("pinned_symbol_libs")),
         pinned_footprint_libs=_str_list(libraries.get("pinned_footprint_libs")),
+        design_rules=_design_rules(doc),
     )
 
 

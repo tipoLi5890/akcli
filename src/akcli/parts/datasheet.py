@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -180,6 +181,8 @@ def fetch_pdf(url: str, dest: Path, *,
         try:
             resp = opener.open(req, timeout=timeout)
         except OSError as exc:  # URLError subclasses OSError
+            if isinstance(exc, urllib.error.HTTPError):
+                exc.close()     # an HTTPError IS the open response: release it
             raise easyeda.EasyEdaError(
                 f"datasheet download failed: {exc}", kind="network",
                 retryable=True) from exc

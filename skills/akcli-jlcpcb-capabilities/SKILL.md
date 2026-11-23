@@ -102,9 +102,20 @@ kicad-cli pcb export drill board.kicad_pcb -o fab/ --format excellon \
 kicad-cli pcb export pos board.kicad_pcb -o fab/cpl.csv --format csv --units mm \
   --side both --exclude-dnp
 akcli jlc bom board.kicad_sch --qty 10 --csv fab/bom.csv   # JLCPCB header, LCSC ids
-akcli fab check board.kicad_pcb --profile jlc-4l-1oz.toml --order order.toml
-akcli fab explain FAB_VIA_IN_PAD --profile jlc-4l-1oz.toml
+akcli fab profiles                                         # bundled profiles: id, sources, retrieval date
+akcli fab check board.kicad_pcb --profile jlc-4l-1oz-free-vias-2026-07 --order order.toml
+akcli fab explain FAB_VIA_IN_PAD --profile jlc-4l-1oz-free-vias-2026-07
+akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile jlc-4l-1oz-free-vias-2026-07 --drc --gerbers fab/ --out release.manifest.json
 ```
+
+`--profile` takes a profile **file** or the **id of a profile bundled with akcli**
+(`akcli fab profiles`; a file at that path always wins). The JLC 4-layer 1 oz
+free-via baseline ships bundled as `jlc-4l-1oz-free-vias-2026-07`; revision
+`jlc-4l-1oz-free-vias-2026-07-r2` is the same snapshot plus the slot-width floor. A bundled profile
+is a dated snapshot, not a live feed: once its `retrieved_at` is more than 12 months
+old `fab check` adds a `FAB_PROFILE_STALE` note — re-verify the numbers against the
+live JLCPCB pages (this skill's reference files say where), or cut your own profile
+file from `examples/fab/jlc-4l-1oz.toml` and pass that.
 
 A fab profile (`--profile`) is a versioned vendor-capability snapshot — `[source]`
 URLs plus a `retrieved_at` date, see `examples/fab/jlc-4l-1oz.toml` — that turns this
@@ -112,11 +123,16 @@ skill's capability numbers into a machine-checkable gate: `fab check` runs the
 board against it (and, with `--order`, against the declared purchase intent) and
 classifies findings by severity — direct rule violations are errors, cost-driving
 thresholds are warnings, boundary-exact values are notes. `fab explain <CODE>` prints
-the rule, the fix direction, and the evidence behind a specific finding code. For the
+the rule, the fix direction, and the evidence behind a specific finding code. Board
+area is the true `Edge.Cuts` outline (arcs exact, cutouts subtracted; a bounding-box
+fallback is always labelled as one), the tenting cap binds only vias the board marks
+tented — or all of them when `--order` declares `via_covering = "tented"` — and the
+project's own DRC minimums (`.kicad_pro`) are compared with the profile's. For the
 free-vs-paid **via covering** model, the surcharge triggers, the capability→profile-field
 mapping, and **exactly what `fab check` gates vs what stays advisory** (it is a
-fab-policy/cost gate, NOT a geometric DRC — pair it with `kicad-cli pcb drc`), see
-`references/cost-and-fab-profile.md`.
+fab-policy/cost gate, NOT a geometric DRC — pair it with KiCad's DRC: `kicad-cli pcb
+drc` by hand, or `akcli release preflight --drc` to make it a release gate recorded
+in the manifest), see `references/cost-and-fab-profile.md`.
 
 CPL header rename before upload: `Ref→Designator, PosX→Mid X, PosY→Mid Y,
 Rot→Rotation, Side→Layer` (or use JLCPCB's Fabrication Toolkit KiCad plugin /
@@ -155,8 +171,9 @@ Top rules an agent must get right (full file-prep guide + the nine 常見錯誤:
   design count are NOT in the files; put them in `order.toml` and gate with
   `akcli fab check --order`.
 - **First batch is customer-verified — no refund on artwork errors** — run
-  `kicad-cli pcb drc` + `akcli fab check` and review the placement/mask preview
-  before ordering.
+  `kicad-cli pcb drc` + `akcli fab check` (both at once, with a manifest:
+  `akcli release preflight --drc --fab-profile …`) and review the
+  placement/mask preview before ordering.
 
 ## Reference files (load only the one you need)
 

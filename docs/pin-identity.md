@@ -18,7 +18,7 @@ boundaries below are where it bites.
 | node uuids | UUIDv5 seeds: `R3` / `R3#u2` (symbol), `R3.pin1` / `R3#u2.pin1` (pin; a *repeated* pin number gets `#2`, `#3`, …) | `writers/kicad.py` (`deterministic_uuid` call sites) |
 | child-sheet FILE identity | `sheetfile:<child.kicad_sch>` — the created child's own ROOT uuid, seeded from the PARENT's root uuid (`add_sheet {"create": true}`) | `writers/identity.py` (`seed_sheet_file`) |
 | netlist export | net node = (ref, pin) pairs | `exporters.py` |
-| agent-eval expectations | net name → member strings | `tools/agent_eval/tasks/*/expected_nets.json` |
+| agent-eval expectations | net name → member strings; `REF.PIN` strings for no-connect facts | `tools/agent_eval/tasks/*/expected_nets.json`, `expected_facts.json` |
 
 ## Verified findings
 

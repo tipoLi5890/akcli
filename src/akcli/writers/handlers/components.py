@@ -111,27 +111,31 @@ def _op_set_component_transform(call: OpCall) -> list[str]:
 def _op_set_component_parameters(call: OpCall) -> list[str]:
     doc, op, idx, src_libs, path, ctx = (  # noqa: F841 - uniform handler prelude
         call.doc, call.op, call.index, call.src_libs, call.inst_path, call.ctx)
-    sym = _symbol_by_ref(doc, op["designator"])
-    if sym is None:
+    syms = _symbols_by_ref(doc, op["designator"])
+    if not syms:
         fail("VERIFY_FAILED", f"set_component_parameters: no component {op['designator']!r}")
     imap = op.get("instance_designators")
-    if imap is not None:
-        if not isinstance(imap, dict) or not imap:
-            fail("INSTANCE_REFS_REQUIRED",
-                 "instance_designators must be a non-empty object of "
-                 "{\"<instance path>\": \"<REF>\"}")
-        instances.write_instance(doc, sym, imap, path)
-    elif op.get("new_designator"):
-        # A scalar rename of a multiply-instantiated symbol would smash its
-        # per-path references into one duplicate refdes; write_instance
-        # refuses that with INSTANCE_REFS_REQUIRED (use instance_designators).
-        instances.write_instance(doc, sym, str(op["new_designator"]), path)
-    if op.get("value") is not None:
-        _set_property(sym, "Value", str(op["value"]))
-    if op.get("footprint") is not None:
-        _set_property(sym, "Footprint", str(op["footprint"]))
-    for k, v in (op.get("parameters") or {}).items():
-        _set_property(sym, str(k), str(v))
+    if imap is not None and (not isinstance(imap, dict) or not imap):
+        fail("INSTANCE_REFS_REQUIRED",
+             "instance_designators must be a non-empty object of "
+             "{\"<instance path>\": \"<REF>\"}")
+    # Every placed unit of a multi-unit part is its own symbol node, and
+    # Reference / Value / Footprint / fields belong to the PART: writing only
+    # the first unit left the others on the old value with nothing to flag it.
+    for sym in syms:
+        if imap is not None:
+            instances.write_instance(doc, sym, imap, path)
+        elif op.get("new_designator"):
+            # A scalar rename of a multiply-instantiated symbol would smash its
+            # per-path references into one duplicate refdes; write_instance
+            # refuses that with INSTANCE_REFS_REQUIRED (use instance_designators).
+            instances.write_instance(doc, sym, str(op["new_designator"]), path)
+        if op.get("value") is not None:
+            _set_property(sym, "Value", str(op["value"]))
+        if op.get("footprint") is not None:
+            _set_property(sym, "Footprint", str(op["footprint"]))
+        for k, v in (op.get("parameters") or {}).items():
+            _set_property(sym, str(k), str(v))
     return []
 
 

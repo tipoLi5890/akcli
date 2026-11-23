@@ -72,7 +72,7 @@ Steps (use the Bash tool; `akcli` is on PATH, else `PYTHONPATH=src python3 -m ak
 2. **Plan (never writes):** `akcli plan <board.kicad_sch> --ops ops.json [--symbols <path>]
    [--render preview.svg]`.
    Show the user what would change and resolve any `SYMBOL_NOT_FOUND` / off-grid / non-orthogonal
-   errors before proceeding. **Read the "Net changes" block**: `! SPLIT` / `! MERGE` lines are the
+   errors before proceeding. **Read the "Net changes" block**: `! SPLIT` / `! MERGE` / `! MOVE` lines are the
    silent killers (name-based connectivity can short or fragment nets without any dangling
    endpoint); `(none)` proves the edit is connectivity-neutral. With `--render`, LOOK at the
    preview (world-mil grid overlay) before applying — a multimodal agent reads placement quality

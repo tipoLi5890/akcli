@@ -1,0 +1,11 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "place_divider", "x_mil": 2000, "y_mil": 2000, "top_net": "VBAT", "mid_net": "VDIV", "bottom_net": "GND", "designators": ["R1", "R2"], "values": ["100k", "33k"], "spacing_mil": 800},
+  {"op": "place_rc_filter", "x_mil": 3200, "y_mil": 2000, "in_net": "VDIV", "out_net": "ADC_IN", "designators": ["R3", "C1"], "r_value": "1k", "c_value": "100n", "spacing_mil": 900},
+  {"op": "place_decoupling", "x_mil": 4400, "y_mil": 2000, "power_net": "3V3", "designator": "C2", "value": "100n"},
+  {"op": "place_pullup", "x_mil": 5200, "y_mil": 2000, "net": "ALERT_N", "rail_net": "3V3", "designator": "R4", "value": "10k"}
+ ]
+}

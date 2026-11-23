@@ -217,7 +217,8 @@ akcli draw board.kicad_sch --ops ops.json --symbols extra.kicad_sym   # if SYMBO
   does not contain the target. On a child target the "Net changes" block is
   evaluated over the WHOLE sheet tree — a diff that looks bigger than your
   edit usually means the tree view is showing members the single-file view
-  never could.
+  never could. A `! MOVE <pins>: <from> -> <to>` line is a minority pin group
+  that left one net for another existing net (not a SPLIT plus a MERGE).
 - Per-op failures name the culprit: `SYMBOL_NOT_FOUND` → add `--symbols`, but when it hits
   EVERY `lib_id` including `Device:R` the op-list is fine and the environment is not —
   `akcli doctor --require symbols` resolves `Device:R` down the real path and says where it

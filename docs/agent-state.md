@@ -49,7 +49,7 @@ One per workspace (the directory holding the edited file):
   is the journal's own name for the
   operation, which is what `akcli log --cmd NAME` filters on: `plan`, `draw`,
   `arrange`, `arrange-groups`, `groups-frame`, `undo`, `relink-symbols`,
-  `jlc-bom-fix`. Size-capped with
+  `jlc-bom-fix`, `project new`, `project init`. Size-capped with
   one rotation; corrupt lines are skipped; journaling never fails the parent
   command. Query with `akcli log`.
 - `backups/` — the rotated undo stack (`<name>.bak` newest … `.bakN`, depth

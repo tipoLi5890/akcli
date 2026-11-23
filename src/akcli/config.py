@@ -61,9 +61,11 @@ class Config:
 
     ``rails``, ``erc_waivers`` and ``waivers`` are lists of plain dicts; ``paths``
     maps a name (``schematic``/``dts``/``pinout_md``/``parts_dir``/``pcb``/
-    ``intent``/``bom_lock``/...) to an absolute path string — ``akcli gate``
-    is the reference consumer of ``schematic``/``pcb``/``intent``/``bom_lock``
-    (``intent`` is also ``check --intent``'s fallback). ``grid_nm`` is the
+    ``intent``/``bom_lock``/``library_baseline``/...) to an absolute path
+    string — ``akcli gate`` is the reference consumer of ``schematic``/``pcb``/
+    ``intent``/``bom_lock`` (``intent`` is also ``check --intent``'s fallback),
+    ``library audit`` and ``release preflight`` of ``library_baseline``.
+    ``grid_nm`` is the
     schematic pin grid in integer nanometres.
     ``waivers`` are the generic ``[[waiver]]`` entries applied centrally to every
     checker's findings (:func:`report.apply_waivers`); ``erc_waivers`` is the

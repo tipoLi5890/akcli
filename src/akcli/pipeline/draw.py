@@ -118,8 +118,8 @@ def run(req: DrawRequest) -> DrawOutcome:
         return DrawOutcome(exit_code=EXIT["OPLIST"], gate=gate, routed=routed,
                            refusal=Refusal(
                                EXIT["OPLIST"],
-                               "REFUSED: --strict-nets: net split/merge touches a "
-                               "named net; nothing written",
+                               "REFUSED: --strict-nets: net split/merge/move touches "
+                               "a named net; nothing written",
                                lines=tuple(gate.net_lines or ())))
 
     findings: list[Any] = []

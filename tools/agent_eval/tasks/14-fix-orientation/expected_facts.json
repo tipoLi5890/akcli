@@ -1,0 +1,8 @@
+{
+ "components": {
+  "D1": {"x_mil": 2100, "y_mil": 1000, "rotation": 180, "mirror": "none"},
+  "U1": {"x_mil": 3500, "y_mil": 1100, "rotation": 0, "mirror": "none"}
+ },
+ "forbid_findings": ["DANGLING_ENDPOINT", "NET_LABEL_UNATTACHED"],
+ "net_diff": {"equivalent": false, "risk": true}
+}

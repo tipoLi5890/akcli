@@ -21,14 +21,18 @@ never silent — and never a blocker; only a `fail` exits non-zero), so read
 the skip reasons before calling a PASS complete.
 
 ```bash
-akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile fab.toml --gerbers fab/ --contract contract.toml --review-policy policy.toml --out release.manifest.json
+akcli release preflight --sch board.kicad_sch --pcb board.kicad_pcb --fab-profile fab.toml --drc --gerbers fab/ --contract contract.toml --review-policy policy.toml --out release.manifest.json
 ```
 
 Gates, in order: `check` (ERC/power/BOM/nets) → `intent` → `contract` →
 `library-audit` → **`project`** (a `.kicad_pro` beside `--sch`; the same
 `project check` findings, library auditing switched off there so
 `library-audit` above isn't reported twice — no project file skips with a
-reason) → `sch-pcb` → `fab` → `order` → **`sim`** (`--sim` sim.json;
+reason) → **`library-baseline`** (library files vs. the committed baseline)
+→ `sch-pcb` → **`pcb-library`** (board footprints vs. the project footprint
+libraries) → `fab` (`--fab-profile`: a profile file, or the id of a
+profile bundled with akcli — `akcli fab profiles` lists them) → **`drc`**
+(`--drc`; KiCad's own DRC) → `order` → **`sim`** (`--sim` sim.json;
 quantitative SPICE assertions) → **`review`** (policy-gated) → **`gerber`**
 (fab package) → `git` (clean worktree; `--allow-dirty` records instead of
 failing).
@@ -46,20 +50,77 @@ failing).
   to WARNING, and config `[[waiver]]` entries apply to sim-gate findings the
   same way they apply to `check`.
 
+- **The DRC gate is opt-in and strict, the same way**: `--drc` (with
+  `--pcb`) runs `kicad-cli pcb drc` and turns KiCad's report into gate
+  findings — `KICAD_DRC_VIOLATION` per violation, `KICAD_DRC_UNCONNECTED`
+  per unrouted connection, at KiCad's own severity, the KiCad rule type
+  leading each message (`clearance: …`). A requested DRC gate that cannot
+  run **FAILS, never skips**: `KICAD_CLI_MISSING` (no kicad-cli — install
+  KiCad or set `KICAD_CLI`), `KICAD_DRC_FAILED` (the board did not load,
+  KiCad is older than 8, or the report was unreadable). `--drc` without
+  `--pcb` is a usage error. What to know when you read its result:
+  - **Zone fills are evaluated as saved, not refilled** (the gate's summary
+    line says so every run). A board whose zones were not refilled after the
+    last edit is judged with stale copper — refill and save in KiCad, commit,
+    then run preflight. akcli never asks KiCad to refill or save.
+  - **The project is not modified**: KiCad runs on a staged copy of the board
+    with its `.kicad_pro` / `.kicad_dru` / `fp-lib-table`, so the project's
+    rule severities, DRC exclusions and custom rules all apply.
+  - **Triage in KiCad first, waive in akcli second.** A rule the project
+    deliberately ignores belongs in Board Setup → Violation Severity (it
+    travels in the `.kicad_pro`). A one-off acceptance is a config
+    `[[waiver]]` with a reason: `code = "KICAD_DRC_VIOLATION"` plus `refs` =
+    the KiCad rule type (`"track_dangling"`), a designator (`"U3"`), a pin
+    (`"R1.1"`) or a net (`"GND"`). Never waive by code alone — that silences
+    every rule KiCad has.
+  - No `--drc` = skipped-with-reason; say so in the summary. The akcli `fab`
+    gate is fab policy and cost, not geometric DRC — the two are complements.
+
+- **The two library gates answer "is this what we released last time?"**
+  `library-audit` only proves the libraries *resolve*; a footprint edited in
+  place resolves perfectly.
+  - **`library-baseline`** compares every project library file (`.kicad_sym`,
+    `.kicad_mod`, referenced 3D models, `provenance.json`) against the
+    committed, sha256-hashed record written by `akcli library audit
+    --write-baseline` (default `akcli-library.baseline.json` beside the
+    `.kicad_pro`; `--library-baseline FILE` or `[paths].library_baseline`
+    name another). `LIB_BASELINE_DRIFT` / `LIB_BASELINE_MISSING` (error) and
+    `LIB_BASELINE_UNTRACKED` (warning) all fail the gate. No baseline
+    anywhere = skipped-with-reason — say so; a *named* baseline that is
+    missing or unreadable is an error, never a pass. After an intended
+    library change: re-run `--write-baseline`, review the diff, commit it.
+    Never re-baseline just to turn the gate green — the diff IS the review.
+    If every file reads as drift on another machine, the repo is converting
+    line endings: mark library files `-text` in `.gitattributes`
+    (docs/design-integrity.md).
+  - **`pcb-library`** (with `--pcb`) compares each board footprint with its
+    definition in the project `fp-lib-table`: `FPLIB_PAD_SET_DRIFT`,
+    `FPLIB_PAD_DRILL_DRIFT`, `FPLIB_SOURCE_MISSING` (warnings — they fail
+    the gate) and `FPLIB_MODEL_MISSING` (note). A deliberate local board edit
+    is legitimate: waive it by designator with a reason. **Read the gate's
+    summary line**: it states how many footprints were compared and how many
+    were NOT (KiCad's own global-table libraries are never compared) —
+    repeat those counts in the release summary; a pass covers only the
+    compared ones. A run that could compare no footprint at all is
+    skipped-with-reason, not passed.
+  - The `sch-pcb` gate also fails on `SCHPCB_DNP_MISMATCH` /
+    `SCHPCB_BOM_FLAG_MISMATCH` (schematic vs footprint DNP / BOM flags) —
+    fix with "Update PCB from Schematic", do not waive a BOM disagreement
+    casually. A board-only footprint that KiCad marks "Not in schematic"
+    (mounting hole, fiducial) is a NOTE and does not fail the gate.
+
 Two things preflight does **not** cover — say so in the release summary
 instead of implying they were checked:
 
 - **Assembly CPL is not produced.** `jlc bom --csv` covers the assembly BOM,
   but the centroid/placement (CPL) file must be exported from the PCB in
   KiCad (Fabrication Outputs → Component Placement) — akcli has no PCB stage.
-- **Document integrity is not in the `check` gate.** That gate runs
-  ERC/power/BOM/nets only; run `akcli check <sch> --integrity --fail-on never`
-  alongside preflight (dangling endpoints, duplicate uuids/designators,
-  unresolved `lib_id`s, instance paths, stacked power ports — two rails merged
-  with nothing visible to see — a `(sheet …)` whose child file is missing, and
-  no-connect conflicts) and report its
-  result with the manifest — a duplicate designator or an unresolved symbol
-  library is a ship-stopper the gate list will not raise.
+- **Document integrity is part of the `check` gate.** For a `.kicad_sch` that
+  gate runs ERC/power/BOM/nets plus the tree-scoped integrity checks
+  (dangling endpoints, duplicate uuids/designators, unresolved `lib_id`s,
+  instance paths, stacked power ports — two rails merged with nothing visible
+  to see — and no-connect conflicts), so a duplicate designator or an
+  unresolved symbol library fails the gate.
 
 ## Gate doctrine
 
@@ -67,7 +128,15 @@ instead of implying they were checked:
   report and manifest say so, and your release summary must repeat the
   skipped list — "PASS with 4 gates skipped" is the honest sentence.
 - **The manifest is the artifact.** Always pass `--out`; the manifest's
-  sha256-bound inputs are what makes the release auditable later.
+  sha256-bound inputs are what makes the release auditable later. Beyond one
+  hash per input file it records: every gerber/drill file's hash
+  (`inputs.gerbers.file_hashes`), the fab profile as `{id, sha256, bundled}`,
+  the kicad-cli version (`tool.kicad_cli`, `null` when none is installed),
+  and — for a dirty worktree — `git.dirty_sha256`, a hash of the uncommitted
+  diff plus the untracked paths. That last value proves two manifests came
+  from the same dirty state on one machine; it is not comparable across
+  machines (line-ending settings change the diff bytes), so a release of
+  record still means a clean worktree.
 - **A FAIL is findings, not a tool error** (exit 1 = findings, per-gate
   detail in the output). Fix or explicitly waive (with reason) — never
   re-run with fewer inputs to make it pass.
@@ -143,8 +212,8 @@ akcli gate                                     # zero-argument in a configured p
 akcli gate board.kicad_sch --pcb board.kicad_pcb --intent intent.json --lock bom.lock.json
 ```
 
-Gates: the **full default** `check` set (wider than preflight's fixed
-erc/power/bom/nets four-tuple — layout/integrity/pairs included for a
+Gates: the **full default** `check` set (wider than preflight's
+erc/power/bom/nets + integrity — layout/pairs included for a
 `.kicad_sch`), `intent`, `sch-pcb`, and `bom-lock` drift — each falling back
 to its `[paths]` config key (`schematic`/`pcb`/`intent`/`bom_lock`), each
 skipped-with-reason when absent. **Offline by default**: the bom-lock gate

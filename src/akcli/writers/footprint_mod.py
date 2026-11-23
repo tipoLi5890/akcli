@@ -1,10 +1,17 @@
 """``FootprintDef`` -> ``.kicad_mod`` text (the PcbLib import target).
 
 Pads are carried over verbatim — positions, sizes, drills, shapes and rotation
-are NEVER recomputed. What the reader did not decode (silkscreen graphics,
-text, 3D bodies) is not invented here either; the import command surfaces those
-as warnings and records them in the provenance file. A courtyard is only added
+are NEVER recomputed. ``FootprintDef.graphics`` (lines, arcs, circles) is
+written as ``fp_line`` / ``fp_arc`` / ``fp_circle`` on the layer each item
+names, in source order. What the reader did not decode (text, fills, regions,
+3D bodies) is not invented here either; the import command surfaces those as
+warnings and records them in the provenance file. A courtyard is only added
 when the caller asks for one (declared transformation, not a silent default).
+
+Graphic grammar is KiCad's own for the declared file version (see
+``tests/fixtures/kicad/altium_import``, written by kicad-cli 10): KiCad 10
+re-saves these nodes unchanged apart from stamping uuids and spelling the
+circle's ``(fill none)`` as ``(fill no)``.
 """
 
 from __future__ import annotations
@@ -45,6 +52,36 @@ def _pad_sexpr(p: FootprintPad, warnings: list[str]) -> str:
     return "\n".join(parts) + "\n\t)"
 
 
+def _stroke(width: float) -> str:
+    return (f"\t\t(stroke\n\t\t\t(width {_fmt(width)})\n"
+            "\t\t\t(type solid)\n\t\t)\n")
+
+
+def _pt(tag: str, xy: tuple[float, float] | list[float]) -> str:
+    return f"\t\t({tag} {_fmt(xy[0])} {_fmt(xy[1])})\n"
+
+
+def _graphic_sexpr(g: dict) -> str | None:
+    """One ``graphics`` item as an ``fp_line`` / ``fp_arc`` / ``fp_circle``."""
+    kind = g.get("kind")
+    tail = _stroke(g.get("width") or 0.0)
+    layer = f'\t\t(layer "{g["layer"]}")\n\t)'
+    if kind == "line":
+        return ("\t(fp_line\n" + _pt("start", g["start"]) + _pt("end", g["end"])
+                + tail + layer)
+    if kind == "arc":
+        return ("\t(fp_arc\n" + _pt("start", g["start"]) + _pt("mid", g["mid"])
+                + _pt("end", g["end"]) + tail + layer)
+    if kind == "circle":
+        cx, cy = g["center"]
+        # KiCad anchors a circle by a point on it; its importer picks the one
+        # straight above the centre.
+        return ("\t(fp_circle\n" + _pt("center", (cx, cy))
+                + _pt("end", (cx, cy - g["radius"])) + tail
+                + "\t\t(fill none)\n" + layer)
+    return None
+
+
 def _courtyard(pads: list[FootprintPad], clearance_mm: float) -> list[str]:
     xs = [p.x_mm - p.size_x_mm / 2 for p in pads] + [p.x_mm + p.size_x_mm / 2 for p in pads]
     ys = [p.y_mm - p.size_y_mm / 2 for p in pads] + [p.y_mm + p.size_y_mm / 2 for p in pads]
@@ -80,6 +117,12 @@ def to_kicad_mod(fp: FootprintDef, *, courtyard_mm: float | None = None,
         body.extend(_courtyard(fp.pads, courtyard_mm))
         w.append(f"{fp.name}: courtyard synthesized from pad bbox "
                  f"(+{_fmt(courtyard_mm)}mm) — declared transformation")
+    for g in fp.graphics:
+        node = _graphic_sexpr(g)
+        if node is None:
+            w.append(f"{fp.name}: graphic kind {g.get('kind')!r} not written")
+            continue
+        body.append(node)
     for p in fp.pads:
         body.append("\t" + _pad_sexpr(p, w))
     body.append(")")

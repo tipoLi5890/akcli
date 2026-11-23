@@ -198,6 +198,7 @@ def _check_network() -> tuple[bool, str, str]:
         return True, url, ""
     except urllib.error.HTTPError as exc:
         # any HTTP answer proves reachability (the API may 4xx a bare HEAD)
+        exc.close()     # an HTTPError is the open response itself: release it
         return True, f"{url} (HTTP {exc.code})", ""
     except Exception as exc:
         return (False, f"{url} unreachable: {exc}",

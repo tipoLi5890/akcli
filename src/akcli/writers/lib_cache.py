@@ -511,12 +511,31 @@ def _coerce_sources(sources: object) -> list[model.Library]:
     return [_coerce_one(item) for item in items]
 
 
+# Parsed sources, keyed by (path, mtime, size). Every placement op coerces the
+# same source list again; without this a 17-op list re-parsed a standard KiCad
+# library ~90 times. The stat key keeps a long-lived process (the view server)
+# honest when a library changes on disk.
+_SOURCE_CACHE: dict[tuple[str, int, int], model.Library] = {}
+
+
 def _coerce_one(src: object) -> model.Library:
     if isinstance(src, model.Library):
         return src
     if not isinstance(src, (str, bytes, os.PathLike)):
         fail("SYMBOL_NOT_FOUND", f"unsupported symbol source: {type(src).__name__}")
     p = Path(os.fspath(src))
+    try:
+        st = p.stat()
+    except OSError:
+        return _load_source(p)           # the loader raises the structured error
+    key = (str(p), st.st_mtime_ns, st.st_size)
+    lib = _SOURCE_CACHE.get(key)
+    if lib is None:
+        lib = _SOURCE_CACHE[key] = _load_source(p)
+    return lib
+
+
+def _load_source(p: Path) -> model.Library:
     if p.suffix.lower() == ".kicad_sym":
         return kicad_lib.read(p)
     root = sexpr.parse(_read_text(p))

@@ -3,15 +3,17 @@
 Fixtures are built DIRECTLY as (name, pin-set) pairs (the coercion netdiff
 accepts alongside real ``model.Net`` objects), so every classification —
 UNCHANGED / RENAMED / MODIFIED (incl. rename+modify combined) / SPLIT /
-MERGED / CREATED / REMOVED — is exercised without touching any reader.
+MERGED / MOVED / CREATED / REMOVED — is exercised without touching any reader.
 One test feeds genuine ``model.Net`` inputs to pin down the duck-typed
 coercion (PinRef tuples, is_named=False => unnamed).
 """
 
 from __future__ import annotations
 
+import pytest
+
 from akcli import model
-from akcli.netdiff import NetView, diff, format_summary, has_risk
+from akcli.netdiff import Moved, NetView, diff, format_summary, has_risk
 
 
 # --- helpers -----------------------------------------------------------------
@@ -23,7 +25,8 @@ def _net(name, *pins):
 
 def _only(d, *buckets):
     """Assert exactly the given NetDiff buckets are non-empty ('unchanged' free)."""
-    all_buckets = ("renamed", "modified", "split", "merged", "created", "removed")
+    all_buckets = ("renamed", "modified", "split", "merged", "moved",
+                   "created", "removed")
     for b in all_buckets:
         got = getattr(d, b)
         if b in buckets:
@@ -253,6 +256,247 @@ def test_reshuffle_reports_both_split_and_merge():
     lines = format_summary(d)
     assert lines[0].startswith("! SPLIT THR (4 pins) ->")
     assert lines[1] == "! MERGE AUX + THR -> AUX"
+
+
+# --- MOVED (a minority pin group changes nets; both nets otherwise hold) -------
+
+def test_move_single_pin_between_named_nets():
+    """One pin changing nets is ONE line — not a split of A plus a merge into B."""
+    before = [_net("A", "R1.1", "R2.1", "U1.3"), _net("B", "R3.1", "R4.1")]
+    after = [_net("A", "R1.1", "R2.1"), _net("B", "R3.1", "R4.1", "U1.3")]
+    d = diff(before, after)
+    _only(d, "moved", "modified")          # no SPLIT, no MERGE
+    (mv,) = d.moved
+    assert isinstance(mv, Moved)
+    assert mv.pins == frozenset({"U1.3"})
+    assert (mv.before.name, mv.after.name) == ("A", "B")
+    assert mv.before.pins == frozenset({"R1.1", "R2.1", "U1.3"})   # before side
+    assert mv.after.pins == frozenset({"R3.1", "R4.1", "U1.3"})    # after side
+    assert has_risk(d) is True             # a named net is touched: still gated
+    assert format_summary(d) == ["! MOVE U1.3: A -> B"]
+
+
+def test_pure_move_is_not_equivalent():
+    """The arrange/relink-style equivalence gates must still refuse a move."""
+    before = [_net(None, "R1.1", "R2.1", "U1.3"), _net(None, "R3.1", "R4.1")]
+    after = [_net(None, "R1.1", "R2.1"), _net(None, "R3.1", "R4.1", "U1.3")]
+    d = diff(before, after)
+    assert d.moved and d.equivalent is False
+    assert format_summary(d) != []         # "[] iff equivalent" still holds
+    # `moved` counts on its own, not only through its MODIFIED hosts
+    d.modified.clear()
+    assert d.equivalent is False
+
+
+def test_move_between_unnamed_nets_carries_no_risk():
+    before = [_net(None, "R1.1", "R2.1", "U1.3"), _net(None, "R3.1", "R4.1")]
+    after = [_net(None, "R1.1", "R2.1"), _net(None, "R3.1", "R4.1", "U1.3")]
+    d = diff(before, after)
+    _only(d, "moved", "modified")
+    assert has_risk(d) is False            # ordinary wiring edit
+    # not risk => "~", the module's marker for a plain membership change
+    assert format_summary(d) == [
+        "~ MOVE U1.3: <unnamed@R1.1> -> <unnamed@R3.1>"
+    ]
+
+
+@pytest.mark.parametrize("src, dst", [("VBUS", None), (None, "GND"),
+                                      ("VBUS", "GND")])
+def test_move_touching_a_named_net_is_risky(src, dst):
+    before = [_net(src, "R1.1", "R2.1", "U1.3"), _net(dst, "R3.1", "R4.1")]
+    after = [_net(src, "R1.1", "R2.1"), _net(dst, "R3.1", "R4.1", "U1.3")]
+    d = diff(before, after)
+    _only(d, "moved", "modified")
+    assert has_risk(d) is True
+    (line,) = format_summary(d)
+    assert line.startswith("! MOVE U1.3: ")
+
+
+def test_move_keeps_strict_gate_when_a_host_changes_name_in_the_same_edit():
+    """GND loses its label WHILE absorbing a pin: every name on the line is
+    unnamed, yet a named net was touched — exactly what SPLIT+MERGE gated."""
+    before = [_net(None, "R1.1", "R2.1", "U1.3"),
+              _net("GND", "C1.2", "C2.2", "C3.2")]
+    after = [_net(None, "R1.1", "R2.1"),
+             _net(None, "C1.2", "C2.2", "C3.2", "U1.3")]
+    d = diff(before, after)
+    _only(d, "moved", "modified")
+    assert has_risk(d) is True
+    assert format_summary(d) == [
+        "! MOVE U1.3: <unnamed@R1.1> -> <unnamed@C1.2>",
+        "~ GND-><unnamed@C1.2>: +U1.3 (3->4 pins)",   # the rename explains it
+    ]
+    # ... and the mirror image: the net the pin LEFT gains a name
+    after = [_net("VREF", "R1.1", "R2.1"),
+             _net(None, "C1.2", "C2.2", "C3.2", "U1.3")]
+    d = diff([before[0], _net(None, "C1.2", "C2.2", "C3.2")], after)
+    assert has_risk(d) is True
+    assert format_summary(d)[0].startswith("! MOVE U1.3: ")
+
+
+def test_move_needs_a_strict_minority_at_both_ends():
+    """Pins leaving for a NEW net are a split; joining an equal-sized donor is
+    a merge; a net absorbed whole is a merge. None of them is a move."""
+    # no other source at the destination => plain SPLIT
+    d = diff([_net("A", "R1.1", "R2.1", "U1.3")],
+             [_net("A", "R1.1", "R2.1"), _net(None, "U1.3")])
+    _only(d, "split")
+    # destination's own source contributes no MORE than the mover (1 vs 1)
+    d = diff([_net("A", "R1.1", "R2.1", "U1.3"), _net("B", "R3.1")],
+             [_net("A", "R1.1", "R2.1"), _net("B", "R3.1", "U1.3")])
+    _only(d, "split", "merged")
+    assert format_summary(d) == [
+        "! SPLIT A (3 pins) -> A(2) + B(1)",
+        "! MERGE B + A -> B",
+    ]
+    # the source keeps nothing behind => plain MERGE
+    d = diff([_net("A", "U1.3"), _net("B", "R3.1", "R4.1")],
+             [_net("B", "R3.1", "R4.1", "U1.3")])
+    _only(d, "merged")
+
+
+def test_multi_pin_move_lists_every_pin_on_one_line():
+    """2 pins out of a 6-pin net into a 5-pin net: 4 > 2 stay, 5 > 2 hosted."""
+    before = [
+        _net("BUS", "A.1", "B.1", "C.1", "D.1", "E.1", "F.1"),
+        _net("AUX", "G.1", "H.1", "I.1", "J.1", "K.1"),
+    ]
+    after = [
+        _net("BUS", "A.1", "B.1", "C.1", "D.1"),
+        _net("AUX", "G.1", "H.1", "I.1", "J.1", "K.1", "E.1", "F.1"),
+    ]
+    d = diff(before, after)
+    _only(d, "moved", "modified")
+    (mv,) = d.moved                        # one pin GROUP, not one per pin
+    assert mv.pins == frozenset({"E.1", "F.1"})
+    # both hosts stay in `modified` — their membership did change
+    aux, bus = d.modified
+    assert (aux.after.name, aux.added, aux.removed) == (
+        "AUX", frozenset({"E.1", "F.1"}), frozenset())
+    assert (bus.after.name, bus.added, bus.removed) == (
+        "BUS", frozenset(), frozenset({"E.1", "F.1"}))
+    # ... but their lines are redundant with the MOVE and are not printed
+    assert format_summary(d) == ["! MOVE E.1, F.1: BUS -> AUX"]
+
+
+def test_move_long_pin_list_is_truncated():
+    before = [
+        _net("BIG", *(f"{c}.1" for c in "ABCDEFGHIJKL")),
+        _net("OTH", *(f"{c}.2" for c in "ABCDEFG")),
+    ]
+    after = [
+        _net("BIG", *(f"{c}.1" for c in "ABCDEFG")),
+        _net("OTH", *(f"{c}.2" for c in "ABCDEFG"), *(f"{c}.1" for c in "HIJKL")),
+    ]
+    (line,) = format_summary(diff(before, after))
+    # same 3-token cap as a MODIFIED delta, remainder collapsed
+    assert line == "! MOVE H.1, I.1, J.1 (+2 more): BIG -> OTH"
+
+
+def test_move_keeps_host_line_when_host_has_another_delta():
+    before = [_net("A", "R1.1", "R2.1", "U1.3"), _net("B", "R3.1", "R4.1")]
+    # A also gains C9.1 (a pin that was on no net before)
+    after = [_net("A", "R1.1", "R2.1", "C9.1"),
+             _net("B", "R3.1", "R4.1", "U1.3")]
+    assert format_summary(diff(before, after)) == [
+        "! MOVE U1.3: A -> B",
+        "~ A: +C9.1 -U1.3 (3->3 pins)",    # B's line (move only) is dropped
+    ]
+    # a rename riding on a host is a second delta too
+    after = [_net("A2", "R1.1", "R2.1"), _net("B", "R3.1", "R4.1", "U1.3")]
+    assert format_summary(diff(before, after)) == [
+        "! MOVE U1.3: A -> B",
+        "~ A->A2: -U1.3 (3->2 pins)",
+    ]
+
+
+def test_move_combined_with_a_genuine_split_elsewhere():
+    before = [
+        _net("A", "R1.1", "R2.1", "U1.3"),
+        _net("B", "R3.1", "R4.1"),
+        _net("THR", "U2.1", "U2.2", "R7.1", "R7.2"),
+    ]
+    after = [
+        _net("A", "R1.1", "R2.1"),
+        _net("B", "R3.1", "R4.1", "U1.3"),
+        _net("THR", "U2.1", "U2.2"),
+        _net(None, "R7.1", "R7.2"),
+    ]
+    d = diff(before, after)
+    _only(d, "split", "moved", "modified")
+    assert d.split[0].before.name == "THR"
+    assert format_summary(d) == [
+        "! SPLIT THR (4 pins) -> THR(2) + <unnamed@R7.1>(2)",
+        "! MOVE U1.3: A -> B",
+    ]
+
+
+def test_move_out_of_a_net_that_also_splits():
+    """The moved pins leave the overlap: the SPLIT lists only real fragments."""
+    before = [
+        _net("A", "R1.1", "R2.1", "R3.1", "C1.1", "C2.1", "U1.3"),
+        _net("B", "R7.1", "R8.1", "R9.1"),
+    ]
+    after = [
+        _net("A", "R1.1", "R2.1", "R3.1"),
+        _net(None, "C1.1", "C2.1"),            # broke off into a NEW net
+        _net("B", "R7.1", "R8.1", "R9.1", "U1.3"),
+    ]
+    d = diff(before, after)
+    _only(d, "split", "moved", "modified")
+    assert [(v.display, n) for v, n in d.split[0].fragments] == [
+        ("A", 3), ("<unnamed@C1.1>", 2)]
+    assert format_summary(d) == [
+        "! SPLIT A (6 pins) -> A(3) + <unnamed@C1.1>(2)",
+        "! MOVE U1.3: A -> B",
+    ]
+
+
+def test_move_lines_sit_between_merge_and_modified():
+    before = [
+        _net("A", "R1.1", "R2.1", "U1.3"),
+        _net("B", "R3.1", "R4.1"),
+        _net("M1", "U5.1", "U5.2"),
+        _net("M2", "U6.1"),
+        _net("V", "U7.1", "U7.2"),
+    ]
+    after = [
+        _net("A", "R1.1", "R2.1"),
+        _net("B", "R3.1", "R4.1", "U1.3"),
+        _net("M1", "U5.1", "U5.2", "U6.1"),
+        _net("V", "U7.1", "U7.2", "U7.3"),
+    ]
+    assert format_summary(diff(before, after)) == [
+        "! MERGE M1 + M2 -> M1",
+        "! MOVE U1.3: A -> B",
+        "~ V: +U7.3 (2->3 pins)",
+    ]
+
+
+def test_move_output_is_deterministic():
+    """Same nets in any input order => the same entries and the same lines."""
+    before = [
+        _net("A", "R1.1", "R2.1", "R3.1", "U1.3", "U1.4"),
+        _net("B", "R4.1", "R5.1", "R6.1", "U2.7"),
+        _net(None, "R7.1", "R8.1", "R9.1"),
+    ]
+    after = [
+        _net("A", "R1.1", "R2.1", "R3.1", "U2.7"),      # swap with B ...
+        _net("B", "R4.1", "R5.1", "R6.1", "U1.3"),
+        _net(None, "R7.1", "R8.1", "R9.1", "U1.4"),     # ... and one to unnamed
+    ]
+    d = diff(before, after)
+    lines = format_summary(d)
+    # sorted by the net the pins left, then the net they joined (named first)
+    assert lines == [
+        "! MOVE U1.3: A -> B",
+        "! MOVE U1.4: A -> <unnamed@R7.1>",
+        "! MOVE U2.7: B -> A",
+    ]
+    assert format_summary(diff(before, after)) == lines         # same twice
+    again = diff(list(reversed(before)), list(reversed(after)))
+    assert again.moved == d.moved and again.modified == d.modified
+    assert format_summary(again) == lines
 
 
 # --- model.Net coercion --------------------------------------------------------

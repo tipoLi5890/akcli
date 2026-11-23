@@ -1,0 +1,9 @@
+{
+ "texts": ["DIVIDER"],
+ "text_boxes": ["VMID = VIN x 10k / (5.1k + 10k)\nKeep C1 next to the ADC pin"],
+ "rectangles": [
+  {"encloses": ["R1", "R2"], "excludes": ["C1"]}
+ ],
+ "title_block": {"title": "Sensor divider", "rev": "B", "company": "Example Labs", "comment1": "ECO-17: documentation only"},
+ "net_diff": {"equivalent": true}
+}

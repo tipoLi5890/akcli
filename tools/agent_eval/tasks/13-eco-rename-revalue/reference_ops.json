@@ -1,0 +1,10 @@
+{
+ "protocol_version": 2,
+ "target_format": "kicad",
+ "target_file": "board.kicad_sch",
+ "ops": [
+  {"op": "rename_net", "old_name": "3V3", "new_name": "VDD_IO"},
+  {"op": "set_component_parameters", "designator": "R1", "value": "2.2k", "footprint": "Resistor_SMD:R_0402_1005Metric", "parameters": {"Tolerance": "1%"}},
+  {"op": "set_component_parameters", "designator": "R2", "value": "2.2k", "footprint": "Resistor_SMD:R_0402_1005Metric", "parameters": {"Tolerance": "1%"}}
+ ]
+}

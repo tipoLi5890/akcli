@@ -1,0 +1,8 @@
+{
+ "components": {
+  "C1": {"value": "100n"},
+  "R2": {"value": "10k"}
+ },
+ "absent": ["R1", "D1"],
+ "forbid_findings": ["DANGLING_ENDPOINT", "NET_LABEL_UNATTACHED"]
+}

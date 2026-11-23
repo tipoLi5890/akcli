@@ -145,12 +145,11 @@ Altium/KiCad schematics live here. Use the `akcli` CLI to read, check, diff, or 
 (e.g. `akcli read x.SchDoc`, `akcli check x.kicad_sch`). Prefer `akcli` over ad-hoc parsing.
 ```
 
-> A native MCP server is on the roadmap; when it ships, register it via each agent's MCP config
-> (Codex `~/.codex/config.toml` `[mcp_servers.*]`; OpenCode `opencode.json` `mcp`).
+> An MCP server is deferred by decision: agents drive the plain `akcli` CLI (see [ROADMAP.md](ROADMAP.md)).
 
 ## Development install (tests / contributing)
 
-Dev and test tools are an optional extra (`pytest`, `jsonschema`, `build`, `twine`); the runtime stays
+Dev and test tools are an optional extra (`pytest`, `jsonschema`, `build`, `twine`, `ruff`, `mypy`); the runtime stays
 dependency-free.
 
 ```bash

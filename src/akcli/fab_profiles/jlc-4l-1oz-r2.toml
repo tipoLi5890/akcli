@@ -1,0 +1,69 @@
+# JLCPCB 4-layer 1oz baseline — revision 2 of the 2026-07 vendor snapshot.
+# The free-via envelope + tented covering of jlc-4l-1oz.toml, number for
+# number, plus the one rule `akcli fab check` learned to measure since: the
+# slot-width floor.
+#
+# A profile is ONE vendor capability revision with evidence — when the vendor
+# page changes, cut a NEW file (new id), never mutate an old revision. This
+# revision keeps every July 2026 number and its `retrieved_at`; the [slot]
+# floors carry their own check date beside their source URL.
+
+id = "jlc-4l-1oz-free-vias-2026-07-r2"
+vendor = "JLCPCB"
+
+[source]
+urls = [
+  "https://jlcpcb.com/hk/help/article/pcb-via-covering",
+  "https://jlcpcb.com/hk/help/article/in-what-cases-will-there-be-charged-extra",
+  # [slot] only: checked against this page on 2026-10-12.
+  "https://jlcpcb.com/capabilities/pcb-capabilities",
+]
+retrieved_at = "2026-07-14"
+
+[stackup]
+layers = 4
+thickness_mm = 1.0
+
+[via]
+covering = "tented"
+min_drill_mm = 0.30            # below: paid small-via process
+min_pad_mm = 0.40
+preferred_annular_mm = 0.075   # recommended margin: 0.30/0.45
+# Applied to vias the board file marks tented — or to every via when the
+# order manifest declares via_covering = "tented".
+max_tented_drill_mm = 0.40     # tenting caps the drill
+forbid_via_in_pad = true
+forbid_blind_buried = true
+
+# Oval pad drills. The width is the smaller of the two drill sizes.
+[slot]
+min_plated_width_mm = 0.35     # multilayer plated slot (a 2-layer board: 0.5)
+min_non_plated_width_mm = 1.0
+
+[cost.warn_if]
+board_length_mm_gte = 600
+board_area_cm2_gt = 650        # true Edge.Cuts area when the outline closes
+drill_density_per_m2_gt = 150000
+trace_width_mm_lte = 0.0889    # 3.5 mil fine-line surcharge (multilayer)
+
+# Optional tables this revision leaves out, because their numbers are YOUR
+# policy or are not recorded under the sources above:
+#
+# [cost.error_if]                # same keys as [cost.warn_if]; a threshold
+# board_length_mm_gte = 600      # here raises the SAME finding as an ERROR
+#
+# [rules]                        # floors the project's own DRC constraints
+# min_clearance_mm = 0.0         # (.kicad_pro) are compared against; the
+# min_track_width_mm = 0.0       # via minimums above are always compared
+# min_via_annular_mm = 0.0
+# min_hole_to_hole_mm = 0.0
+# min_hole_clearance_mm = 0.0
+# min_copper_edge_clearance_mm = 0.0
+
+# Approved exceptions are explicit, owned and expiring — never a shrug.
+# [[exception]]
+# type = "thermal_via"
+# component = "U1"
+# owner = "hw-lead"
+# reason = "QFN exposed-pad thermal vias per datasheet layout guide"
+# expires = "2027-01-01"

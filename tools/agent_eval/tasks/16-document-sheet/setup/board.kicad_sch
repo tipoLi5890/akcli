@@ -1,0 +1,104 @@
+(kicad_sch
+	(version 20231120)
+	(generator "eeschema")
+	(generator_version "8.0")
+	(uuid "2035b16a-0569-5033-812e-6ce37deee970")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Device:R"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "R"
+			(at 2.032 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Value" "R"
+			(at 0 0 90)
+			(effects (font (size 1.27 1.27))))
+		(property "Footprint" ""
+			(at -1.778 0 90)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Resistor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "R_0_1"
+			(rectangle
+				(start -1.016 -2.54)
+				(end 1.016 2.54)
+				(stroke (width 0.254) (type default))
+				(fill (type none))))
+		(symbol "R_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 1.27)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27)))))))
+		(symbol "Device:C"
+		(pin_numbers (hide yes))
+		(pin_names (offset 0.254))
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(property "Reference" "C"
+			(at 0.635 2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Value" "C"
+			(at 0.635 -2.54 0)
+			(effects (font (size 1.27 1.27)) (justify left)))
+		(property "Footprint" ""
+			(at 0.9652 -3.81 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Datasheet" "~"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(property "Description" "Unpolarized capacitor"
+			(at 0 0 0)
+			(effects (font (size 1.27 1.27)) (hide yes)))
+		(symbol "C_0_1"
+			(polyline
+				(pts (xy -2.032 -0.762) (xy 2.032 -0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none)))
+			(polyline
+				(pts (xy -2.032 0.762) (xy 2.032 0.762))
+				(stroke (width 0.508) (type default))
+				(fill (type none))))
+		(symbol "C_1_1"
+			(pin passive line
+				(at 0 3.81 270)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "1" (effects (font (size 1.27 1.27)))))
+			(pin passive line
+				(at 0 -3.81 90)
+				(length 2.794)
+				(name "~" (effects (font (size 1.27 1.27))))
+				(number "2" (effects (font (size 1.27 1.27))))))))
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(symbol (lib_id "Device:R") (at 50.8 50.8 0) (unit 1) (uuid "4952112d-5952-5b9e-808f-9711d065662b") (pin "1" (uuid "1371872f-958e-5acb-b71c-d759c2d82682")) (pin "2" (uuid "262a72d2-156a-5556-957d-583d2ef849e7")) (property "Reference" "R1" (at 53.086 49.53 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2035b16a-0569-5033-812e-6ce37deee970" (reference "R1") (unit 1))))
+	(property "Value" "5.1k" (at 53.086 52.07 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:R") (at 50.8 66.04 0) (unit 1) (uuid "9b4f5f86-aed7-5a31-b838-f8acbb3e9e6d") (pin "1" (uuid "e0091bd9-bc39-513a-9a2e-a5f4a94fbbe8")) (pin "2" (uuid "8a96722f-b63c-5394-af28-1e73158eb65a")) (property "Reference" "R2" (at 53.086 64.77 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2035b16a-0569-5033-812e-6ce37deee970" (reference "R2") (unit 1))))
+	(property "Value" "10k" (at 53.086 67.31 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(symbol (lib_id "Device:C") (at 96.52 66.04 0) (unit 1) (uuid "5d6e1122-81c0-5498-a6aa-66f30bdaf4e0") (pin "1" (uuid "a87fb865-105a-594b-b44c-4ae98941cfbb")) (pin "2" (uuid "56a34402-0802-551c-aa36-c08b4ced0f14")) (property "Reference" "C1" (at 99.822 64.77 0) (effects (font (size 1.27 1.27)) (justify left))) (instances (project "noname" (path "/2035b16a-0569-5033-812e-6ce37deee970" (reference "C1") (unit 1))))
+	(property "Value" "100n" (at 99.822 67.31 0) (effects (font (size 1.27 1.27)) (justify left))))
+	(label "VIN" (at 50.8 46.99 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "5c710a7c-40a2-59ba-9557-018851ae21a6"))
+	(wire (pts (xy 50.8 54.61) (xy 50.8 62.23)) (stroke (width 0) (type default)) (uuid "a6a9dd4a-8060-52e3-a167-96b066cd0290"))
+	(label "VMID" (at 50.8 58.42 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "1643d8d3-ac4c-5204-978d-49a8502b2ca6"))
+	(label "GND" (at 50.8 69.85 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "70a942fc-21ce-5406-b77b-bf26aba2e5d0"))
+	(label "VMID" (at 96.52 62.23 90) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "a9ede87f-ed2a-5981-a25e-6b03834a4db2"))
+	(label "GND" (at 96.52 69.85 270) (effects (font (size 1.27 1.27)) (justify right bottom)) (uuid "96d45c20-811c-57ff-b833-38e53758ad15"))
+)

@@ -423,20 +423,57 @@ def test_check_truncated_pro_is_malformed_but_read_still_works(tmp_path):
     assert info["ok"] is False and info["error"]
 
 
-def test_check_missing_child_sheet_is_a_sheet_file_missing(tmp_path):
-    d = _scaffold(tmp_path, "--sheets", "power")
+def _two_level_tree(tmp_path: Path) -> Path:
+    """A scaffold whose root instantiates ``power`` and ``power`` instantiates
+    ``deep`` — clean under ``project check`` until a file goes missing."""
+    d = _scaffold(tmp_path, "--sheets", "power,deep")
     ops = {"protocol_version": 2, "target_format": "kicad",
+           "sheets": {"power": {"file": "power.kicad_sch"}},
            "ops": [{"op": "add_sheet", "file": "power.kicad_sch",
                     "name": "Power", "at": [1000, 1000],
-                    "size": [1000, 800]}]}
+                    "size": [1000, 800]},
+                   {"op": "add_sheet", "sheet": "power",
+                    "file": "deep.kicad_sch", "name": "Deep",
+                    "at": [1000, 1000], "size": [1000, 800]}]}
     ops_file = d / "sheet-ops.json"
     ops_file.write_text(json.dumps(ops), encoding="utf-8", newline="\n")
     assert run_cli(["draw", str(d / "demo.kicad_sch"), "--ops", str(ops_file),
                     "--apply", "--no-erc"])[0] == 0
     assert json_of(["project", "check", str(d), "--json"], expect=0)["findings"] == []
+    return d
+
+
+def test_check_missing_child_sheet_is_a_sheet_file_missing(tmp_path):
+    """ONE finding for the one cause. The library audit loads the tree through
+    the reader, which trips over the same missing file and used to add a
+    second, differently-worded finding (``SCH_UNREADABLE``) for it."""
+    d = _two_level_tree(tmp_path)
     (d / "power.kicad_sch").unlink()
     doc = json_of(["project", "check", str(d), "--json"], expect=1)
-    assert "SHEET_FILE_MISSING" in _codes(doc)
+    assert _codes(doc) == ["SHEET_FILE_MISSING"]
+    assert doc["findings"][0]["severity"] == "error"
+    assert doc["findings"][0]["message"].startswith(
+        "demo.kicad_sch: sheet 'Power' references 'power.kicad_sch'")
+
+
+def test_check_missing_grandchild_names_the_sheet_that_references_it(tmp_path):
+    d = _two_level_tree(tmp_path)
+    (d / "deep.kicad_sch").unlink()
+    doc = json_of(["project", "check", str(d), "--json"], expect=1)
+    assert _codes(doc) == ["SHEET_FILE_MISSING"]
+    assert doc["findings"][0]["message"].startswith(
+        "power.kicad_sch: sheet 'Deep' references 'deep.kicad_sch'")
+
+
+def test_check_unreadable_child_is_still_reported(tmp_path):
+    """The de-duplication is exactly as wide as the missing-file echo: a sheet
+    that exists but does not parse is a different cause and keeps its own
+    (library-audit) finding."""
+    d = _two_level_tree(tmp_path)
+    (d / "power.kicad_sch").write_text(
+        "(kicad_sch (version 20231120)\n", encoding="utf-8", newline="\n")
+    doc = json_of(["project", "check", str(d), "--json"], expect=1)
+    assert _codes(doc) == ["SCH_UNREADABLE"]
 
 
 def test_check_without_a_project_is_exit_4(tmp_path):

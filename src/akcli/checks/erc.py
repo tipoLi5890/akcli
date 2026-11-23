@@ -58,6 +58,7 @@ from ..classify import (
     is_connector as _is_connector,
     is_ground as _is_ground,
     is_power as _is_power,
+    is_testpoint as _is_testpoint,
     is_tvs as _is_tvs,
     norm as _norm,
     rail_matches as _rail_matches,
@@ -212,7 +213,9 @@ def _driven_by_topology(
       pull-up, a ferrite feeding a rail: the resistor's pins are Passive, so
       a type-only rule called the (correctly biased) input floating;
     * a **connector** — ``SWDCLK`` is driven by the debug probe that is not
-      on this schematic at all.
+      on this schematic at all;
+    * a **test point** — a probe pad is an off-board access point too, and
+      KiCad's own ERC accepts an input wired to one (kicad-cli 10.0.4).
 
     DNP parts tie nothing: an unpopulated pull-up leaves the input genuinely
     floating, which is exactly the mistake worth reporting.
@@ -224,6 +227,8 @@ def _driven_by_topology(
         if _is_connector(des, comp.library_ref if comp else None,
                          footprint=comp.footprint if comp else None,
                          value=comp.value if comp else None):
+            return True
+        if comp is not None and _is_testpoint(comp.library_ref, comp.footprint):
             return True
         if _prefix(des) not in PASSIVE_TIE_PREFIXES:
             continue

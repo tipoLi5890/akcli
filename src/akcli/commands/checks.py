@@ -36,8 +36,8 @@ def _default_check_names(path, cfg) -> list[str]:
     KiCad-only so they're added for a ``.kicad_sch`` input; ``pairs`` runs
     unless ``[check].pairs = false`` opts out. Shared with ``akcli gate``'s
     check gate so both commands run the exact same set — a narrower ad hoc
-    list (like ``release preflight``'s fixed erc/power/bom/nets four-tuple)
-    is a DIFFERENT, intentionally lighter selection, not this one.
+    list (like ``release preflight``'s erc/power/bom/nets + integrity) is a
+    DIFFERENT, intentionally lighter selection, not this one.
     """
     which = ["erc", "power", "bom", "nets"]
     if str(path).lower().endswith(".kicad_sch"):
@@ -86,20 +86,56 @@ def _run_check(name: str, sch, cfg, args: argparse.Namespace) -> list:
         # uuids/designators, unresolved lib_ids, broken instance paths, NC
         # conflicts) — run read-only over ANY .kicad_sch, not just files akcli
         # itself just wrote (imports and hand-edited files need them most).
+        # Tree-scoped: the file AND every sheet below it, because a duplicate
+        # designator among child sheets or a missing grandchild is invisible
+        # to a single-document pass over the root (checks/integrity.py).
         if not str(args.path).lower().endswith(".kicad_sch"):
             return []
-        from .. import sexpr as _sexpr
-        from ..writers import connectivity as _connectivity
-        text = Path(args.path).read_text(encoding="utf-8")
-        # the path enables the checks that need the filesystem (a (sheet ...)
-        # whose child file is missing)
-        return _connectivity.verify(_sexpr.parse(text), path=args.path)
+        from ..checks import integrity
+        return integrity.run_tree(args.path)
     return []
+
+
+def _load_kicad_tree(path: Path, with_integrity: bool) -> tuple:
+    """``(schematic | None, integrity findings | None)`` for an on-disk
+    ``.kicad_sch``.
+
+    Tree-scoped integrity runs BEFORE the reader, so a child sheet that is not
+    on disk is reported as what it is — ``SHEET_FILE_MISSING`` — instead of
+    killing the command with ``FILE_NOT_FOUND`` before a single finding
+    prints. ``schematic`` is ``None`` in exactly that case: integrity was
+    selected, it found the missing sheet, and the reader then could not load
+    the tree. Every other failure is the reader's own error, raised unchanged.
+    """
+    findings = None
+    integrity_exc: Exception | None = None
+    if with_integrity:
+        from ..checks import integrity
+        from ..errors import AkcliError
+        try:
+            findings = integrity.run_tree(path)
+        except (AkcliError, OSError) as exc:
+            # The file itself is unreadable: let the reader raise ITS error
+            # below (the exit and wording this had before the pre-pass).
+            integrity_exc = exc
+    try:
+        sch = _load_schematic(path)
+    except FileNotFoundError:
+        if not any(f.code == "SHEET_FILE_MISSING" for f in findings or ()):
+            raise
+        return None, findings
+    if integrity_exc is not None:
+        raise integrity_exc
+    return sch, findings
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
     path = _require_path(args.path)
-    sch = _load_schematic(path)
+    # A KiCad file that IS on disk loads after its check selection is known
+    # (see _load_kicad_tree); a missing file and every non-KiCad input load
+    # first, exactly as before — a missing ROOT is still FILE_NOT_FOUND.
+    kicad_tree = str(path).lower().endswith(".kicad_sch") and path.is_file()
+    sch = None if kicad_tree else _load_schematic(path)
     cfg = _load_cfg(args, path)
 
     which: list[str] = []
@@ -133,23 +169,52 @@ def _cmd_check(args: argparse.Namespace) -> int:
         # --intent/--contract alone are pure assertions, like any other selector.
         which = _default_check_names(path, cfg)
 
+    tree_findings = None
+    if kicad_tree:
+        sch, tree_findings = _load_kicad_tree(path, "integrity" in which)
+
     findings: list = []
-    for name in which:
-        findings.extend(_run_check(name, sch, cfg, args))
-    if intent_file:
-        from ..checks import intent as intent_mod
-        spec = intent_mod.load(intent_file)   # BAD_CONFIG/PROTOCOL_MISMATCH via main
-        findings.extend(intent_mod.run(sch, spec))
-    if contract_file:
-        from ..checks import contract as contract_mod
-        doc = contract_mod.load(contract_file)  # BAD_CONFIG/PROTOCOL_MISMATCH via main
-        findings.extend(contract_mod.run(sch, doc))
+    # Families that need the loaded schematic and did not get one. None when
+    # the tree loaded; a list (possibly empty) when a missing child sheet left
+    # integrity as the only family that could run.
+    skipped: list[str] | None = None
+    if sch is None:
+        findings.extend(tree_findings or ())
+        skipped = [name for name in which if name != "integrity"]
+        skipped += [name for name, wanted in (("intent", intent_file),
+                                              ("contract", contract_file))
+                    if wanted]
+    else:
+        for name in which:
+            if name == "integrity" and tree_findings is not None:
+                findings.extend(tree_findings)      # the pre-pass already ran it
+                continue
+            findings.extend(_run_check(name, sch, cfg, args))
+        if intent_file:
+            from ..checks import intent as intent_mod
+            spec = intent_mod.load(intent_file)   # BAD_CONFIG/PROTOCOL_MISMATCH via main
+            findings.extend(intent_mod.run(sch, spec))
+        if contract_file:
+            from ..checks import contract as contract_mod
+            doc = contract_mod.load(contract_file)  # BAD_CONFIG/PROTOCOL_MISMATCH via main
+            findings.extend(contract_mod.run(sch, doc))
 
     waiver_detail: list[dict] = []
     findings, waived, demoted = _report.apply_waivers(
         findings, cfg.waivers, detail_out=waiver_detail)
 
-    meta = _schematic_meta(sch)
+    if skipped is None:
+        meta = _schematic_meta(sch)
+    else:
+        # Nothing was read into a model, so the header caveats are unknown —
+        # "n/a", never the "0" a clean board would print.
+        meta = {key: "n/a" for key in ("passive_pin_ratio", "no_erc_suppressed",
+                                       "unnamed_net_count", "frac_present")}
+        meta["skipped_checks"] = skipped
+        sys.stderr.write(
+            "note: a sheet file is missing (SHEET_FILE_MISSING), so the "
+            "schematic could not be loaded and only integrity ran"
+            + (f" — skipped: {', '.join(skipped)}" if skipped else "") + "\n")
     # Always surface waiver activity so a run cleaned only by waivers is never
     # mistaken for an intrinsically clean board.
     meta["config_waived"] = f"{waived} ({demoted} demoted)"
@@ -200,21 +265,44 @@ def _cmd_diff(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify_schpcb(args: argparse.Namespace, sch_path, pcb_path) -> int:
-    """`verify <sch> <board.kicad_pcb>` — schematic <-> PCB equivalence."""
+    """`verify <sch> <board.kicad_pcb>` — schematic <-> PCB equivalence.
+
+    Config ``[[waiver]]`` entries apply as in ``akcli check`` (discovered from
+    the schematic's directory, or ``-C``): the verdict and the exit are
+    computed from the findings left AFTER them, and what they silenced is
+    named on stderr and in the output.
+
+    ``--library`` adds the PCB <-> library leg (``checks/fplib.py``): each
+    board footprint against the definition its library id names in the
+    PROJECT ``fp-lib-table`` (the board's directory). Its findings go through
+    the same waivers; they are warnings/notes, so they never change the
+    PASS/FAIL verdict — and the coverage counts are always printed, because
+    footprints from the global table are NOT compared.
+    """
     from ..checks import schpcb
     from ..readers import kicad as kreader
+    from ._shared import _apply_config_waivers
 
     sch = _load_schematic(sch_path)
     pcb = kreader.read_pcb(str(pcb_path))
     findings = schpcb.run(sch, pcb)
     if not getattr(args, "strict", False):
         findings = [f for f in findings if f.code != "SCHPCB_VALUE_MISMATCH"]
+    coverage = None
+    if getattr(args, "library", False):
+        from .. import libtable
+        from ..checks import fplib
+        lib_findings, coverage = fplib.run(
+            pcb, libtable.discover(Path(pcb_path).parent))
+        findings = findings + lib_findings
+    findings, waived_summary, waived = _apply_config_waivers(
+        findings, _load_cfg(args, sch_path))
     errors = [f for f in findings
               if f.severity in (_report.Severity.ERROR, _report.Severity.CRITICAL)]
     equivalent = not errors
 
     if args.json:
-        _emit(_dumps(_stamp({
+        payload = {
             "equivalent": equivalent,
             "mode": "sch-pcb",
             "schematic": str(sch_path),
@@ -223,18 +311,29 @@ def _cmd_verify_schpcb(args: argparse.Namespace, sch_path, pcb_path) -> int:
             "pads": len(pcb.pads),
             "findings": [
                 {"code": f.code, "severity": f.severity.value,
-                 "message": f.message, "anchors": f.anchors}
+                 "message": f.message, "refs": f.refs, "anchors": f.anchors}
                 for f in findings
             ],
-        })))
+            "config_waived": waived_summary,
+            "waived": waived,
+        }
+        if coverage is not None:
+            payload["library"] = coverage
+        _emit(_dumps(_stamp(payload)))
     else:
         lines = [f"SCH-PCB EQUIVALENCE: {'PASS' if equivalent else 'FAIL'}",
                  f"  components: {len(sch.components)} (sch) vs "
-                 f"{len(pcb.footprints)} (pcb)   pads: {len(pcb.pads)}"]
+                 f"{len(pcb.footprints)} (pcb)   pads: {len(pcb.pads)}",
+                 f"  config-waived: {waived_summary}"]
+        if coverage is not None:
+            from ..checks import fplib
+            lines.append(f"  library: {fplib.coverage_text(coverage)}")
         for f in findings:
             lines.append(f"  {f.severity.value.upper():<8} {f.code}: {f.message}")
         if not findings:
-            lines.append("  refdes, footprints and net partition all match")
+            lines.append("  no findings left — every finding was config-waived"
+                         if waived else
+                         "  refdes, footprints and net partition all match")
         _emit("\n".join(lines))
     if getattr(args, "exit_zero", False):
         return EXIT["OK"]
@@ -255,6 +354,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     b_path = _require_path(args.other, "second file")
     if str(b_path).lower().endswith(".kicad_pcb"):
         return _cmd_verify_schpcb(args, a_path, b_path)
+    if getattr(args, "library", False):
+        # A malformed request, not a finding — and never something to ignore.
+        raise _ExitWith(EXIT["USAGE"],
+                        "ERROR: --library compares a board against its "
+                        "footprint libraries — the second file must be a "
+                        ".kicad_pcb")
     a = _load_schematic(a_path)
     b = _load_schematic(b_path)
     from ..checks import diff as diffmod
@@ -438,8 +543,11 @@ def _cmd_relink(args: argparse.Namespace) -> int:
     do_apply = bool(getattr(args, "apply", False))
     res = None
     if do_apply:
-        # VERIFY_FAILED (gate refusal) / SYMBOL_NOT_FOUND -> exit 6 via main
-        res = relink.apply(str(target), actions)
+        # VERIFY_FAILED (gate refusal) / SYMBOL_NOT_FOUND / TARGET_LOCKED
+        # (KiCad holds the file open; --allow-open overrides) -> exit 6 via main
+        res = relink.apply(
+            str(target), actions,
+            allow_open=bool(getattr(args, "allow_open", False)))
 
     replaces = [a for a in actions if a["status"] == "replace"]
     missing = [a for a in actions if a["status"] == "missing-lib"]
@@ -540,6 +648,11 @@ def register(sub, common) -> None:
     p.add_argument("--strict", action="store_true",
                    help="also fail on component value/footprint differences "
                         "(sch-pcb mode: include value mismatches)")
+    p.add_argument("--library", action="store_true",
+                   help="sch-pcb mode: also compare each board footprint "
+                        "against its definition in the PROJECT fp-lib-table "
+                        "(pad set, pad type/drill, missing source, 3D model) "
+                        "and report how many footprints were NOT compared")
     p.add_argument("--exit-zero", action="store_true", help="always exit 0")
     p.set_defaults(handler=_cmd_verify)
 
@@ -579,4 +692,7 @@ def register(sub, common) -> None:
     p.add_argument("--apply", action="store_true",
                    help="write the replacements (default: preview only; "
                         "net-membership equivalence gated, leaves <name>.bak)")
+    p.add_argument("--allow-open", dest="allow_open", action="store_true",
+                   help="write even when a KiCad GUI lock file is present "
+                        "(File>Revert in KiCad afterwards)")
     p.set_defaults(handler=_cmd_relink)

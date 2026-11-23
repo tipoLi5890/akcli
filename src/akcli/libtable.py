@@ -8,7 +8,12 @@ GUI. This module makes the project tables a first-class, auditable object:
 
 * :func:`read_table` — parse a ``sym-lib-table`` / ``fp-lib-table``;
 * :func:`discover` — build a :class:`Workspace` from a project directory;
-* :func:`audit` — findings across schematic <-> tables <-> libraries <-> 3D;
+* :func:`nearest_project_table` / :func:`nicknames_for_dir` — which project
+  table governs a directory, and under which nickname(s) it registers it;
+* :func:`load_libraries` — every project table entry, resolved and loaded
+  (the one walk ``audit``, the library baseline and ``verify --library`` share);
+* :func:`audit` — findings across schematic <-> tables <-> libraries <-> 3D
+  (:func:`audit_with_origins` also says which FILE each finding is about);
 * :func:`plan_rename` / :func:`plan_model_paths` — the two historically
   hand-``sed``-ed repairs, as reviewable plans (apply via ``library repair``).
 
@@ -45,8 +50,10 @@ _MAX_TABLE_DEPTH = 8
 
 __all__ = [
     "LibEntry", "LibTable", "Workspace", "read_table", "discover", "audit",
+    "audit_with_origins", "nearest_project_table", "nicknames_for_dir",
     "plan_rename", "plan_model_paths", "RepairEdit", "expand_var",
-    "kicad_data_roots",
+    "kicad_data_roots", "load_libraries", "LoadedLibrary", "LoadedFootprint",
+    "ModelRef", "is_kicad_builtin_ref", "resolve_model",
 ]
 
 
@@ -129,6 +136,22 @@ def _kicad_builtin_dir(var: str) -> str | None:
     return _builtin_cache[key]
 
 
+# KiCad <= 5 spelled its stock footprint / 3D-model roots this way; later
+# versions still write them back unchanged (tests/fixtures/kicad/fp_attrs).
+_KICAD_LEGACY_PATH_VARS = frozenset({"KISYSMOD", "KISYS3DMOD"})
+
+
+def is_kicad_builtin_ref(text: str) -> bool:
+    """True when a lib-table uri / 3D-model path goes through one of KiCad's
+    built-in ``${KICAD<N>_*_DIR}`` variables (or their KiCad <= 5 names
+    ``${KISYSMOD}`` / ``${KISYS3DMOD}``) — i.e. it names a file of KiCad's
+    OWN stock libraries. What such a reference resolves to depends on the
+    KiCad installed on the machine, not on the project.
+    """
+    return any(_KICAD_PATH_VAR_RE.match(var) or var in _KICAD_LEGACY_PATH_VARS
+               for var in re.findall(r"\$\{([^}]+)\}", text or ""))
+
+
 def expand_var(var: str) -> str | None:
     """Value of a lib-table ``${VAR}``: environment first, KiCad built-ins next.
 
@@ -196,7 +219,15 @@ class Workspace:
         return self._locate(nick, self.fp_table, self.global_fp_table)
 
     def resolve_uri(self, uri: str) -> tuple[Path, list[str]]:
-        """Expand ``${KIPRJMOD}``/env vars in a table URI; returns (path, unresolved)."""
+        """Expand ``${KIPRJMOD}``/env vars in a table URI; returns (path, unresolved).
+
+        Only a BARE relative uri is taken against the project directory. A
+        uri anchored by a variable is complete once expanded: when the
+        project directory is itself relative (``akcli library audit hw``,
+        ``release preflight --sch hw/board.kicad_sch``) ``${KIPRJMOD}/x``
+        expands to ``hw/x``, and joining that to ``hw`` again pointed every
+        project library at ``hw/hw/x``.
+        """
         unresolved: list[str] = []
 
         def _sub(m: re.Match) -> str:
@@ -211,7 +242,7 @@ class Workspace:
 
         expanded = re.sub(r"\$\{([^}]+)\}", _sub, uri)
         p = Path(expanded)
-        if not p.is_absolute():
+        if not p.is_absolute() and not uri.lstrip().startswith("${"):
             p = self.project_dir / p
         return p, unresolved
 
@@ -384,6 +415,60 @@ def discover(project: os.PathLike | str, *,
     return ws
 
 
+def nearest_project_table(start: os.PathLike | str,
+                          kind: str = "fp") -> tuple[Path | None, Path | None]:
+    """``(project_dir, table_path)`` for the KiCad project nearest ``start``.
+
+    Walks up from ``start`` (which need not exist yet) to the first directory
+    holding a ``{sym,fp}-lib-table`` or a ``*.kicad_pro``. KiCad reads the
+    project table from the project directory only, so the walk stops at the
+    first project it meets: a table further up belongs to some OTHER project.
+    ``(dir, None)`` is a project with no table of that kind; ``(None, None)``
+    means no project was found at all.
+    """
+    fname = "sym-lib-table" if kind == "sym" else "fp-lib-table"
+    here = Path(start).resolve()
+    for d in [here, *here.parents]:
+        try:
+            if (d / fname).is_file():
+                return d, d / fname
+            if any(d.glob("*.kicad_pro")):
+                return d, None
+        except OSError:                          # unreadable ancestor: keep walking
+            continue
+    return None, None
+
+
+def nicknames_for_dir(table: LibTable, directory: os.PathLike | str) -> list[str]:
+    """Nicknames of the ``table`` entries whose uri resolves to ``directory``.
+
+    EXACT directory match (both sides ``resolve()``-d, so ``${KIPRJMOD}``,
+    ``..`` and symlinked prefixes compare equal) — never an ancestor: a
+    ``.pretty`` library is flat (KiCad and
+    :func:`.readers.footprint_lib.read_pretty` list one directory, not its
+    children), so an entry registering a PARENT of ``directory`` does not
+    serve what is in it. Non-KiCad plugin entries and unresolvable ``${VAR}``
+    uris are skipped. Table order is preserved.
+    """
+    if table.path is None:
+        return []
+    ws = Workspace(project_dir=table.path.parent)
+    want = Path(directory).resolve()
+    out: list[str] = []
+    for e in table.entries:
+        if (e.type or "KiCad").lower() != "kicad":
+            continue
+        path, unresolved = ws.resolve_uri(e.uri)
+        if unresolved:
+            continue
+        try:
+            if path.resolve() == want and e.name not in out:
+                out.append(e.name)
+        except OSError:                          # pragma: no cover - defensive
+            continue
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # audit
 # --------------------------------------------------------------------------- #
@@ -404,8 +489,17 @@ def _load_sym_lib(path: Path) -> set[str] | None:
 
 
 def _resolve_model(mpath: str, mod_dir: Path, project_dir: Path) -> tuple[Path | None, bool]:
-    """Resolve a footprint 3D ``model`` path; returns (path-or-None, portable)."""
+    """Resolve a footprint 3D ``model`` path; returns (path-or-None, portable).
+
+    Only a BARE relative path is taken against ``mod_dir``. A path anchored
+    by a variable is already complete once expanded — joining it to
+    ``mod_dir`` again is wrong whenever the expansion is itself relative,
+    which is exactly ``${KIPRJMOD}`` under ``akcli library audit .`` (the
+    project directory is then ``.``, and ``./3d/x.step`` used to be looked up
+    inside the ``.pretty``).
+    """
     portable = not Path(mpath).is_absolute()
+    anchored = mpath.lstrip().startswith("${")
     expanded = mpath
     for var, val in (("${KIPRJMOD}", str(project_dir)),):
         expanded = expanded.replace(var, val)
@@ -417,15 +511,155 @@ def _resolve_model(mpath: str, mod_dir: Path, project_dir: Path) -> tuple[Path |
     if "${" in expanded:
         return None, portable
     p = Path(expanded)
-    if not p.is_absolute():
+    if not p.is_absolute() and not anchored:
         p = mod_dir / p
     return p, portable
 
 
+def resolve_model(mpath: str, base_dir: Path,
+                  project_dir: Path) -> tuple[Path | None, bool]:
+    """Resolve a footprint 3D ``model`` path the way :func:`audit` does.
+
+    ``${KIPRJMOD}`` -> ``project_dir``, other ``${VAR}`` through
+    :func:`expand_var`, a relative path against ``base_dir``. Returns
+    ``(path, portable)``; ``path`` is ``None`` for an unresolvable variable.
+    """
+    return _resolve_model(mpath, base_dir, project_dir)
+
+
+# --------------------------------------------------------------------------- #
+# library loading (shared by audit, the library baseline and verify --library)
+# --------------------------------------------------------------------------- #
+@dataclass
+class ModelRef:
+    """One 3D ``(model ...)`` reference of a library footprint."""
+
+    ref: str                  # the path exactly as the footprint writes it
+    path: Path | None         # resolved file; None = an unresolvable ${VAR}
+    portable: bool            # False when written as an absolute path
+
+
+@dataclass
+class LoadedFootprint:
+    """One ``.kicad_mod`` of a registered ``.pretty`` library."""
+
+    file: Path
+    definition: model.FootprintDef
+    models: list[ModelRef] = field(default_factory=list)
+
+
+@dataclass
+class LoadedLibrary:
+    """One PROJECT lib-table entry, resolved and (when it exists) loaded.
+
+    ``kind`` is the table slot (``"sym"`` | ``"fp"``). ``unresolved`` lists the
+    ``${VAR}`` names the uri could not expand; ``exists`` is whether the
+    expanded ``path`` is on disk — content is loaded only when the uri
+    resolved AND exists. ``symbols`` is the symbol-name set of a ``.kicad_sym``
+    (``None`` when not loaded or unreadable); ``footprints`` holds the
+    readable ``.kicad_mod`` files in file-name order and ``unreadable`` the
+    ones that did not parse.
+    """
+
+    kind: str
+    table: LibTable
+    entry: LibEntry
+    path: Path
+    unresolved: list[str] = field(default_factory=list)
+    exists: bool = False
+    symbols: set[str] | None = None
+    footprints: list[LoadedFootprint] = field(default_factory=list)
+    unreadable: list[Path] = field(default_factory=list)
+
+    @property
+    def loaded(self) -> bool:
+        return not self.unresolved and self.exists
+
+    def footprint_defs(self) -> dict[str, model.FootprintDef] | None:
+        """``{footprint name: definition}``, or ``None`` when not loaded."""
+        if not self.loaded:
+            return None
+        return {f.definition.name: f.definition for f in self.footprints}
+
+
+def load_libraries(ws: Workspace,
+                   kinds: tuple[str, ...] = ("sym", "fp")) -> list[LoadedLibrary]:
+    """Resolve and load every PROJECT lib-table entry, in table order.
+
+    The symbol table's entries come first, then the footprint table's (each
+    only when ``kinds`` asks for it). Nothing is reported here: a uri that
+    does not expand, a path that does not exist and an unreadable file are
+    recorded on the :class:`LoadedLibrary` for the caller to judge — ``audit``
+    turns them into findings, the library baseline into explicit "not
+    resolved" records. The global tables are never loaded (their libraries
+    are KiCad's own, and machine-specific).
+    """
+    out: list[LoadedLibrary] = []
+    for table, kind in ((ws.sym_table, "sym"), (ws.fp_table, "fp")):
+        if table is None or kind not in kinds:
+            continue
+        for e in table.entries:
+            path, unresolved = ws.resolve_uri(e.uri)
+            lib = LoadedLibrary(kind=kind, table=table, entry=e, path=path,
+                                unresolved=unresolved)
+            out.append(lib)
+            if unresolved:
+                continue
+            lib.exists = path.exists()
+            if not lib.exists:
+                continue
+            if kind == "sym":
+                lib.symbols = _load_sym_lib(path)
+                continue
+            # Same walk as footprint_lib.read_pretty (file-name order, one
+            # unreadable file never hides the rest), keeping WHICH file each
+            # definition came from.
+            for mod in sorted(path.glob("*.kicad_mod")):
+                try:
+                    one = footprint_lib.read_kicad_mod(mod)
+                except Exception:
+                    lib.unreadable.append(mod)
+                    continue
+                for fdef in one.footprints:
+                    refs = []
+                    for mpath in fdef.models:
+                        resolved, portable = _resolve_model(
+                            mpath, path, ws.project_dir)
+                        refs.append(ModelRef(ref=mpath, path=resolved,
+                                             portable=portable))
+                    lib.footprints.append(LoadedFootprint(
+                        file=mod, definition=fdef, models=refs))
+    return out
+
+
 def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
-    """Cross-check schematics <-> lib tables <-> libraries <-> 3D models."""
-    findings: list[Finding] = []
-    out = findings.append
+    """Cross-check schematics <-> lib tables <-> libraries <-> 3D models.
+
+    ``refs`` carry what a config ``[[waiver]]`` can scope on
+    (:func:`.report.apply_waivers` matches ``refs``, never ``anchors``): the
+    component designator for a per-component finding, the table nickname
+    (``nick``, or ``nick:footprint`` for one footprint) for a library one.
+    """
+    return [f for f, _origin in audit_with_origins(ws, sch_paths)]
+
+
+def audit_with_origins(
+    ws: Workspace, sch_paths: list[Path] | None = None,
+) -> list[tuple[Finding, Path | None]]:
+    """:func:`audit`, paired with the file each finding is ABOUT.
+
+    The origin is the schematic for a per-component finding, the library
+    (``.kicad_sym`` file / ``.pretty`` directory) for one about its contents,
+    the lib-table for a bad table entry, and ``None`` when there is no file to
+    point at. ``library repair`` uses it to tell "the repair left an error in
+    a file it rewrote" from "the project already had an unrelated error" —
+    kept BESIDE the finding rather than on it, so the exported finding shape
+    does not change.
+    """
+    pairs: list[tuple[Finding, Path | None]] = []
+
+    def out(finding: Finding, origin: Path | None = None) -> None:
+        pairs.append((finding, origin))
 
     if ws.sym_table is None:
         out(Finding("LIB_TABLE_MISSING", Severity.NOTE,
@@ -440,61 +674,58 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
     sym_symbols: dict[str, set[str] | None] = {}
     fp_defs: dict[str, dict[str, model.FootprintDef] | None] = {}
 
-    for table, store in ((ws.sym_table, "sym"), (ws.fp_table, "fp")):
-        if table is None:
+    for lib in load_libraries(ws):
+        table, e, path = lib.table, lib.entry, lib.path
+        if lib.unresolved:
+            out(Finding("LIB_URI_UNRESOLVED", Severity.ERROR,
+                        f"{table.kind}-lib-table '{e.name}': cannot expand "
+                        f"{', '.join('${' + v + '}' for v in lib.unresolved)} "
+                        f"in uri {e.uri!r}", refs=[e.name]), table.path)
+            (sym_symbols if lib.kind == "sym" else fp_defs)[e.name] = None
             continue
-        for e in table.entries:
-            path, unresolved = ws.resolve_uri(e.uri)
-            if unresolved:
-                out(Finding("LIB_URI_UNRESOLVED", Severity.ERROR,
-                            f"{table.kind}-lib-table '{e.name}': cannot expand "
-                            f"{', '.join('${' + v + '}' for v in unresolved)} "
-                            f"in uri {e.uri!r}"))
-                (sym_symbols if store == "sym" else fp_defs)[e.name] = None
-                continue
-            if not path.exists():
-                out(Finding("LIB_PATH_MISSING", Severity.ERROR,
-                            f"{table.kind}-lib-table '{e.name}': uri resolves to "
-                            f"{path}, which does not exist"))
-                (sym_symbols if store == "sym" else fp_defs)[e.name] = None
-                continue
-            if store == "sym":
-                syms = _load_sym_lib(path)
-                if syms is None:
-                    out(Finding("LIB_UNREADABLE", Severity.ERROR,
-                                f"sym-lib-table '{e.name}': {path} is not a "
-                                "readable .kicad_sym"))
-                sym_symbols[e.name] = syms
-            else:
-                lib = footprint_lib.read_pretty(path)
-                defs = {f.name: f for f in lib.footprints}
-                fp_defs[e.name] = defs
-                for f in lib.footprints:
-                    for w in f.warnings:
-                        if w.startswith("LEGACY_FORMAT"):
-                            out(Finding(
-                                "FOOTPRINT_LEGACY_FORMAT", Severity.WARNING,
-                                f"{e.name}:{f.name}: {w}",
-                                anchors=[anchor("component", f.name)]))
-                    for mpath in f.models:
-                        resolved, portable = _resolve_model(
-                            mpath, path, ws.project_dir)
-                        if resolved is None:
-                            out(Finding(
-                                "MODEL_UNRESOLVED", Severity.WARNING,
-                                f"{e.name}:{f.name}: 3D model {mpath!r} uses an "
-                                "unresolvable path variable"))
-                        elif not resolved.exists():
-                            out(Finding(
-                                "MODEL_MISSING", Severity.WARNING,
-                                f"{e.name}:{f.name}: 3D model {mpath!r} -> "
-                                f"{resolved} does not exist"))
-                        elif not portable:
-                            out(Finding(
-                                "MODEL_NOT_PORTABLE", Severity.NOTE,
-                                f"{e.name}:{f.name}: 3D model path is absolute — "
-                                "usable on this machine, breaks on other "
-                                "checkouts/machines"))
+        if not lib.exists:
+            out(Finding("LIB_PATH_MISSING", Severity.ERROR,
+                        f"{table.kind}-lib-table '{e.name}': uri resolves to "
+                        f"{path}, which does not exist", refs=[e.name]),
+                table.path)
+            (sym_symbols if lib.kind == "sym" else fp_defs)[e.name] = None
+            continue
+        if lib.kind == "sym":
+            if lib.symbols is None:
+                out(Finding("LIB_UNREADABLE", Severity.ERROR,
+                            f"sym-lib-table '{e.name}': {path} is not a "
+                            "readable .kicad_sym", refs=[e.name]), path)
+            sym_symbols[e.name] = lib.symbols
+            continue
+        fp_defs[e.name] = lib.footprint_defs()
+        for loaded in lib.footprints:
+            f = loaded.definition
+            fp_ref = f"{e.name}:{f.name}"
+            for w in f.warnings:
+                if w.startswith("LEGACY_FORMAT"):
+                    out(Finding(
+                        "FOOTPRINT_LEGACY_FORMAT", Severity.WARNING,
+                        f"{e.name}:{f.name}: {w}", refs=[fp_ref],
+                        anchors=[anchor("component", f.name)]), path)
+            for m in loaded.models:
+                if m.path is None:
+                    out(Finding(
+                        "MODEL_UNRESOLVED", Severity.WARNING,
+                        f"{e.name}:{f.name}: 3D model {m.ref!r} uses an "
+                        "unresolvable path variable", refs=[fp_ref]),
+                        path)
+                elif not m.path.exists():
+                    out(Finding(
+                        "MODEL_MISSING", Severity.WARNING,
+                        f"{e.name}:{f.name}: 3D model {m.ref!r} -> "
+                        f"{m.path} does not exist", refs=[fp_ref]),
+                        path)
+                elif not m.portable:
+                    out(Finding(
+                        "MODEL_NOT_PORTABLE", Severity.NOTE,
+                        f"{e.name}:{f.name}: 3D model path is absolute — "
+                        "usable on this machine, breaks on other "
+                        "checkouts/machines", refs=[fp_ref]), path)
 
     # --- schematics: symbol + footprint references ------------------------- #
     for sch_path in (sch_paths if sch_paths is not None else ws.schematics):
@@ -503,7 +734,8 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
             sch = kreader.read_sch(str(sch_path))
         except Exception as exc:
             out(Finding("SCH_UNREADABLE", Severity.ERROR,
-                        f"{sch_path.name}: unreadable schematic ({exc})"))
+                        f"{sch_path.name}: unreadable schematic ({exc})"),
+                sch_path)
             continue
         for comp in sch.components:
             nick, _sym = _split_lib_id(comp.library_ref)
@@ -516,7 +748,9 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                         f"nickname '{nick}' is in neither the project nor the "
                         "global sym-lib-table (embedded copy still renders; "
                         "re-linking will fail)",
-                        anchors=[anchor("component", comp.designator)]))
+                        refs=[comp.designator],
+                        anchors=[anchor("component", comp.designator)]),
+                        sch_path)
                 elif where is None:
                     out(Finding(
                         "SYMBOL_LIB_UNREGISTERED", Severity.NOTE,
@@ -524,7 +758,9 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                         f"nickname '{nick}' is not in the project sym-lib-table; "
                         "the global table could not be read to confirm it is a "
                         "standard KiCad library",
-                        anchors=[anchor("component", comp.designator)]))
+                        refs=[comp.designator],
+                        anchors=[anchor("component", comp.designator)]),
+                        sch_path)
                 elif where == "project":
                     known = sym_symbols.get(nick)
                     if known is not None and _sym and _sym not in known:
@@ -533,7 +769,9 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                             f"{sch_path.name} {comp.designator}: symbol "
                             f"'{comp.library_ref}' not found in the registered "
                             "library",
-                            anchors=[anchor("component", comp.designator)]))
+                            refs=[comp.designator],
+                            anchors=[anchor("component", comp.designator)]),
+                            sch_path)
                 # where == "global": resolved via a standard library (not loaded)
             fp_nick, fp_name = _split_lib_id(comp.footprint)
             if not comp.footprint:
@@ -543,7 +781,8 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                     "FOOTPRINT_FIELD_MALFORMED", Severity.WARNING,
                     f"{sch_path.name} {comp.designator}: Footprint field "
                     f"{comp.footprint!r} has no library nickname",
-                    anchors=[anchor("component", comp.designator)]))
+                    refs=[comp.designator],
+                    anchors=[anchor("component", comp.designator)]), sch_path)
                 continue
             fp_where = ws.locate_fp_nick(fp_nick)
             if fp_where is None and ws.has_global_fp:
@@ -553,7 +792,8 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                     f"'{fp_nick}' (from {comp.footprint!r}) is in neither the "
                     "project nor the global fp-lib-table — KiCad will not find "
                     "this package",
-                    anchors=[anchor("component", comp.designator)]))
+                    refs=[comp.designator],
+                    anchors=[anchor("component", comp.designator)]), sch_path)
                 continue
             if fp_where is None:
                 out(Finding(
@@ -562,7 +802,8 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                     f"'{fp_nick}' (from {comp.footprint!r}) is not in the "
                     "project fp-lib-table; the global table could not be read "
                     "to confirm it is a standard KiCad library",
-                    anchors=[anchor("component", comp.designator)]))
+                    refs=[comp.designator],
+                    anchors=[anchor("component", comp.designator)]), sch_path)
                 continue
             if fp_where == "global":
                 continue        # resolved via a standard library (not loaded)
@@ -572,8 +813,9 @@ def audit(ws: Workspace, sch_paths: list[Path] | None = None) -> list[Finding]:
                     "FOOTPRINT_MISSING", Severity.ERROR,
                     f"{sch_path.name} {comp.designator}: footprint "
                     f"'{comp.footprint}' not found in the registered library",
-                    anchors=[anchor("component", comp.designator)]))
-    return findings
+                    refs=[comp.designator],
+                    anchors=[anchor("component", comp.designator)]), sch_path)
+    return pairs
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,7 @@
+{
+ "components": {
+  "C1": {"value": "100n"}
+ },
+ "no_connects": ["U1.7"],
+ "power_ports": ["VCC", "GND"]
+}

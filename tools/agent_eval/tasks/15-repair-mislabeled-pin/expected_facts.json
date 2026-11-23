@@ -1,0 +1,10 @@
+{
+ "forbid_findings": ["DANGLING_ENDPOINT", "NET_LABEL_UNATTACHED"],
+ "net_diff": {
+  "equivalent": false,
+  "risk": true,
+  "lines": [
+   "! MOVE J1.3: SDA -> SCL"
+  ]
+ }
+}

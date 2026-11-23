@@ -34,6 +34,11 @@ intent    = "intent.json"
 pcb       = "hardware/altium/main.kicad_pcb"
 # `akcli gate`'s bom-lock-gate lockfile (`jlc bom --lock`), when --lock is not given.
 bom_lock  = "bom.lock.json"
+# The library baseline (`akcli library audit --write-baseline` / `--baseline`,
+# and `release preflight`'s library-baseline gate) when no FILE is given. A
+# committed deliverable; without this key it is akcli-library.baseline.json
+# beside the .kicad_pro.
+library_baseline = "akcli-library.baseline.json"
 # Where `jlc add`, `library import-altium` and `library new-symbol` place
 # converted libraries when --out is not given (a committed asset dir). Without
 # this key, only `jlc add` defaults to ./akcli-parts; the `library` commands
