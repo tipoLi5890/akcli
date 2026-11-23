@@ -283,13 +283,28 @@ def test_drc_runs_on_a_staged_copy_with_only_read_only_flags(tmp_path,
     assert _tree(board.parent) == before
 
 
-def test_drc_on_kicad_older_than_8_reports_why(tmp_path, monkeypatch):
+def test_drc_on_kicad_older_than_10_reports_why(tmp_path, monkeypatch):
     run = _FakeRun()
-    _fake_kicad(monkeypatch, run, version=(7, 0, 11))
+    _fake_kicad(monkeypatch, run, version=(9, 0, 8))
     out = kicad_cli.drc(str(_drc_project(tmp_path)))
     assert out["report"] is None
-    assert "7.0.11" in out["error"] and "pcb drc" in out["error"]
+    assert "9.0.8" in out["error"] and "KiCad 10" in out["error"]
     assert run.argv is None                    # never spawned
+
+
+@pytest.mark.parametrize("ver, refused", [
+    ((9, 0, 8), True), ((10, 0, 0), False), ((11, 0), False), (None, False)])
+def test_unsupported_gates_on_the_major_version(monkeypatch, ver, refused):
+    monkeypatch.setattr(kicad_cli, "version", lambda: ver)
+    assert bool(kicad_cli.unsupported()) is refused
+
+
+def test_erc_and_netlist_refuse_kicad_9_without_spawning(monkeypatch):
+    run = _FakeRun()
+    _fake_kicad(monkeypatch, run, version=(9, 0, 8))
+    assert kicad_cli.erc(str(V8)) is None
+    assert kicad_cli.netlist(str(V8)) is None
+    assert run.argv is None
 
 
 def test_drc_nonzero_exit_is_an_error_even_if_a_report_exists(tmp_path,

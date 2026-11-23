@@ -167,6 +167,8 @@ def _advisory_erc(req: DrawRequest) -> None:
         from ..drivers import kicad_cli
         if req.no_erc:
             req.log(1, "advisory kicad-cli ERC skipped (--no-erc)")
+        elif reason := kicad_cli.unsupported():
+            req.warn(f"note: advisory kicad-cli ERC skipped: {reason}")
         elif kicad_cli.available():
             rep = kicad_cli.erc(str(req.target))
             if rep is not None:

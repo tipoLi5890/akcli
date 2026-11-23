@@ -354,6 +354,8 @@ class _Watcher(threading.Thread):
         self.dash = dash
         self.target = dash.target
         self.kicad_cli = _find_kicad_cli()
+        from ..drivers import kicad_cli as _driver
+        self.kicad_unsupported = _driver.unsupported()
         self.auto_revert = os.environ.get("AUTO_REVERT") == "1"
         m = self._stat_mtime()
         self._last = m or 0.0
@@ -374,6 +376,11 @@ class _Watcher(threading.Thread):
         --no-background-color matters: the theme background is a page-sized
         rect, which would defeat the dashboard's getBBox() content crop.
         """
+        if self.kicad_unsupported:
+            with self.dash.lock:
+                self.dash.state["watcher_error"] = self.kicad_unsupported
+            self.dash.publish()
+            return [], []
         with tempfile.TemporaryDirectory() as td:
             try:
                 r = subprocess.run(
@@ -419,6 +426,8 @@ class _Watcher(threading.Thread):
 
     def _erc_detail(self) -> tuple[int | None, int | None, list[dict]]:
         """(errors, warnings, violations) from KiCad's JSON ERC report."""
+        if self.kicad_unsupported:
+            return None, None, []
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "erc.json"
             try:

@@ -31,6 +31,13 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+### Changed
+
+- **KiCad 10 or newer is now required to run `kicad-cli`.** With an older
+  install, ERC, netlist export, DRC and `view live` do not run, `doctor` marks
+  `kicad-cli` unsupported, and `release preflight --drc` fails. Reading older
+  `.kicad_sch` / `.kicad_pcb` files is unchanged.
+
 ## [0.23.0] - 2026-11-23
 
 A design-integrity hardening release: the verification side grows — KiCad DRC,

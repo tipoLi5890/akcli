@@ -1012,7 +1012,7 @@ where = ["src"]
 - **Fully buildable + validated on macOS/Linux/CI:** all Altium **read/analyze**, net inference, all checks,
   report, op-list + validator, KiCad **read + write/draw** (primary connectivity gate is pure Python), CLI,
   plugin, docs, safety/fuzz.
-- **Cross-platform but needs `kicad-cli` (CI ubuntu + KiCad 10; KiCad 8+ works locally):** the
+- **Cross-platform but needs `kicad-cli` (KiCad 10+; CI ubuntu + KiCad 10):** the
   *optional secondary* ERC verify, and the `.kicad_pro`/`.kicad_pcb` ground-truth e2e.
 - **Not supported anywhere (by design):** writing Altium files or driving a running Altium — Altium is
   import-only; every write path targets `.kicad_sch` (`akcli project new`/`project init`'s scaffold

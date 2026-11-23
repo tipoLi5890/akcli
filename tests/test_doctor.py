@@ -36,6 +36,14 @@ def test_doctor_require_gates_exit(monkeypatch, capsys):
     assert main(["doctor", "--require", "python,kicad-cli"]) == 0
 
 
+def test_doctor_rejects_kicad_older_than_10(monkeypatch, capsys):
+    from akcli.drivers import kicad_cli
+    monkeypatch.setattr(doc, "_find_kicad_cli", lambda: "/usr/bin/kicad-cli")
+    monkeypatch.setattr(kicad_cli, "version", lambda: (9, 0, 8))
+    assert main(["doctor", "--require", "kicad-cli"]) == 1
+    assert "missing: kicad-cli" in capsys.readouterr().out
+
+
 def test_doctor_require_unknown_is_usage_error(capsys):
     assert main(["doctor", "--require", "bogus"]) == 2
     assert "--require accepts" in capsys.readouterr().err

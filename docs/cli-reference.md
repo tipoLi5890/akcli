@@ -661,10 +661,8 @@ which is also the order files are reported and committed in; every path —
 The blank `.kicad_pcb` is a **container, not a layout** — zero footprints,
 zero tracks, no board outline; akcli writes no PCB content (a SPEC
 non-goal), it only makes sure pcbnew finds a board instead of a prompt. It
-is written in KiCad 10's board-file format (`version 20241229`): **KiCad 8
-cannot open it** (repair-prompts or refuses), while the schematic stays
-KiCad 8's own `.kicad_sch` format and opens fine everywhere. Pass `--no-pcb`
-to skip the board entirely on a KiCad 8 workflow.
+is written in KiCad 10's board-file format (`version 20241229`). Pass
+`--no-pcb` to skip the board entirely.
 
 ### `akcli project init [DIR] [--name NAME] [--root FILE] [--paper SIZE] [--title T] [--no-pcb] [--no-lib-tables] [--no-gitignore] [--sheets A,B] [--dry-run]`
 Complete a directory that already has *some* KiCad files, adding only what
@@ -1141,7 +1139,7 @@ several → explicit usage error, exit 2); `view calc` serves `/calc` alone.
   per-line failure-tolerant and absent on the offline BOM.
   Steps live in a per-run temp dir; `--state-dir DIR` persists the
   timeline across runs and `--max-steps N` bounds it (default 500 — oldest
-  SVGs are deleted; `0` = unlimited). Needs `kicad-cli` (KiCad 8+) on
+  SVGs are deleted; `0` = unlimited). Needs `kicad-cli` (KiCad 10+) on
   `PATH`, in the macOS app bundle, or via `KICAD_CLI=`. `AUTO_REVERT=1` asks
   an open KiCad editor to File→Revert after each step (macOS only).
 
@@ -1438,8 +1436,7 @@ See [docs/design-integrity.md](design-integrity.md).
   Mechanical15=F.CrtYd` assigns it and silences the warning. The flag is repeatable or takes
   comma-separated pairs, works for any row of the table (including the skipped ones), matches
   Altium names case-insensitively, and exits `2` on a layer name it does not know; a pair whose
-  Altium layer holds no track or arc in the library is reported as a warning. `User.10` and
-  above exist from KiCad 9; map those layers elsewhere for KiCad 8.
+  Altium layer holds no track or arc in the library is reported as a warning.
   Transformations are declared, not silent (filesystem-safe renames; an optional pad-bbox
   `--courtyard`, not drawn when a mapped layer already put graphics on a courtyard layer); on
   `--apply` it writes the `.kicad_mod` files plus a `provenance.json` (source SHA-256, converter
@@ -1663,7 +1660,7 @@ releasing.
   type, then the designators, `REF.PAD` pins and nets involved — resolved from the report's item
   uuids against the board file, never parsed from KiCad's descriptions (those are localized).
 - Like `--sim`, a **requested** gate that cannot run FAILS rather than skips: no kicad-cli →
-  `KICAD_CLI_MISSING`; no usable report (board does not load, KiCad older than 8, unreadable JSON) →
+  `KICAD_CLI_MISSING`; no usable report (board does not load, KiCad older than 10, unreadable JSON) →
   `KICAD_DRC_FAILED`; timeout → `KICAD_CLI_TIMEOUT`. `--drc` without `--pcb` is a usage error (exit
   `2`).
 - Limit: a project `fp-lib-table` entry that reaches a library through a relative path, or through a

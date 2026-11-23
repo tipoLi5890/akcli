@@ -61,6 +61,10 @@ def _check_kicad_cli() -> tuple[bool, str, str]:
         return (False, "not found",
                 "install KiCad (kicad.org) or set KICAD_CLI=/path/to/kicad-cli "
                 "— optional: enables advisory ERC, view-live SVG, parity tests")
+    from ..drivers import kicad_cli as _driver
+    reason = _driver.unsupported()
+    if reason:
+        return False, f"{path} (unsupported)", f"{reason}; upgrade from kicad.org"
     return True, path, ""
 
 

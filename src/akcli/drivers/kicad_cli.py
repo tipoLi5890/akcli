@@ -49,10 +49,13 @@ from ..errors import AkcliError
 from ..kicad_escape import quote_atom
 from ..safety import run_subprocess
 
-__all__ = ["available", "find", "version", "version_text", "erc", "drc",
-           "netlist", "EXE"]
+__all__ = ["available", "find", "version", "version_text", "unsupported",
+           "erc", "drc", "netlist", "EXE", "MIN_MAJOR"]
 
 EXE = "kicad-cli"
+# The oldest KiCad akcli will run. Discovery still reports an older install
+# (so `doctor` can name it); every entry point that would execute it refuses.
+MIN_MAJOR = 10
 
 # Known install locations probed when the tool is neither in ``KICAD_CLI`` nor
 # on PATH — the single discovery ladder shared by the advisory ERC here, the
@@ -124,10 +127,11 @@ def version() -> tuple[int, ...] | None:
     ``None`` when the tool is absent or its version output cannot be parsed; never
     raises for an absent tool.
     """
-    if not available():
+    exe = find()
+    if exe is None:
         return None
     try:
-        proc = run_subprocess([find() or EXE, "version"], timeout=_TIMEOUT)
+        proc = run_subprocess([exe, "version"], timeout=_TIMEOUT)
     except Exception:  # pragma: no cover - defensive: tool present but unrunnable
         return None
     text = (proc.stdout or b"").decode("utf-8", "replace").strip()
@@ -147,25 +151,28 @@ def _parse_version(text: str) -> tuple[int, ...] | None:
         return None
 
 
-def _major() -> int | None:
-    v = version()
-    return v[0] if v else None
+def unsupported() -> str | None:
+    """Why the discovered ``kicad-cli`` may not be run, or ``None`` if it may.
+
+    Only a version that parses and is below :data:`MIN_MAJOR` is refused; an
+    absent tool or an unparseable version string is not a version verdict.
+    """
+    ver = version()
+    if ver is None or ver[0] >= MIN_MAJOR:
+        return None
+    return (f"kicad-cli {'.'.join(map(str, ver))} is not supported: "
+            f"akcli needs KiCad {MIN_MAJOR} or newer")
 
 
 def erc(path: str) -> dict | None:
     """Run KiCad's ERC on a ``.kicad_sch`` and return a parsed report dict.
 
-    Uses ``sch erc --format json`` on KiCad >= 8 (parsing the JSON report file);
-    on older KiCad (7) — which has no JSON ERC — it falls back to
-    :func:`netlist` as a best-effort "does this parse + net out" check. Returns
-    ``None`` when ``kicad-cli`` is absent or the report cannot be produced/parsed.
+    Uses ``sch erc --format json``, parsing the JSON report file. Returns
+    ``None`` when ``kicad-cli`` is absent or older than :data:`MIN_MAJOR`.
     Never passes ``--exit-code-violations``.
     """
-    if not available():
+    if not available() or unsupported():
         return None
-    major = _major()
-    if major is not None and major < 8:
-        return netlist(path)
 
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "erc.json"
@@ -279,7 +286,7 @@ def drc(path: str) -> dict | None:
     (``$schema: https://schemas.kicad.org/drc.v1.json`` — ``violations`` and
     ``unconnected_items`` lists of ``{type, severity, description, items:
     [{uuid, pos:{x,y}, description}]}``) or ``None`` when no usable report was
-    produced; ``error`` then says why (KiCad < 8 has no ``pcb drc``; the tool
+    produced; ``error`` then says why (KiCad older than 10; the tool
     timed out; the board would not load; the JSON was unreadable). It never
     raises for a tool failure.
 
@@ -302,10 +309,9 @@ def drc(path: str) -> dict | None:
         "error": None,
         "error_code": None,
     }
-    ver = version()
-    if ver is not None and ver[0] < 8:
-        result["error"] = (f"kicad-cli {'.'.join(map(str, ver))} has no "
-                           "`pcb drc` (KiCad >= 8 is required)")
+    reason = unsupported()
+    if reason:
+        result["error"] = reason
         return result
 
     src = Path(path).absolute()
@@ -353,9 +359,10 @@ def netlist(path: str) -> dict | None:
     """Export a KiCad netlist for ``path`` (best-effort second opinion).
 
     Returns a dict describing the exported netlist (the netlist text is returned
-    inline) or ``None`` when ``kicad-cli`` is absent / the export failed.
+    inline) or ``None`` when ``kicad-cli`` is absent, older than
+    :data:`MIN_MAJOR`, or the export failed.
     """
-    if not available():
+    if not available() or unsupported():
         return None
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "netlist.net"

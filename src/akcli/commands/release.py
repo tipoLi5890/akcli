@@ -295,7 +295,7 @@ def _drc_gate(pcb_path: Path, cfg=None) -> dict:
     gate that cannot run must FAIL, never skip — a PASS manifest may not ship
     just because the release machine had no KiCad (``KICAD_CLI_MISSING``) or
     KiCad could not produce a report (``KICAD_DRC_FAILED``: board would not
-    load, KiCad older than 8, unreadable JSON; a timeout keeps its own
+    load, KiCad older than 10, unreadable JSON; a timeout keeps its own
     ``KICAD_CLI_TIMEOUT``).
 
     Each violation becomes a ``KICAD_DRC_VIOLATION`` and each unrouted

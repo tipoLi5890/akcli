@@ -169,8 +169,8 @@ twine check dist/*
 
 ## Optional external tools
 
-- **`kicad-cli` (KiCad 8+; CI pins 10.x):** enables an *optional secondary* ERC/netlist cross-check. `akcli` detects
-  it via `PATH`; if it is absent, the pure-Python connectivity verifier is used and nothing breaks.
+- **`kicad-cli` (KiCad 10+):** enables an *optional secondary* ERC/netlist cross-check. `akcli` detects
+  it via `PATH`; if it is absent or older than 10, the pure-Python connectivity verifier is used and the KiCad-backed checks do not run.
 - **Altium Designer: never required.** Altium `.SchDoc`/`.SchLib`/`.PcbDoc`/`.PcbLib` files are a
   read-only import surface parsed offline; there is no live write/draw driver.
 

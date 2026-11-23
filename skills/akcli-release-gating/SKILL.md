@@ -57,7 +57,7 @@ failing).
   leading each message (`clearance: …`). A requested DRC gate that cannot
   run **FAILS, never skips**: `KICAD_CLI_MISSING` (no kicad-cli — install
   KiCad or set `KICAD_CLI`), `KICAD_DRC_FAILED` (the board did not load,
-  KiCad is older than 8, or the report was unreadable). `--drc` without
+  KiCad is older than 10, or the report was unreadable). `--drc` without
   `--pcb` is a usage error. What to know when you read its result:
   - **Zone fills are evaluated as saved, not refilled** (the gate's summary
     line says so every run). A board whose zones were not refilled after the

@@ -71,9 +71,9 @@ The distribution is `akcli-kicad`; the import package and CLI command stay
 *externally-managed-environment* (PEP 668) — prefer pipx or a venv; never
 suggest `--break-system-packages` unless the user owns that Python.
 
-**kicad-cli missing** — install KiCad ≥ 8 from kicad.org (macOS: the app bundle
+**kicad-cli missing** — install KiCad ≥ 10 from kicad.org (macOS: the app bundle
 carries it at `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`; Linux:
-distro `kicad` package; Windows: `C:\Program Files\KiCad\<ver>\bin\`). If it is
+the `ppa:kicad/kicad-10.0-releases` package, since distro builds can be older; Windows: `C:\Program Files\KiCad\<ver>\bin\`). If it is
 installed somewhere unusual, point the env var instead of editing PATH:
 ```bash
 export KICAD_CLI=/path/to/kicad-cli
