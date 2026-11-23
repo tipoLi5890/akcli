@@ -164,7 +164,7 @@ Python 之外的東西——一律在執行期偵測，核心流程永遠不需�
 
 ## 路線圖
 
-**目前已提供（v0.23.0）：** 發版把關新增 KiCad DRC、已提交的 library 基準線、PCB ↔ library 檢查與涵蓋整個
+**目前已提供（v0.24.0）：** 發版把關新增 KiCad DRC、已提交的 library 基準線、PCB ↔ library 檢查與涵蓋整個
 sheet tree 的完整性檢查，`fab check` 也改讀板子真實的外框、via、防焊覆蓋與專案設計規則；此外還有完整的 KiCad 專案骨架化——`project new`／`project init` 會在根圖頁旁
 寫出 `.kicad_pro`、空白的 `.kicad_pcb` 板框容器、專案 lib table 與 `.gitignore`（`--example NAME` 還會
 附上一份現成 op-list），`project info`／`project check` 則負責讀取與把關這個專案綁定了什麼；

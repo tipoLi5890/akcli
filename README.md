@@ -172,7 +172,7 @@ by the core loop:
 
 ## Roadmap
 
-**Shipped (v0.23.0):** release gates for KiCad DRC, a committed library baseline, a PCB ↔ library
+**Shipped (v0.24.0):** release gates for KiCad DRC, a committed library baseline, a PCB ↔ library
 check and tree-scoped integrity, with `fab check` reading the board's real outline, vias, tenting and
 project design rules; before that, complete KiCad project scaffolding — `project new` / `project init` write the
 `.kicad_pro`, a blank `.kicad_pcb` board container, the project lib tables and a `.gitignore` around a

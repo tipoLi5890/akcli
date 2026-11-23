@@ -596,6 +596,21 @@ def test_export_svgs_via_stub(tmp_path, monkeypatch):
     assert (sdir / "step-7.svg").exists() and (sdir / "step-7-2.svg").exists()
 
 
+def test_watcher_refuses_kicad_older_than_10(tmp_path, monkeypatch):
+    from akcli.drivers import kicad_cli
+    monkeypatch.setenv("KICAD_CLI", str(_stub_kicad(tmp_path)))
+    monkeypatch.setattr(kicad_cli, "version", lambda: (9, 0, 8))
+    dash, sdir = _watch_env(tmp_path)
+    w = _Watcher(dash)
+    spawned = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: spawned.append(a))
+    assert w._export_svgs(1) == ([], [])
+    assert w._erc_detail() == (None, None, [])
+    assert spawned == []
+    assert "KiCad 10" in dash.state["watcher_error"]
+    assert not list(sdir.glob("*.svg"))
+
+
 def test_export_svgs_failure_and_timeout(tmp_path, monkeypatch):
     # non-zero exit (intermediate broken save): no step, no error state
     bad_py = tmp_path / "kicad-cli-bad.py"

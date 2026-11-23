@@ -934,7 +934,7 @@ build-backend = "setuptools.build_meta"
 # PyPI dist name: the distribution ships as `akcli-kicad` while the import
 # package and CLI stay `akcli`.
 name = "akcli-kicad"
-version = "0.23.0"
+version = "0.24.0"
 description = "Verification layer for AI-authored KiCad schematics: draw and edit .kicad_sch from JSON op-lists that are dry-run by default, net-diffed and connectivity-gated, run ERC/design/intent checks, simulate on bundled ngspice, source parts, and import Altium .SchDoc/.PcbDoc read-only into the KiCad flow."
 requires-python = ">=3.11"
 readme = "README.md"

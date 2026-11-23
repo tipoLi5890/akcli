@@ -14,7 +14,7 @@ read-only on-ramp into the KiCad flow, not a symmetric conversion peer. That rep
 release-critical now live in a demand-driven optional track, and the experimental Windows live
 bridge was **deleted outright** (0.17).
 
-## Where we are (v0.23.0)
+## Where we are (v0.24.0)
 
 Shipped and working today (details per release in [CHANGELOG.md](CHANGELOG.md)):
 
@@ -242,6 +242,7 @@ honest history:
 | v0.21.0 | **Architecture release:** layered packages with a tested layering invariant, `opspec` as the single op vocabulary, eeschema-aligned canonical net names, `protocol_version` 2 and `schema_version` 2.0 ([migration guide](docs/migration-0.21.md)) |
 | v0.22.0 | **Project scaffolding release:** `akcli project new`/`init`/`info`/`check`, `.kicad_pro` reader, `release preflight` `project` gate, `add_sheet` `create: true` |
 | v0.23.0 | **Design-integrity hardening release:** `release preflight --drc` and library gates, manifest evidence, bundled fab profiles by id, `fab check` fidelity, library baseline, `verify --library`, tree-scoped `check --integrity`, net-diff `MOVE`, `.PcbLib` track/arc import, PR-gate workflow recipe, `docs/stability.md` |
+| v0.24.0 | **KiCad 10 minimum:** running `kicad-cli` (ERC, netlist, DRC, `view live`) requires KiCad 10 or newer; reading older files is unchanged |
 
 The first PyPI release (`pip install akcli-kicad`) shipped in 0.15.0; the import package and CLI
 stay `akcli`.

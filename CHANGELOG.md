@@ -31,6 +31,8 @@ When in doubt, prefer additive, backwards-compatible changes and leave the versi
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-23
+
 ### Changed
 
 - **KiCad 10 or newer is now required to run `kicad-cli`.** With an older

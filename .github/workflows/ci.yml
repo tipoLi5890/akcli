@@ -216,9 +216,21 @@ jobs:
       - name: Install pinned KiCad 10.x
         run: |
           set -euo pipefail
-          sudo add-apt-repository --yes ppa:kicad/kicad-10.0-releases
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends kicad
+          # The PPA host intermittently answers 503. `--error-on=any` matters:
+          # a failed index is otherwise only a warning, and apt would carry on
+          # with the distro's older KiCad.
+          for attempt in 1 2 3 4 5 6; do
+            if sudo add-apt-repository --yes --no-update ppa:kicad/kicad-10.0-releases \
+              && sudo apt-get update --error-on=any -o Acquire::Retries=3 \
+              && sudo apt-get install --yes --no-install-recommends \
+                   -o Acquire::Retries=3 kicad; then
+              exit 0
+            fi
+            echo "::warning::KiCad install attempt $attempt failed; retrying"
+            sleep $((attempt * 30))
+          done
+          echo "::error::KiCad could not be installed from the PPA" >&2
+          exit 1
       - name: kicad-cli version (must be 10.x)
         run: |
           set -euo pipefail
